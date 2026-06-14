@@ -96,6 +96,65 @@ struct SettingsTabView: View {
                 .foregroundStyle(Color.white.opacity(0.4))
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
+            
+            Divider()
+                .background(Color.white.opacity(0.08))
+                .padding(.vertical, 2)
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show Usage % in Icon")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Render the remaining usage % directly inside the menu bar icon.")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.white.opacity(0.4))
+                }
+                Spacer()
+                Toggle("", isOn: $viewModel.showModelUsageInIcon.animation(.easeInOut(duration: 0.2)))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
+            
+            if viewModel.showModelUsageInIcon {
+                HStack {
+                    Text("Model for Icon")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.7))
+                        .padding(.leading, 10)
+                    Spacer()
+                    Picker("Model", selection: $viewModel.selectedModelForIcon) {
+                        ForEach(IconModelSelection.allCases) { sel in
+                            Text(sel.rawValue).tag(sel)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+                .padding(.bottom, 2)
+            }
+            
+            Divider()
+                .background(Color.white.opacity(0.08))
+                .padding(.vertical, 2)
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show Weekly Limit & Reset")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Display the weekly quota % remaining and the time until reset in the menu bar text.")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.white.opacity(0.4))
+                }
+                Spacer()
+                Toggle("", isOn: $viewModel.showWeeklyLimitAndReset)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
         }
         .padding(12)
         .background(
