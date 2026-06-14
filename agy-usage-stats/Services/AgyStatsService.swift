@@ -23,58 +23,64 @@ public enum AgyStatsService {
     }
     
     public static func loadStats(cliDir: String) async -> (AgyUsageStats, AgySettings) {
-        let expandedDir = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
-        let historyPath = (expandedDir as NSString).appendingPathComponent("history.jsonl")
-        let settingsPath = (expandedDir as NSString).appendingPathComponent("settings.json")
-        let conversationsDir = (expandedDir as NSString).appendingPathComponent("conversations")
-        
-        // Load Settings
-        let settings = loadSettings(at: settingsPath)
-        
-        // Load History Lines
-        let (queries, workspaces, lastQuery) = loadHistory(at: historyPath)
-        
-        // Count queries today and this week
-        let now = Date()
-        let calendar = Calendar.current
-        var queriesToday = 0
-        var queriesThisWeek = 0
-        
-        let startOfToday = calendar.startOfDay(for: now)
-        let sevenDaysAgo = calendar.date(byAdding: .day, value: -7, to: now) ?? now
-        
-        for q in queries {
-            if q.timestamp >= startOfToday {
-                queriesToday += 1
+        return await Task.detached(priority: .userInitiated) {
+            let expandedDir = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
+            let historyPath = (expandedDir as NSString).appendingPathComponent("history.jsonl")
+            let settingsPath = (expandedDir as NSString).appendingPathComponent("settings.json")
+            let conversationsDir = (expandedDir as NSString).appendingPathComponent("conversations")
+            
+            // Load Settings
+            let settings = loadSettings(at: settingsPath)
+            
+            // Load History Lines
+            let (queries, workspaces, lastQuery) = loadHistory(at: historyPath)
+            
+            // Count queries today and this week
+            let now = Date()
+            let calendar = Calendar.current
+            var queriesToday = 0
+            var queriesThisWeek = 0
+            
+            let startOfToday = calendar.startOfDay(for: now)
+            let sevenDaysAgo = calendar.date(byAdding: .day, value: -7, to: now) ?? now
+            
+            for q in queries {
+                if q.timestamp >= startOfToday {
+                    queriesToday += 1
+                }
+                if q.timestamp >= sevenDaysAgo {
+                    queriesThisWeek += 1
+                }
             }
-            if q.timestamp >= sevenDaysAgo {
-                queriesThisWeek += 1
+            
+            // Load Tool Stats from SQLite Conversations DBs
+            let toolStats = await loadToolStats(conversationsDir: conversationsDir)
+            let totalToolCalls = toolStats.reduce(0) { $0 + $1.count }
+            
+            // Fetch Quota Info
+            let quotaInfo = await AgyQuotaService.fetchQuota()
+            
+            // Model distribution
+            var modelDist: [String: Int] = [:]
+            if let activeModel = settings.model {
+                modelDist[activeModel] = queries.count
             }
-        }
-        
-        // Load Tool Stats from SQLite Conversations DBs
-        let toolStats = await loadToolStats(conversationsDir: conversationsDir)
-        let totalToolCalls = toolStats.reduce(0) { $0 + $1.count }
-        
-        // Model distribution
-        var modelDist: [String: Int] = [:]
-        if let activeModel = settings.model {
-            modelDist[activeModel] = queries.count
-        }
-        
-        let stats = AgyUsageStats(
-            totalQueries: queries.count,
-            queriesToday: queriesToday,
-            queriesThisWeek: queriesThisWeek,
-            lastQueryAt: lastQuery,
-            workspaces: workspaces,
-            modelDistribution: modelDist,
-            recentQueries: Array(queries.prefix(100)), // Limit to 100 recent
-            toolStats: toolStats,
-            totalToolCalls: totalToolCalls
-        )
-        
-        return (stats, settings)
+            
+            let stats = AgyUsageStats(
+                totalQueries: queries.count,
+                queriesToday: queriesToday,
+                queriesThisWeek: queriesThisWeek,
+                lastQueryAt: lastQuery,
+                workspaces: workspaces,
+                modelDistribution: modelDist,
+                recentQueries: Array(queries.prefix(100)), // Limit to 100 recent
+                toolStats: toolStats,
+                totalToolCalls: totalToolCalls,
+                quotaInfo: quotaInfo
+            )
+            
+            return (stats, settings)
+        }.value
     }
     
     private static func loadSettings(at path: String) -> AgySettings {

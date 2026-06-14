@@ -159,7 +159,7 @@ else
 
     echo "Mounting writable DMG to set volume icon..."
     MOUNT_OUTPUT=$(hdiutil attach "$TMP_RW_DMG" -nobrowse -noautoopen)
-    MOUNT_DIR=$(echo "$MOUNT_OUTPUT" | grep -E '/Volumes/' | awk '{print $NF}')
+    MOUNT_DIR=$(echo "$MOUNT_OUTPUT" | grep -o '/Volumes/.*' | sed 's/[[:space:]]*$//')
 
     if [[ -d "$MOUNT_DIR" ]]; then
         cp "$ICNS_DEST" "$MOUNT_DIR/.VolumeIcon.icns"

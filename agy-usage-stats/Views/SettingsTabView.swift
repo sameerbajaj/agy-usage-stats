@@ -77,19 +77,21 @@ struct SettingsTabView: View {
     
     private var menuBarSettingsCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Menu Bar View")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.6))
-            
-            Picker("Display Style", selection: $viewModel.menuBarDisplayMode) {
-                ForEach(MenuBarDisplayMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+            HStack {
+                Text("Menu Bar View")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.6))
+                Spacer()
+                Picker("Display Style", selection: $viewModel.menuBarDisplayMode) {
+                    ForEach(MenuBarDisplayMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             
-            Text("Choose whether to display the Antigravity icon, the number of queries run today, or both in your menu bar.")
+            Text("Choose whether to display the Antigravity icon, remaining quotas (Gemini & Claude), the number of queries run today, or combinations in your menu bar.")
                 .font(.system(size: 9))
                 .foregroundStyle(Color.white.opacity(0.4))
                 .lineLimit(nil)

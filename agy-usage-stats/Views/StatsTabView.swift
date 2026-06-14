@@ -13,6 +13,9 @@ struct StatsTabView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
+                // Section 0: Remaining Quotas
+                remainingQuotasCard
+                
                 // Section 1: Metrics Grid
                 metricsGrid
                 
@@ -23,6 +26,155 @@ struct StatsTabView: View {
                 toolExecutionBreakdown
             }
             .padding(12)
+        }
+    }
+    
+    // MARK: - Remaining Quotas
+    
+    private var remainingQuotasCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Remaining Quotas")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.7))
+                Spacer()
+                if let email = viewModel.stats.quotaInfo?.email {
+                    Text(email)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.white.opacity(0.4))
+                }
+            }
+            .padding(.horizontal, 4)
+            
+            if let quota = viewModel.stats.quotaInfo, !quota.groups.isEmpty {
+                VStack(spacing: 12) {
+                    ForEach(quota.groups) { group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(group.displayName)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                if let desc = group.description {
+                                    let cleanDesc = desc.replacingOccurrences(of: "Models within this group: ", with: "")
+                                    Text(cleanDesc)
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(Color.white.opacity(0.4))
+                                        .lineLimit(1)
+                                }
+                            }
+                            
+                            ForEach(group.buckets) { bucket in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(bucket.displayName)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(Color.white.opacity(0.8))
+                                        Spacer()
+                                        if let fraction = bucket.remainingFraction {
+                                            Text(String(format: "%.1f%% remaining", fraction * 100))
+                                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                                .foregroundStyle(quotaColor(for: fraction))
+                                        } else {
+                                            Text("Unlimited/Unknown")
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(Color.white.opacity(0.4))
+                                        }
+                                    }
+                                    
+                                    if let fraction = bucket.remainingFraction {
+                                        GeometryReader { geo in
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(Color.white.opacity(0.06))
+                                                .frame(height: 6)
+                                                .overlay(
+                                                    HStack(spacing: 0) {
+                                                        RoundedRectangle(cornerRadius: 3)
+                                                            .fill(
+                                                                LinearGradient(
+                                                                    colors: quotaGradientColors(for: group.displayName, fraction: fraction),
+                                                                    startPoint: .leading,
+                                                                    endPoint: .trailing
+                                                                )
+                                                            )
+                                                            .frame(width: geo.size.width * CGFloat(fraction))
+                                                        Spacer(minLength: 0)
+                                                    }
+                                                )
+                                        }
+                                        .frame(height: 6)
+                                    }
+                                    
+                                    if let resetDesc = bucket.resetDescription {
+                                        Text(resetDesc)
+                                            .font(.system(size: 8))
+                                            .foregroundStyle(Color.white.opacity(0.45))
+                                    }
+                                }
+                                .padding(8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.white.opacity(0.015))
+                                )
+                            }
+                        }
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.02))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.04), lineWidth: 1)
+                        )
+                    }
+                }
+            } else {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Color.yellow.opacity(0.7))
+                        Text("No active quota session detected")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.7))
+                        Text("Start the agy CLI or language server to view remaining limits.")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.white.opacity(0.4))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.vertical, 20)
+                    Spacer()
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.02))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                )
+            }
+        }
+    }
+    
+    private func quotaColor(for fraction: Double) -> Color {
+        if fraction > 0.5 {
+            return .green
+        } else if fraction > 0.2 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+    
+    private func quotaGradientColors(for group: String, fraction: Double) -> [Color] {
+        let isGemini = group.lowercased().contains("gemini")
+        if isGemini {
+            return [Color(red: 0.55, green: 0.25, blue: 0.95), Color(red: 0.25, green: 0.65, blue: 1.0)]
+        } else {
+            return [Color(red: 1.0, green: 0.4, blue: 0.2), Color(red: 1.0, green: 0.65, blue: 0.3)]
         }
     }
     
@@ -112,7 +264,7 @@ struct StatsTabView: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.5))
                 
-                Text(viewModel.settings.model ?? "Gemini 3.5 Flash")
+                Text(viewModel.settings.model ?? (viewModel.stats.quotaInfo?.plan ?? "Gemini 3.5 Flash"))
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
             }

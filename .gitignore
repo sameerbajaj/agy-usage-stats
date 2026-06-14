@@ -34,3 +34,5 @@ xcuserdata/
 # General/Temporary
 tmp/
 *.log
+*.profraw
+

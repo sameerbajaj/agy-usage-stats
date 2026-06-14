@@ -12,6 +12,8 @@ import AppKit
 
 public enum MenuBarDisplayMode: String, Codable, CaseIterable, Identifiable {
     case iconOnly = "Icon Only"
+    case quotas = "Quotas (G & C)"
+    case iconAndQuotas = "Icon & Quotas"
     case queriesToday = "Queries Today"
     case both = "Icon & Queries"
     

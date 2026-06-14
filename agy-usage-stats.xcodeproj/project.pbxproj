@@ -688,7 +688,7 @@
 				<key>DEVELOPMENT_TEAM</key>
 				<string>BZ685BB6M6</string>
 				<key>ENABLE_APP_SANDBOX</key>
-				<string>YES</string>
+				<string>NO</string>
 				<key>ENABLE_HARDENED_RUNTIME</key>
 				<string>YES</string>
 				<key>ENABLE_PREVIEWS</key>
@@ -747,7 +747,7 @@
 				<key>DEVELOPMENT_TEAM</key>
 				<string>BZ685BB6M6</string>
 				<key>ENABLE_APP_SANDBOX</key>
-				<string>YES</string>
+				<string>NO</string>
 				<key>ENABLE_HARDENED_RUNTIME</key>
 				<string>YES</string>
 				<key>ENABLE_PREVIEWS</key>

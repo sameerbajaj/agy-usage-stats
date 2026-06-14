@@ -89,6 +89,29 @@ public struct ToolStat: Identifiable, Codable, Hashable {
     }
 }
 
+public struct AgyQuotaBucket: Identifiable, Codable, Hashable, Sendable {
+    public var id: String { bucketId }
+    public let bucketId: String
+    public let displayName: String
+    public let remainingFraction: Double?
+    public let resetDescription: String?
+    public let disabled: Bool
+    public let resetTime: String?
+}
+
+public struct AgyQuotaGroup: Identifiable, Codable, Hashable, Sendable {
+    public var id: String { displayName }
+    public let displayName: String
+    public let description: String?
+    public let buckets: [AgyQuotaBucket]
+}
+
+public struct AgyQuotaInfo: Codable, Hashable, Sendable {
+    public let email: String?
+    public let plan: String?
+    public let groups: [AgyQuotaGroup]
+}
+
 public struct AgyUsageStats: Codable {
     public var totalQueries: Int
     public var queriesToday: Int
@@ -99,6 +122,7 @@ public struct AgyUsageStats: Codable {
     public var recentQueries: [QueryEntry]
     public var toolStats: [ToolStat]
     public var totalToolCalls: Int
+    public var quotaInfo: AgyQuotaInfo?
     
     public static let empty = AgyUsageStats(
         totalQueries: 0,
@@ -109,7 +133,8 @@ public struct AgyUsageStats: Codable {
         modelDistribution: [:],
         recentQueries: [],
         toolStats: [],
-        totalToolCalls: 0
+        totalToolCalls: 0,
+        quotaInfo: nil
     )
 }
 
