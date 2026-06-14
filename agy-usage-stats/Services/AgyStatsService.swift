@@ -29,11 +29,21 @@ public enum AgyStatsService {
             let settingsPath = (expandedDir as NSString).appendingPathComponent("settings.json")
             let conversationsDir = (expandedDir as NSString).appendingPathComponent("conversations")
             
+            print("AgyStatsService: --- Loading Stats ---")
+            print("AgyStatsService: cliDir = \(cliDir)")
+            print("AgyStatsService: NSHomeDirectory = \(NSHomeDirectory())")
+            print("AgyStatsService: expandedDir = \(expandedDir)")
+            print("AgyStatsService: historyPath = \(historyPath)")
+            print("AgyStatsService: settingsPath = \(settingsPath)")
+            print("AgyStatsService: conversationsDir = \(conversationsDir)")
+            
             // Load Settings
             let settings = loadSettings(at: settingsPath)
+            print("AgyStatsService: Loaded settings: model=\(settings.model ?? "nil")")
             
             // Load History Lines
             let (queries, workspaces, lastQuery) = loadHistory(at: historyPath)
+            print("AgyStatsService: Loaded history: queries count = \(queries.count), workspaces count = \(workspaces.count)")
             
             // Count queries today and this week
             let now = Date()
@@ -52,13 +62,20 @@ public enum AgyStatsService {
                     queriesThisWeek += 1
                 }
             }
+            print("AgyStatsService: Queries today = \(queriesToday), this week = \(queriesThisWeek)")
             
             // Load Tool Stats from SQLite Conversations DBs
             let toolStats = await loadToolStats(conversationsDir: conversationsDir)
             let totalToolCalls = toolStats.reduce(0) { $0 + $1.count }
+            print("AgyStatsService: Loaded tool stats: count = \(toolStats.count), total calls = \(totalToolCalls)")
             
             // Fetch Quota Info
             let quotaInfo = await AgyQuotaService.fetchQuota()
+            if let quotaInfo = quotaInfo {
+                print("AgyStatsService: Fetched quota: plan = \(quotaInfo.plan ?? "nil"), email = \(quotaInfo.email ?? "nil"), groups count = \(quotaInfo.groups.count)")
+            } else {
+                print("AgyStatsService: Fetched quota: NONE")
+            }
             
             // Model distribution
             var modelDist: [String: Int] = [:]
@@ -169,7 +186,8 @@ public enum AgyStatsService {
     
     private static func queryToolStats(forDbPath dbPath: String) -> [String: Int] {
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
+        guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
             sqlite3_close(db)
             return [:]
         }
