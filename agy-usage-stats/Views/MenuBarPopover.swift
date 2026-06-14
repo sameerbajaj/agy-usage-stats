@@ -29,6 +29,7 @@ public enum PopoverTab: String, CaseIterable, Identifiable {
 public struct MenuBarPopover: View {
     @Bindable public var viewModel: AgyStatsViewModel
     @State private var selectedTab: PopoverTab = .stats
+    @Namespace private var namespace
     
     public init(viewModel: AgyStatsViewModel) {
         self.viewModel = viewModel
@@ -55,12 +56,18 @@ public struct MenuBarPopover: View {
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
             
             Divider()
-                .background(Color.white.opacity(0.12))
+                .background(Color.white.opacity(0.08))
             
             footer
         }
         .frame(width: 350)
-        .background(Color(red: 0.08, green: 0.08, blue: 0.10))
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.08, green: 0.08, blue: 0.11), Color(red: 0.05, green: 0.05, blue: 0.07)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
         .environment(\.colorScheme, .dark)
         .preferredColorScheme(.dark)
         .onAppear {
@@ -79,24 +86,25 @@ public struct MenuBarPopover: View {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(
                                 LinearGradient(
-                                    colors: [Color(red: 0.55, green: 0.25, blue: 0.95), // Purple
-                                             Color(red: 0.25, green: 0.65, blue: 1.0)], // Blue
+                                    colors: [Color(red: 0.58, green: 0.38, blue: 0.95), // Purple
+                                             Color(red: 0.28, green: 0.68, blue: 1.0)], // Blue
                                     startPoint: .topLeading, endPoint: .bottomTrailing
                                 )
                             )
                             .frame(width: 28, height: 28)
+                            .shadow(color: Color(red: 0.58, green: 0.38, blue: 0.95).opacity(0.35), radius: 4)
                         Image(systemName: "square.stack.3d.up.fill")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
                     }
                     
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text("Antigravity")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
                         Text("CLI Usage Stats")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.5))
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.4))
                     }
                 }
                 
@@ -115,12 +123,12 @@ public struct MenuBarPopover: View {
                             }
                         } label: {
                             Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(Color.white.opacity(0.6))
                                 .frame(width: 22, height: 22)
                                 .background(
                                     RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.white.opacity(0.08))
+                                        .fill(Color.white.opacity(0.06))
                                 )
                         }
                         .buttonStyle(.plain)
@@ -138,9 +146,9 @@ public struct MenuBarPopover: View {
                 .padding(.bottom, 10)
             
             Divider()
-                .background(Color.white.opacity(0.12))
+                .background(Color.white.opacity(0.08))
         }
-        .background(Color.white.opacity(0.02))
+        .background(Color.white.opacity(0.01))
     }
     
     // MARK: - Tab Picker
@@ -149,7 +157,7 @@ public struct MenuBarPopover: View {
         HStack(spacing: 2) {
             ForEach(PopoverTab.allCases) { tab in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
                         selectedTab = tab
                     }
                 } label: {
@@ -162,17 +170,25 @@ public struct MenuBarPopover: View {
                     .foregroundStyle(
                         selectedTab == tab
                             ? Color.white
-                            : Color.white.opacity(0.50)
+                            : Color.white.opacity(0.45)
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(
-                                selectedTab == tab
-                                    ? Color.white.opacity(0.12)
-                                    : Color.clear
-                            )
+                        ZStack {
+                            if selectedTab == tab {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.white.opacity(0.12), Color.white.opacity(0.08)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .matchedGeometryEffect(id: "activeTabBackground", in: namespace)
+                                    .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
+                            }
+                        }
                     )
                     .contentShape(Rectangle())
                 }
@@ -182,7 +198,7 @@ public struct MenuBarPopover: View {
         .padding(2)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.06))
+                .fill(Color.white.opacity(0.04))
         )
     }
     
@@ -192,11 +208,11 @@ public struct MenuBarPopover: View {
         HStack {
             if let last = viewModel.stats.lastQueryAt {
                 Text("Last active: \(formattedTime(last))")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.4))
             } else {
                 Text("No queries recorded")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.4))
             }
             
@@ -206,12 +222,12 @@ public struct MenuBarPopover: View {
                 NSApplication.shared.terminate(nil)
             } label: {
                 Text("Quit App")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Color.red.opacity(0.8))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(
-                        RoundedRectangle(cornerRadius: 5)
+                        RoundedRectangle(cornerRadius: 6)
                             .stroke(Color.red.opacity(0.25), lineWidth: 1)
                     )
             }
@@ -219,7 +235,7 @@ public struct MenuBarPopover: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.01))
+        .background(Color.white.opacity(0.005))
     }
     
     private func formattedTime(_ date: Date) -> String {
