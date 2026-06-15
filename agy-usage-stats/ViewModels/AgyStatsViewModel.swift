@@ -29,6 +29,21 @@ public enum IconModelSelection: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+public enum IconQuotaLimitTarget: String, Codable, CaseIterable, Identifiable {
+    case minimum = "Minimum (Auto)"
+    case weekly = "Weekly Limit"
+    case fiveHour = "5-Hour Limit"
+    
+    public var id: String { rawValue }
+}
+
+public enum IconCircleFillMetric: String, Codable, CaseIterable, Identifiable {
+    case usageRemaining = "Usage Remaining"
+    case timeUntilReset = "Time Until Reset"
+    
+    public var id: String { rawValue }
+}
+
 public struct WeeklyLimitInfo {
     public let remainingFraction: Double?
     public let resetTimeDescription: String?
@@ -60,6 +75,18 @@ public final class AgyStatsViewModel {
     public var selectedModelForIcon: IconModelSelection {
         didSet {
             UserDefaults.standard.set(selectedModelForIcon.rawValue, forKey: "agy_selectedModelForIcon")
+        }
+    }
+
+    public var iconQuotaLimitTarget: IconQuotaLimitTarget {
+        didSet {
+            UserDefaults.standard.set(iconQuotaLimitTarget.rawValue, forKey: "agy_iconQuotaLimitTarget")
+        }
+    }
+
+    public var iconCircleFillMetric: IconCircleFillMetric {
+        didSet {
+            UserDefaults.standard.set(iconCircleFillMetric.rawValue, forKey: "agy_iconCircleFillMetric")
         }
     }
     
@@ -104,28 +131,35 @@ public final class AgyStatsViewModel {
         } else {
             self.selectedModelForIcon = .active
         }
+
+        let savedLimitTarget = UserDefaults.standard.string(forKey: "agy_iconQuotaLimitTarget")
+        if let savedLimitTarget, let limitTarget = IconQuotaLimitTarget(rawValue: savedLimitTarget) {
+            self.iconQuotaLimitTarget = limitTarget
+        } else {
+            self.iconQuotaLimitTarget = .minimum
+        }
+
+        let savedFillMetric = UserDefaults.standard.string(forKey: "agy_iconCircleFillMetric")
+        if let savedFillMetric, let fillMetric = IconCircleFillMetric(rawValue: savedFillMetric) {
+            self.iconCircleFillMetric = fillMetric
+        } else {
+            self.iconCircleFillMetric = .usageRemaining
+        }
         
         self.showWeeklyLimitAndReset = UserDefaults.standard.bool(forKey: "agy_showWeeklyLimitAndReset")
     }
 
-    /// Resolves the remaining fraction (0.0 to 1.0) for the currently selected model from quota info.
-    public var selectedModelRemainingFraction: Double? {
-        guard let modelName = settings.model?.lowercased(),
-              let quota = stats.quotaInfo else {
-            // If settings.model is nil, but there's a quota, fall back to the first group's min fraction
-            if let quota = stats.quotaInfo, let firstGroup = quota.groups.first {
-                return firstGroup.buckets.compactMap { $0.remainingFraction }.min()
-            }
-            return nil
+    private func getActiveGroup() -> AgyQuotaGroup? {
+        guard let quota = stats.quotaInfo else { return nil }
+        guard let modelName = settings.model?.lowercased() else {
+            return quota.groups.first
         }
         
         // Match group names
         for group in quota.groups {
             let groupName = group.displayName.lowercased()
             if modelName.contains(groupName) || groupName.contains(modelName) {
-                if let minFraction = group.buckets.compactMap({ $0.remainingFraction }).min() {
-                    return minFraction
-                }
+                return group
             }
         }
         
@@ -134,7 +168,7 @@ public final class AgyStatsViewModel {
             for bucket in group.buckets {
                 let bucketName = bucket.displayName.lowercased()
                 if modelName.contains(bucketName) || bucketName.contains(modelName) {
-                    return bucket.remainingFraction
+                    return group
                 }
             }
         }
@@ -143,7 +177,7 @@ public final class AgyStatsViewModel {
         if modelName.contains("gemini") {
             for group in quota.groups {
                 if group.displayName.lowercased().contains("gemini") {
-                    return group.buckets.compactMap({ $0.remainingFraction }).min()
+                    return group
                 }
             }
         }
@@ -151,34 +185,144 @@ public final class AgyStatsViewModel {
             for group in quota.groups {
                 let name = group.displayName.lowercased()
                 if name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic") {
-                    return group.buckets.compactMap({ $0.remainingFraction }).min()
+                    return group
                 }
             }
         }
         
-        // Final fallback: minimum fraction of any group
-        return quota.groups.flatMap { $0.buckets.compactMap { $0.remainingFraction } }.min()
+        return quota.groups.first
     }
-    
-    public var geminiRemainingFraction: Double? {
+
+    private func getGeminiGroup() -> AgyQuotaGroup? {
         guard let quota = stats.quotaInfo else { return nil }
-        for group in quota.groups {
-            if group.displayName.lowercased().contains("gemini") {
-                return group.buckets.compactMap { $0.remainingFraction }.min()
-            }
-        }
-        return nil
+        return quota.groups.first { $0.displayName.lowercased().contains("gemini") }
     }
-    
-    public var claudeRemainingFraction: Double? {
+
+    private func getClaudeGroup() -> AgyQuotaGroup? {
         guard let quota = stats.quotaInfo else { return nil }
-        for group in quota.groups {
+        return quota.groups.first { group in
             let name = group.displayName.lowercased()
-            if name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic") {
-                return group.buckets.compactMap { $0.remainingFraction }.min()
-            }
+            return name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic")
         }
-        return nil
+    }
+
+    private func getBucket(forGroup group: AgyQuotaGroup?, target: IconQuotaLimitTarget) -> AgyQuotaBucket? {
+        guard let group = group else { return nil }
+        switch target {
+        case .weekly:
+            return group.buckets.first { bucket in
+                let name = bucket.displayName.lowercased()
+                let id = bucket.bucketId.lowercased()
+                let desc = (bucket.resetDescription ?? "").lowercased()
+                return name.contains("week") || id.contains("week") || desc.contains("week")
+            } ?? group.buckets.first
+        case .fiveHour:
+            return group.buckets.first { bucket in
+                let name = bucket.displayName.lowercased()
+                let id = bucket.bucketId.lowercased()
+                let desc = (bucket.resetDescription ?? "").lowercased()
+                return name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five") || desc.contains("5-hour") || desc.contains("5 hour")
+            } ?? group.buckets.first
+        case .minimum:
+            return group.buckets.min(by: { ($0.remainingFraction ?? 1.0) < ($1.remainingFraction ?? 1.0) })
+        }
+    }
+
+    private func getUsageFraction(for bucket: AgyQuotaBucket?) -> Double? {
+        return bucket?.remainingFraction
+    }
+
+    private func getCircleFillFraction(for bucket: AgyQuotaBucket?) -> Double? {
+        guard let bucket = bucket else { return nil }
+        switch iconCircleFillMetric {
+        case .usageRemaining:
+            return bucket.remainingFraction
+        case .timeUntilReset:
+            guard let resetTimeStr = bucket.resetTime,
+                  let remaining = bucket.remainingFraction,
+                  remaining < 1.0 else {
+                return 1.0
+            }
+            
+            let formatter = ISO8601DateFormatter()
+            guard let resetDate = formatter.date(from: resetTimeStr) else {
+                return 1.0
+            }
+            
+            let now = Date()
+            let timeRemaining = resetDate.timeIntervalSince(now)
+            if timeRemaining <= 0 {
+                return 1.0
+            }
+            
+            let totalWindow = getWindowDuration(for: bucket)
+            let fraction = timeRemaining / totalWindow
+            return max(0.0, min(1.0, fraction))
+        }
+    }
+
+    private func getWindowDuration(for bucket: AgyQuotaBucket) -> TimeInterval {
+        let id = bucket.bucketId.lowercased()
+        let name = bucket.displayName.lowercased()
+        let desc = (bucket.resetDescription ?? "").lowercased()
+        
+        if id.contains("5h") || id.contains("five") || name.contains("5h") || name.contains("five") || desc.contains("5-hour") || desc.contains("5 hour") {
+            return 5.0 * 3600.0
+        } else if id.contains("week") || name.contains("week") || desc.contains("week") {
+            return 7.0 * 24.0 * 3600.0
+        }
+        return 5.0 * 3600.0
+    }
+
+    // The usage remaining fractions (always 0.0 to 1.0) for the models
+    public var selectedModelUsageFraction: Double? {
+        let group = getActiveGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getUsageFraction(for: bucket)
+    }
+
+    public var geminiUsageFraction: Double? {
+        let group = getGeminiGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getUsageFraction(for: bucket)
+    }
+
+    public var claudeUsageFraction: Double? {
+        let group = getClaudeGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getUsageFraction(for: bucket)
+    }
+
+    // The circle fill fractions for the models (respects the circle fill metric setting)
+    public var selectedModelCircleFillFraction: Double? {
+        let group = getActiveGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getCircleFillFraction(for: bucket)
+    }
+
+    public var geminiCircleFillFraction: Double? {
+        let group = getGeminiGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getCircleFillFraction(for: bucket)
+    }
+
+    public var claudeCircleFillFraction: Double? {
+        let group = getClaudeGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getCircleFillFraction(for: bucket)
+    }
+
+    // Compatibility properties mapped to circle fill fractions
+    public var selectedModelRemainingFraction: Double? {
+        selectedModelCircleFillFraction
+    }
+
+    public var geminiRemainingFraction: Double? {
+        geminiCircleFillFraction
+    }
+
+    public var claudeRemainingFraction: Double? {
+        claudeCircleFillFraction
     }
     
     public var weeklyLimitInfo: WeeklyLimitInfo? {

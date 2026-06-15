@@ -84,6 +84,38 @@ struct SettingsTabView: View {
                         .labelsHidden()
                         .controlSize(.small)
                     }
+
+                    HStack {
+                        Text("Quota Limit for Icon")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 8)
+                        Spacer()
+                        Picker("", selection: $viewModel.iconQuotaLimitTarget) {
+                            ForEach(IconQuotaLimitTarget.allCases) { sel in
+                                Text(sel.rawValue).tag(sel)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+
+                    HStack {
+                        Text("Circle Fill Completion")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 8)
+                        Spacer()
+                        Picker("", selection: $viewModel.iconCircleFillMetric) {
+                            ForEach(IconCircleFillMetric.allCases) { sel in
+                                Text(sel.rawValue).tag(sel)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
                 }
                 
                 Divider()

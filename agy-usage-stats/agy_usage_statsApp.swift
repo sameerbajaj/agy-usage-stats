@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct agy_usage_statsApp: App {
@@ -26,20 +27,27 @@ struct agy_usage_statsApp: App {
 
 struct MenuBarLabel: View {
     let viewModel: AgyStatsViewModel
+    @State private var refreshTrigger = false
 
     private var statusColor: Color {
-        if let quota = viewModel.stats.quotaInfo {
-            let fractions = quota.groups.flatMap { $0.buckets.compactMap { $0.remainingFraction } }
-            if let minFraction = fractions.min() {
-                if minFraction > 0.5 {
-                    return .green
-                } else if minFraction > 0.2 {
-                    return .orange
-                } else {
-                    return .red
-                }
+        var fractions: [Double] = []
+        if let gf = viewModel.geminiUsageFraction {
+            fractions.append(gf)
+        }
+        if let cf = viewModel.claudeUsageFraction {
+            fractions.append(cf)
+        }
+        
+        if let minFraction = fractions.min() {
+            if minFraction > 0.5 {
+                return Color(red: 0.15, green: 0.85, blue: 0.55) // Premium emerald green
+            } else if minFraction > 0.2 {
+                return Color(red: 1.0, green: 0.60, blue: 0.15) // Premium warm orange
+            } else {
+                return Color(red: 1.0, green: 0.35, blue: 0.35) // Premium ruby red
             }
         }
+        
         if viewModel.stats.queriesToday > 0 {
             return Color(red: 0.65, green: 0.45, blue: 1.0) // Vibrant purple
         } else {
@@ -85,28 +93,15 @@ struct MenuBarLabel: View {
     }
 
     private var quotaText: String {
-        guard let quota = viewModel.stats.quotaInfo else {
+        guard viewModel.stats.quotaInfo != nil else {
             return "no session"
         }
         
-        var geminiFraction: Double? = nil
-        var claudeFraction: Double? = nil
-        
-        for group in quota.groups {
-            let name = group.displayName.lowercased()
-            let minBucketFraction = group.buckets.compactMap { $0.remainingFraction }.min()
-            if name.contains("gemini") {
-                geminiFraction = minBucketFraction
-            } else if name.contains("claude") || name.contains("gpt") {
-                claudeFraction = minBucketFraction
-            }
-        }
-        
         var parts: [String] = []
-        if let gf = geminiFraction {
+        if let gf = viewModel.geminiUsageFraction {
             parts.append(String(format: "G:%.0f%%", gf * 100))
         }
-        if let cf = claudeFraction {
+        if let cf = viewModel.claudeUsageFraction {
             parts.append(String(format: "C:%.0f%%", cf * 100))
         }
         
@@ -124,9 +119,12 @@ struct MenuBarLabel: View {
                     litColor: statusColor,
                     showUsage: viewModel.showModelUsageInIcon,
                     selectedModelForIcon: viewModel.selectedModelForIcon,
-                    activeFraction: viewModel.selectedModelRemainingFraction,
-                    geminiFraction: viewModel.geminiRemainingFraction,
-                    claudeFraction: viewModel.claudeRemainingFraction
+                    activeUsageFraction: viewModel.selectedModelUsageFraction,
+                    geminiUsageFraction: viewModel.geminiUsageFraction,
+                    claudeUsageFraction: viewModel.claudeUsageFraction,
+                    activeFillFraction: viewModel.selectedModelCircleFillFraction,
+                    geminiFillFraction: viewModel.geminiCircleFillFraction,
+                    claudeFillFraction: viewModel.claudeCircleFillFraction
                 ))
             }
 
@@ -135,12 +133,18 @@ struct MenuBarLabel: View {
                     .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
             }
         }
+        .id(refreshTrigger)
         .onAppear {
             // Trigger stats loading on label launch
             viewModel.setup()
         }
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
+            refreshTrigger.toggle()
+        }
     }
 }
+
+// MARK: - Menu Bar Drawing
 
 /// Draw a custom upward floating arrow/chevron (defying gravity) above a ground line using CoreGraphics.
 /// The chevron levitates higher and displays energy lines under it as usage/queries increase.
@@ -150,9 +154,12 @@ private func makeAntigravityImage(
     litColor: Color,
     showUsage: Bool = false,
     selectedModelForIcon: IconModelSelection = .active,
-    activeFraction: Double? = nil,
-    geminiFraction: Double? = nil,
-    claudeFraction: Double? = nil
+    activeUsageFraction: Double? = nil,
+    geminiUsageFraction: Double? = nil,
+    claudeUsageFraction: Double? = nil,
+    activeFillFraction: Double? = nil,
+    geminiFillFraction: Double? = nil,
+    claudeFillFraction: Double? = nil
 ) -> NSImage {
     let h: CGFloat = 14
     let litNS = NSColor(litColor)
@@ -168,32 +175,32 @@ private func makeAntigravityImage(
     if showUsage {
         switch selectedModelForIcon {
         case .active:
-            if let fraction = activeFraction {
+            if let fraction = activeUsageFraction {
                 pctText = String(format: "%.0f%%", fraction * 100)
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
                 textAttributes = [.font: font, .foregroundColor: litNS]
                 textSize = pctText.size(withAttributes: textAttributes)
             }
         case .gemini:
-            if let fraction = geminiFraction {
+            if let fraction = geminiUsageFraction {
                 pctText = String(format: "G:%.0f%%", fraction * 100)
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
                 textAttributes = [.font: font, .foregroundColor: geminiColor]
                 textSize = pctText.size(withAttributes: textAttributes)
             }
         case .claude:
-            if let fraction = claudeFraction {
+            if let fraction = claudeUsageFraction {
                 pctText = String(format: "C:%.0f%%", fraction * 100)
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
                 textAttributes = [.font: font, .foregroundColor: claudeColor]
                 textSize = pctText.size(withAttributes: textAttributes)
             }
         case .both:
-            let gf = geminiFraction ?? 1.0
-            let cf = claudeFraction ?? 1.0
+            let gf = geminiUsageFraction ?? 1.0
+            let cf = claudeUsageFraction ?? 1.0
             pctText = String(format: "G:%.0f%% C:%.0f%%", gf * 100, cf * 100)
             let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
-            textAttributes = [.font: font, .foregroundColor: NSColor.labelColor]
+            textAttributes = [.font: font, .foregroundColor: NSColor.textColor]
             textSize = pctText.size(withAttributes: textAttributes)
         }
     }
@@ -215,20 +222,20 @@ private func makeAntigravityImage(
         if !pctText.isEmpty {
             switch selectedModelForIcon {
             case .active:
-                if let fraction = activeFraction {
+                if let fraction = activeFillFraction {
                     drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: fraction, strokeColor: litNS)
                 }
             case .gemini:
-                if let fraction = geminiFraction {
+                if let fraction = geminiFillFraction {
                     drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: fraction, strokeColor: geminiColor)
                 }
             case .claude:
-                if let fraction = claudeFraction {
+                if let fraction = claudeFillFraction {
                     drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: fraction, strokeColor: claudeColor)
                 }
             case .both:
-                let gf = geminiFraction ?? 1.0
-                let cf = claudeFraction ?? 1.0
+                let gf = geminiFillFraction ?? 1.0
+                let cf = claudeFillFraction ?? 1.0
                 drawGauge(center: NSPoint(x: 6.0, y: 7.0), radius: 4.2, fraction: gf, strokeColor: geminiColor, chevronSize: 2.0)
                 drawGauge(center: NSPoint(x: 16.0, y: 7.0), radius: 4.2, fraction: cf, strokeColor: claudeColor, chevronSize: 2.0)
             }
@@ -325,8 +332,8 @@ private func drawGauge(center: NSPoint, radius: CGFloat, fraction: Double, strok
     // Draw Background Track
     let trackPath = NSBezierPath()
     trackPath.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
-    trackPath.lineWidth = 1.0
-    NSColor.labelColor.withAlphaComponent(0.12).setStroke()
+    trackPath.lineWidth = 1.2
+    NSColor.labelColor.withAlphaComponent(0.15).setStroke()
     trackPath.stroke()
     
     // Draw Progress Arc
@@ -334,7 +341,7 @@ private func drawGauge(center: NSPoint, radius: CGFloat, fraction: Double, strok
     let startAngle: CGFloat = 90.0
     let endAngle: CGFloat = 90.0 - CGFloat(fraction * 360.0)
     progressPath.appendArc(withCenter: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
-    progressPath.lineWidth = 1.2
+    progressPath.lineWidth = 1.6
     progressPath.lineCapStyle = .round
     strokeColor.setStroke()
     progressPath.stroke()
@@ -347,7 +354,7 @@ private func drawGauge(center: NSPoint, radius: CGFloat, fraction: Double, strok
     chevronPath.move(to: NSPoint(x: center.x - halfSize, y: wingY))
     chevronPath.line(to: NSPoint(x: center.x, y: apexY))
     chevronPath.line(to: NSPoint(x: center.x + halfSize, y: wingY))
-    chevronPath.lineWidth = 1.0
+    chevronPath.lineWidth = chevronSize > 2.0 ? 1.2 : 1.0
     chevronPath.lineCapStyle = .round
     chevronPath.lineJoinStyle = .round
     strokeColor.setStroke()
