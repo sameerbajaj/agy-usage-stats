@@ -1,0 +1,129 @@
+name: Build and Upload DMG
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    runs-on: macos-latest
+
+    env:
+      APP_NAME: agy-usage-stats
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 20
+
+      - name: Set DMG version suffix
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+            echo "version_suffix=$TAG" >> "$GITHUB_OUTPUT"
+            echo "target_tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "marketing_version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "display_version=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            git fetch --force --tags >/dev/null 2>&1 || true
+            LATEST_STABLE_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)"
+
+            if [[ -n "$LATEST_STABLE_TAG" ]]; then
+              BASE="${LATEST_STABLE_TAG#v}"
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+            else
+              MAJOR=1
+              MINOR=0
+            fi
+
+            PUSH_VERSION="${MAJOR}.${MINOR}.${GITHUB_RUN_NUMBER}"
+            echo "version_suffix=latest" >> "$GITHUB_OUTPUT"
+            echo "target_tag=latest" >> "$GITHUB_OUTPUT"
+            echo "marketing_version=$PUSH_VERSION" >> "$GITHUB_OUTPUT"
+            echo "display_version=v$PUSH_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install DMG builder
+        run: brew install create-dmg
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          rm "$RUNNER_TEMP/certificate.p12"
+
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Prepend to keychain search list
+          EXISTING=$(security list-keychains -d user | tr -d '"' | tr '\n' ' ')
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $EXISTING
+
+      - name: Build, sign, notarize DMG
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_DEVELOPER_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+        run: |
+          chmod +x scripts/build-dmg.sh
+          scripts/build-dmg.sh "${{ steps.vars.outputs.version_suffix }}" "${{ steps.vars.outputs.marketing_version }}"
+
+      - name: Recreate rolling latest release
+        if: github.event_name != 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+          sleep 2
+
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" -10)
+
+          NOTES=$(cat <<EOF
+          ### Highlights
+          ${CHANGELOG}
+
+          ---
+          **Commit:** \`${GITHUB_SHA::7}\` · **Built from:** \`main\`
+          EOF
+          )
+
+          gh release create latest \
+            --title "$APP_NAME ${{ steps.vars.outputs.marketing_version }}" \
+            --latest \
+            --notes "$NOTES"
+
+      - name: Upload DMG to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.vars.outputs.target_tag }}
+        run: |
+          gh release upload "$TAG_NAME" "dist/$APP_NAME-${{ steps.vars.outputs.version_suffix }}.dmg" --clobber
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true

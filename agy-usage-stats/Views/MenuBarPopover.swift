@@ -10,6 +10,7 @@ import AppKit
 
 public enum PopoverTab: String, CaseIterable, Identifiable {
     case stats = "Stats"
+    case cost = "Cost"
     case workspaces = "Workspaces"
     case history = "History"
     case settings = "Settings"
@@ -19,6 +20,7 @@ public enum PopoverTab: String, CaseIterable, Identifiable {
     public var icon: String {
         switch self {
         case .stats: return "chart.bar.fill"
+        case .cost: return "dollarsign.circle.fill"
         case .workspaces: return "folder.fill"
         case .history: return "clock.arrow.circlepath"
         case .settings: return "gearshape.fill"
@@ -39,10 +41,25 @@ public struct MenuBarPopover: View {
         VStack(spacing: 0) {
             header
             
+            if let update = viewModel.availableUpdate {
+                updateBanner(update)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.03))
+                    .overlay(
+                        Rectangle()
+                            .frame(height: 1)
+                            .foregroundStyle(Color.white.opacity(0.08)),
+                        alignment: .bottom
+                    )
+            }
+            
             Group {
                 switch selectedTab {
                 case .stats:
                     StatsTabView(viewModel: viewModel)
+                case .cost:
+                    CostTabView(viewModel: viewModel)
                 case .workspaces:
                     WorkspacesTabView(viewModel: viewModel)
                 case .history:
@@ -242,5 +259,115 @@ public struct MenuBarPopover: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+    
+    // MARK: - Update Banner View Helper
+    
+    private func updateBanner(_ update: UpdateInfo) -> some View {
+        VStack(spacing: 0) {
+            switch viewModel.selfUpdateState {
+            case .idle:
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.green.opacity(0.18))
+                            .frame(width: 24, height: 24)
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.green)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(update.isRolling ? "New build available" : "Update available — v\(update.version)")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text("Installs automatically — no drag & drop")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.white.opacity(0.60))
+                    }
+                    Spacer()
+                    if update.downloadURL != nil {
+                        Button { viewModel.installUpdate() } label: {
+                            Text("Install")
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.green))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button { NSWorkspace.shared.open(update.releaseURL) } label: {
+                            Text("Download")
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.green))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button(action: { viewModel.dismissUpdate() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.35))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+            case .downloading(let progress):
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Downloading update…")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white)
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .tint(.green)
+                    }
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.80))
+                        .frame(width: 28, alignment: .trailing)
+                }
+
+            case .installing:
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("Installing — app will relaunch…")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                }
+
+            case .failed(let message):
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Update failed")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text(message)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.white.opacity(0.60))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        viewModel.selfUpdateState = .idle
+                    } label: {
+                        Text("Retry")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.orange))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 }

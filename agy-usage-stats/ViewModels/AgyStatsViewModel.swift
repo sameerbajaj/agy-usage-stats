@@ -75,6 +75,12 @@ public final class AgyStatsViewModel {
     public var isRefreshing = false
     public var searchQuery = String()
     
+    // Auto-update States
+    public var availableUpdate: UpdateInfo? = nil
+    public var selfUpdateState: SelfUpdateState = .idle
+    public var isCheckingForUpdates = false
+    public var updateCheckMessage: String? = nil
+    
     // File Watcher
     private let watcher = AgyFileWatcher()
     
@@ -239,6 +245,7 @@ public final class AgyStatsViewModel {
         // Initial load
         Task {
             await refresh()
+            await checkForUpdates()
         }
     }
     
@@ -273,5 +280,59 @@ public final class AgyStatsViewModel {
         let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         let url = URL(fileURLWithPath: expanded)
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
+    }
+    
+    // MARK: - Auto Update Actions
+    
+    public func checkForUpdates(showUpToDateFeedback: Bool = false) async {
+        await MainActor.run {
+            isCheckingForUpdates = true
+            if showUpToDateFeedback {
+                updateCheckMessage = nil
+            }
+        }
+        
+        let update = await UpdateChecker.check()
+        
+        await MainActor.run {
+            isCheckingForUpdates = false
+            availableUpdate = update
+            
+            if let update {
+                updateCheckMessage = update.isRolling
+                    ? "New pre-release build available."
+                    : "New version v\(update.version) available."
+            } else if showUpToDateFeedback {
+                updateCheckMessage = "You’re up to date."
+            }
+        }
+        
+        if showUpToDateFeedback {
+            try? await Task.sleep(for: .seconds(4))
+            await MainActor.run {
+                if availableUpdate == nil {
+                    updateCheckMessage = nil
+                }
+            }
+        }
+    }
+    
+    public func dismissUpdate() {
+        availableUpdate = nil
+    }
+    
+    public func installUpdate() {
+        guard let update = availableUpdate, let dmgURL = update.downloadURL else { return }
+        
+        Task {
+            let didInstall = await SelfUpdater.update(dmgURL: dmgURL) { [weak self] state in
+                Task { @MainActor in
+                    self?.selfUpdateState = state
+                }
+            }
+            if didInstall, update.isRolling, let ts = update.publishedAt {
+                UpdateChecker.recordInstalledRollingTimestamp(ts)
+            }
+        }
     }
 }

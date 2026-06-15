@@ -16,6 +16,7 @@ struct SettingsTabView: View {
     @State private var healthCardHovered = false
     @State private var menuBarCardHovered = false
     @State private var pathCardHovered = false
+    @State private var updateCardHovered = false
     
     var historyFileExists: Bool {
         let expanded = viewModel.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
@@ -28,6 +29,9 @@ struct SettingsTabView: View {
             VStack(spacing: 16) {
                 // Section 1: Connection Health Status
                 connectionHealthCard
+                
+                // Section 1.5: Application Updates
+                appUpdateCard
                 
                 // Section 2: Menu Bar Display Settings
                 menuBarSettingsCard
@@ -232,6 +236,134 @@ struct SettingsTabView: View {
         .premiumCardStyle(isHovered: pathCardHovered, accentColor: .blue)
         .onHover { hovering in
             pathCardHovered = hovering
+        }
+    }
+    
+    // MARK: - App Update Card
+    
+    private var appUpdateCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.green)
+                    Text("Application Updates")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                }
+                Spacer()
+                
+                Button(action: {
+                    Task {
+                        await viewModel.checkForUpdates(showUpToDateFeedback: true)
+                    }
+                }) {
+                    if viewModel.isCheckingForUpdates {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.white)
+                    } else {
+                        Text("Check Now")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                }
+                .disabled(viewModel.isCheckingForUpdates)
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+            }
+            
+            if let update = viewModel.availableUpdate {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(update.isRolling ? "New pre-release build is available" : "Version v\(update.version) is available")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                    
+                    if let notes = update.releaseNotes, !notes.isEmpty {
+                        Text(notes)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.white.opacity(0.5))
+                            .lineLimit(3)
+                    }
+                    
+                    switch viewModel.selfUpdateState {
+                    case .idle:
+                        HStack {
+                            Button(action: { viewModel.installUpdate() }) {
+                                Text("Install Update")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.black)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.green))
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Button(action: { viewModel.dismissUpdate() }) {
+                                Text("Ignore")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Color.white.opacity(0.5))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        
+                    case .downloading(let progress):
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Downloading update (\(Int(progress * 100))%)...")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.white.opacity(0.8))
+                            
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .tint(.green)
+                        }
+                        
+                    case .installing:
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(.white)
+                            Text("Installing update and relaunching...")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white)
+                        }
+                        
+                    case .failed(let errorMsg):
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Installation Failed")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.red)
+                            Text(errorMsg)
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.white.opacity(0.6))
+                        }
+                    }
+                }
+            } else {
+                HStack {
+                    Text("Current Version:")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.white.opacity(0.4))
+                    Text("v\(UpdateChecker.currentVersion)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.65))
+                    
+                    Spacer()
+                    
+                    if let msg = viewModel.updateCheckMessage {
+                        Text(msg)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .premiumCardStyle(isHovered: updateCardHovered, accentColor: .green)
+        .onHover { hovering in
+            updateCardHovered = hovering
         }
     }
 }
