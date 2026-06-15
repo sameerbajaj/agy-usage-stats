@@ -7,72 +7,31 @@
 
 import SwiftUI
 
-
-
 // MARK: - Telemetry Badge
 struct TelemetryBadge: View {
     @State private var pulse = false
     
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             Circle()
                 .fill(Color.green)
-                .frame(width: 5, height: 5)
-                .scaleEffect(pulse ? 1.4 : 1.0)
-                .opacity(pulse ? 0.4 : 1.0)
-                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulse)
+                .frame(width: 4, height: 4)
+                .scaleEffect(pulse ? 1.3 : 1.0)
+                .opacity(pulse ? 0.5 : 1.0)
+                .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: pulse)
             
-            Text("Telemetry Active")
-                .font(.system(size: 8, weight: .bold))
+            Text("telemetry")
+                .font(.system(size: 7.5, weight: .bold, design: .rounded))
                 .foregroundStyle(.green)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
         .background(
             Capsule()
-                .fill(Color.green.opacity(0.1))
-                .overlay(Capsule().stroke(Color.green.opacity(0.2), lineWidth: 1))
+                .fill(Color.green.opacity(0.08))
         )
         .onAppear {
             pulse = true
-        }
-    }
-}
-
-// MARK: - Metric Card Component
-struct MetricCardView: View {
-    let title: String
-    let value: String
-    let systemImage: String
-    let color: Color
-    
-    @State private var isHovered = false
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: systemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-                    .shadow(color: color.opacity(isHovered ? 0.6 : 0.0), radius: 3)
-                Spacer()
-            }
-            
-            Text(value)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-            
-            Text(title)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.45))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .premiumCardStyle(isHovered: isHovered, accentColor: color)
-        .scaleEffect(isHovered ? 1.02 : 1.0)
-        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovered)
-        .onHover { hovering in
-            isHovered = hovering
         }
     }
 }
@@ -83,34 +42,32 @@ struct QuotaBucketRow: View {
     let bucket: AgyQuotaBucket
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(bucket.displayName)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.85))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.8))
                 
                 Spacer()
                 
                 if let fraction = bucket.remainingFraction {
-                    Text(String(format: "%.1f%% remaining", fraction * 100))
+                    Text(String(format: "%.0f%%", fraction * 100))
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(quotaTextColor(for: groupDisplayName, fraction: fraction))
                 } else {
-                    Text("Unlimited")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.4))
+                    Text("unlimited")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.35))
                 }
             }
             
             if let fraction = bucket.remainingFraction {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        // Track background
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.white.opacity(0.06))
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(Color.white.opacity(0.04))
                         
-                        // Fill track
-                        RoundedRectangle(cornerRadius: 3)
+                        RoundedRectangle(cornerRadius: 1.5)
                             .fill(
                                 LinearGradient(
                                     colors: quotaGradientColors(for: groupDisplayName, fraction: fraction),
@@ -119,42 +76,37 @@ struct QuotaBucketRow: View {
                                 )
                             )
                             .frame(width: max(0, geo.size.width * CGFloat(fraction)))
-                            .shadow(color: quotaGradientColors(for: groupDisplayName, fraction: fraction)[0].opacity(0.3), radius: 3, x: 0, y: 0)
                     }
                 }
-                .frame(height: 6)
+                .frame(height: 3)
             }
             
             if let resetDesc = bucket.resetDescription {
-                Text(resetDesc)
-                    .font(.system(size: 8))
-                    .foregroundStyle(Color.white.opacity(0.4))
+                Text(resetDesc.lowercased())
+                    .font(.system(size: 7.5))
+                    .foregroundStyle(Color.white.opacity(0.3))
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
     
     private func quotaTextColor(for group: String, fraction: Double) -> Color {
         if fraction <= 0.2 {
-            return Color(red: 1.0, green: 0.35, blue: 0.35) // Soft red warning
+            return Color(red: 1.0, green: 0.35, blue: 0.35)
         }
         let isGemini = group.lowercased().contains("gemini")
-        if isGemini {
-            return Color(red: 0.55, green: 0.75, blue: 1.0) // Soft sapphire blue
-        } else {
-            return Color(red: 1.0, green: 0.7, blue: 0.4) // Soft amber orange
-        }
+        return isGemini ? Color(red: 0.65, green: 0.45, blue: 1.0) : Color(red: 1.0, green: 0.6, blue: 0.3)
     }
     
     private func quotaGradientColors(for group: String, fraction: Double) -> [Color] {
         if fraction <= 0.2 {
-            return [Color(red: 1.0, green: 0.3, blue: 0.3), Color(red: 1.0, green: 0.5, blue: 0.5)]
+            return [Color(red: 1.0, green: 0.3, blue: 0.3), Color(red: 1.0, green: 0.45, blue: 0.45)]
         }
         let isGemini = group.lowercased().contains("gemini")
         if isGemini {
-            return [Color(red: 0.58, green: 0.38, blue: 0.95), Color(red: 0.28, green: 0.68, blue: 1.0)]
+            return [Color(red: 0.65, green: 0.45, blue: 1.0), Color(red: 0.28, green: 0.68, blue: 1.0)]
         } else {
-            return [Color(red: 0.95, green: 0.45, blue: 0.2), Color(red: 1.0, green: 0.68, blue: 0.35)]
+            return [Color(red: 0.98, green: 0.45, blue: 0.09), Color(red: 1.0, green: 0.65, blue: 0.2)]
         }
     }
 }
@@ -166,54 +118,42 @@ struct ToolStatRow: View {
     @State private var isHovered = false
     
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(tool.categoryColor.opacity(isHovered ? 0.2 : 0.12))
-                    .frame(width: 24, height: 24)
-                    .animation(.easeInOut(duration: 0.2), value: isHovered)
-                
-                Image(systemName: tool.iconName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(tool.categoryColor)
-                    .shadow(color: tool.categoryColor.opacity(isHovered ? 0.5 : 0.0), radius: 3)
-            }
+        HStack(spacing: 8) {
+            Image(systemName: tool.iconName)
+                .font(.system(size: 9))
+                .foregroundStyle(tool.categoryColor)
+                .frame(width: 16, height: 16)
+                .background(tool.categoryColor.opacity(0.08))
+                .cornerRadius(4)
             
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(tool.displayName)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
                     Spacer()
                     Text("\(tool.count)")
-                        .font(.system(size: 10, weight: .bold).monospacedDigit())
-                        .foregroundStyle(Color.white.opacity(0.85))
+                        .font(.system(size: 9, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Color.white.opacity(0.7))
                 }
                 
                 GeometryReader { geo in
                     let pct = maxCount > 0 ? Double(tool.count) / maxCount : 0
                     ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.white.opacity(0.06))
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.white.opacity(0.04))
                         
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(tool.categoryColor)
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(tool.categoryColor.opacity(0.8))
                             .frame(width: geo.size.width * CGFloat(pct))
-                            .shadow(color: tool.categoryColor.opacity(isHovered ? 0.4 : 0.0), radius: 2)
                     }
                 }
-                .frame(height: 4)
+                .frame(height: 2.5)
             }
         }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(isHovered ? 0.03 : 0.015))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(isHovered ? 0.06 : 0.02), lineWidth: 1)
-        )
+        .padding(6)
+        .background(Color.white.opacity(isHovered ? 0.025 : 0.0))
+        .cornerRadius(6)
         .onHover { hovering in
             isHovered = hovering
         }
@@ -225,84 +165,119 @@ struct StatsTabView: View {
     let viewModel: AgyStatsViewModel
     
     @State private var quotaCardHovered: [String: Bool] = [:]
-    @State private var activeModelCardHovered = false
     @State private var toolsCardHovered = false
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
-                // Section 0: Remaining Quotas
-                remainingQuotasCard
+            VStack(spacing: 12) {
+                // Active Model Row
+                activeModelRow
+                    .padding(.top, 4)
                 
-                // Section 1: Metrics Grid
-                metricsGrid
+                // Metrics Strip
+                metricsStrip
                 
-                // Section 2: Active Model Card
-                activeModelCard
+                // Remaining Quotas List
+                remainingQuotasList
                 
-                // Section 3: Tool Execution Breakdown
+                // Tool Execution Breakdown
                 toolExecutionBreakdown
             }
             .padding(12)
         }
     }
     
-    // MARK: - Remaining Quotas Card
-    private var remainingQuotasCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private var activeModelRow: some View {
+        HStack {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color(red: 0.65, green: 0.45, blue: 1.0))
+                Text(viewModel.settings.model ?? (viewModel.stats.quotaInfo?.plan ?? "Gemini 3.5 Flash"))
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            Spacer()
+            if viewModel.settings.enableTelemetry == true {
+                TelemetryBadge()
+            }
+        }
+        .padding(.horizontal, 2)
+    }
+    
+    private var metricsStrip: some View {
+        HStack(spacing: 0) {
+            metricItem(title: "today", value: "\(viewModel.stats.queriesToday)", color: Color(red: 0.65, green: 0.45, blue: 1.0))
+            metricDivider
+            metricItem(title: "week", value: "\(viewModel.stats.queriesThisWeek)", color: Color(red: 0.28, green: 0.68, blue: 1.0))
+            metricDivider
+            metricItem(title: "total", value: "\(viewModel.stats.totalQueries)", color: Color(red: 0.15, green: 0.85, blue: 0.55))
+            metricDivider
+            metricItem(title: "tools", value: "\(viewModel.stats.totalToolCalls)", color: Color(red: 1.0, green: 0.45, blue: 0.45))
+        }
+        .padding(.vertical, 8)
+        .premiumCardStyle()
+    }
+    
+    private var metricDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.05))
+            .frame(width: 0.75)
+            .frame(maxHeight: 18)
+    }
+    
+    private func metricItem(title: String, value: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.35))
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity)
+    }
+    
+    private var remainingQuotasList: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Remaining Quotas")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.6))
+                Text("remaining quotas")
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.45))
                 Spacer()
                 if let email = viewModel.stats.quotaInfo?.email {
                     Text(email)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.4))
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.3))
                 }
             }
             .padding(.horizontal, 4)
             
             if let quota = viewModel.stats.quotaInfo, !quota.groups.isEmpty {
-                VStack(spacing: 12) {
+                VStack(spacing: 8) {
                     ForEach(quota.groups) { group in
                         let isHovered = quotaCardHovered[group.displayName] ?? false
                         let isGemini = group.displayName.lowercased().contains("gemini")
                         let cardAccent = isGemini 
-                            ? Color(red: 0.55, green: 0.25, blue: 0.95)
-                            : Color(red: 1.0, green: 0.45, blue: 0.2)
+                            ? Color(red: 0.65, green: 0.45, blue: 1.0)
+                            : Color(red: 0.98, green: 0.45, blue: 0.09)
                         
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                HStack(spacing: 6) {
-                                    Image(systemName: isGemini ? "sparkles" : "cpu.fill")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(cardAccent)
-                                        .shadow(color: cardAccent.opacity(isHovered ? 0.6 : 0.0), radius: 3)
-                                    
-                                    Text(group.displayName)
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.white)
-                                }
+                                Text(group.displayName.lowercased())
+                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .foregroundStyle(cardAccent)
                                 
                                 Spacer()
-                                
-                                if let desc = group.description {
-                                    let cleanDesc = desc.replacingOccurrences(of: "Models within this group: ", with: "")
-                                    Text(cleanDesc)
-                                        .font(.system(size: 8, weight: .medium))
-                                        .foregroundStyle(Color.white.opacity(0.35))
-                                        .lineLimit(1)
-                                }
                             }
                             
-                            VStack(spacing: 10) {
+                            VStack(spacing: 8) {
                                 ForEach(group.buckets) { bucket in
                                     QuotaBucketRow(groupDisplayName: group.displayName, bucket: bucket)
                                 }
                             }
                         }
-                        .padding(12)
+                        .padding(10)
                         .premiumCardStyle(isHovered: isHovered, accentColor: cardAccent)
                         .onHover { hovering in
                             quotaCardHovered[group.displayName] = hovering
@@ -312,22 +287,21 @@ struct StatsTabView: View {
             } else {
                 HStack {
                     Spacer()
-                    VStack(spacing: 8) {
+                    VStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 20))
-                            .foregroundStyle(Color.yellow.opacity(0.8))
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.yellow.opacity(0.6))
                         
-                        Text("No Active Quota Session")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
+                        Text("no active quota session")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.8))
                         
-                        Text("Start the agy CLI or language server to view remaining limits.")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Color.white.opacity(0.4))
+                        Text("run agy cli to activate quota info")
+                            .font(.system(size: 8.5))
+                            .foregroundStyle(Color.white.opacity(0.35))
                             .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16)
                     }
-                    .padding(.vertical, 24)
+                    .padding(.vertical, 16)
                     Spacer()
                 }
                 .premiumCardStyle()
@@ -335,109 +309,32 @@ struct StatsTabView: View {
         }
     }
     
-    // MARK: - Metrics Grid
-    private var metricsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            MetricCardView(
-                title: "Queries Today",
-                value: "\(viewModel.stats.queriesToday)",
-                systemImage: "calendar.badge.clock",
-                color: Color(red: 0.58, green: 0.38, blue: 0.95) // Violet
-            )
-            
-            MetricCardView(
-                title: "Queries This Week",
-                value: "\(viewModel.stats.queriesThisWeek)",
-                systemImage: "waveform.path.ecg",
-                color: Color(red: 0.28, green: 0.68, blue: 1.0) // Sapphire
-            )
-            
-            MetricCardView(
-                title: "Total Queries",
-                value: "\(viewModel.stats.totalQueries)",
-                systemImage: "command",
-                color: Color(red: 0.15, green: 0.85, blue: 0.55) // Emerald
-            )
-            
-            MetricCardView(
-                title: "Tool Calls",
-                value: "\(viewModel.stats.totalToolCalls)",
-                systemImage: "cpu",
-                color: Color(red: 1.0, green: 0.45, blue: 0.45) // Sunset Coral
-            )
-        }
-    }
-    
-    // MARK: - Active Model Card
-    private var activeModelCard: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.58, green: 0.38, blue: 0.95), Color(red: 0.28, green: 0.68, blue: 1.0)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 32, height: 32)
-                    .shadow(color: Color(red: 0.58, green: 0.38, blue: 0.95).opacity(activeModelCardHovered ? 0.5 : 0.0), radius: 4)
-                
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text("ACTIVE MODEL")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.45))
-                
-                Text(viewModel.settings.model ?? (viewModel.stats.quotaInfo?.plan ?? "Gemini 3.5 Flash"))
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            
-            Spacer()
-            
-            if viewModel.settings.enableTelemetry == true {
-                TelemetryBadge()
-            }
-        }
-        .padding(12)
-        .premiumCardStyle(isHovered: activeModelCardHovered, accentColor: Color(red: 0.58, green: 0.38, blue: 0.95))
-        .onHover { hovering in
-            activeModelCardHovered = hovering
-        }
-    }
-    
-    // MARK: - Tool Execution Breakdown
     private var toolExecutionBreakdown: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Tool Executions")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.6))
+        VStack(alignment: .leading, spacing: 8) {
+            Text("tool executions")
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.45))
                 .padding(.horizontal, 4)
             
             if viewModel.stats.toolStats.isEmpty {
                 HStack {
                     Spacer()
-                    Text("No tool calls recorded yet")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.3))
-                        .padding(.vertical, 24)
+                    Text("no tool calls recorded")
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.25))
+                        .padding(.vertical, 16)
                     Spacer()
                 }
                 .premiumCardStyle()
             } else {
-                VStack(spacing: 8) {
+                VStack(spacing: 4) {
                     let maxCount = Double(viewModel.stats.toolStats.first?.count ?? 1)
-                    
                     ForEach(viewModel.stats.toolStats) { tool in
                         ToolStatRow(tool: tool, maxCount: maxCount)
                     }
                 }
-                .padding(10)
-                .premiumCardStyle(isHovered: toolsCardHovered, accentColor: .pink)
+                .padding(8)
+                .premiumCardStyle(isHovered: toolsCardHovered, accentColor: Color(red: 1.0, green: 0.45, blue: 0.45))
                 .onHover { hovering in
                     toolsCardHovered = hovering
                 }

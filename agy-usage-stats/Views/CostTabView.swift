@@ -24,7 +24,6 @@ struct ModelCostInfo: Identifiable, Hashable {
             }
         }
         
-        // Assumed average tokens per query in agy
         var inputTokens: Double {
             switch self {
             case .low: return 15_000
@@ -71,12 +70,10 @@ struct CostTabView: View {
         let activeName = viewModel.settings.model ?? ""
         let cleanedActive = activeName.replacingOccurrences(of: " (current)", with: "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
-        // Find best match in our list
         if let matched = knownModels.first(where: { cleanedActive.contains($0.name.replacingOccurrences(of: " (current)", with: "").lowercased()) || $0.name.lowercased().contains(cleanedActive) }) {
             return matched
         }
         
-        // Default fallback (usually High)
         return knownModels[2] // Gemini 3.5 Flash (High)
     }
     
@@ -91,18 +88,18 @@ struct CostTabView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                // Section 1: Summary Banner
+                // Estimated API Cost Strip
                 costSummaryCard
                 
-                // Section 2: Model Pricing Table
-                Text("Select Model to Estimate Cost")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.6))
+                // Header Label
+                Text("pricing templates")
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.45))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
                 
-                VStack(spacing: 8) {
+                VStack(spacing: 4) {
                     ForEach(knownModels) { model in
                         let isActive = model.id == activeModel.id
                         let isSelected = model.id == selectedModel.id
@@ -111,62 +108,44 @@ struct CostTabView: View {
                         Button {
                             localSelectedModelId = model.id
                         } label: {
-                            HStack(spacing: 10) {
-                                // Selection indicator / bullet
+                            HStack(spacing: 8) {
                                 Circle()
-                                    .fill(isSelected ? Color.green : Color.white.opacity(0.15))
-                                    .frame(width: 6, height: 6)
+                                    .fill(isSelected ? Color.green : Color.clear)
+                                    .frame(width: 4, height: 4)
+                                    .overlay(Circle().stroke(Color.white.opacity(isSelected ? 0 : 0.2), lineWidth: 0.75))
                                 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
+                                    HStack(spacing: 4) {
                                         Text(model.name)
-                                            .font(.system(size: 11, weight: .bold))
+                                            .font(.system(size: 10, weight: .semibold))
                                             .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.8))
                                         
                                         if isActive {
-                                            Text("Active")
-                                                .font(.system(size: 8, weight: .bold))
+                                            Text("active")
+                                                .font(.system(size: 7.5, weight: .bold))
                                                 .foregroundStyle(.green)
-                                                .padding(.horizontal, 5)
-                                                .padding(.vertical, 1.5)
-                                                .background(Capsule().fill(Color.green.opacity(0.15)))
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(Capsule().fill(Color.green.opacity(0.08)))
                                         }
                                     }
                                     
-                                    Text(String(format: "Assumes %dK in / %dK out • $%.3f/q", Int(model.tier.inputTokens/1000), Int(model.tier.outputTokens/1000), model.costPerQuery))
-                                        .font(.system(size: 8.5))
-                                        .foregroundStyle(Color.white.opacity(0.45))
+                                    Text(String(format: "$%.3f/q • rate: $%.2f / $%.2f per M", model.costPerQuery, model.inputPricePerMillion, model.outputPricePerMillion))
+                                        .font(.system(size: 8, weight: .medium, design: .rounded))
+                                        .foregroundStyle(Color.white.opacity(0.4))
                                 }
                                 
                                 Spacer()
-                                
-                                VStack(alignment: .trailing, spacing: 1) {
-                                    Text(String(format: "In: $%.2f/M", model.inputPricePerMillion))
-                                        .font(.system(size: 9, weight: .bold).monospacedDigit())
-                                        .foregroundStyle(Color.white.opacity(0.55))
-                                    Text(String(format: "Out: $%.2f/M", model.outputPricePerMillion))
-                                        .font(.system(size: 9, weight: .bold).monospacedDigit())
-                                        .foregroundStyle(Color.white.opacity(0.55))
-                                }
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
                             .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(
-                                        isSelected 
-                                        ? Color.green.opacity(0.06) 
-                                        : (isHovered ? Color.white.opacity(0.04) : Color.white.opacity(0.015))
-                                    )
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(isSelected ? Color.green.opacity(0.04) : (isHovered ? Color.white.opacity(0.02) : Color.clear))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(
-                                        isSelected 
-                                        ? Color.green.opacity(0.35) 
-                                        : (isHovered ? Color.white.opacity(0.12) : Color.white.opacity(0.05)),
-                                        lineWidth: 1
-                                    )
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSelected ? Color.green.opacity(0.15) : Color.clear, lineWidth: 0.5)
                             )
                         }
                         .buttonStyle(.plain)
@@ -183,63 +162,49 @@ struct CostTabView: View {
     // MARK: - Cost Summary Card
     
     private var costSummaryCard: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("ESTIMATED API COST")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.45))
-                    
-                    Text(selectedModel.name)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
+                HStack(spacing: 4) {
+                    Image(systemName: "banknote")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.green)
+                    Text(selectedModel.name.lowercased())
+                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.8))
                 }
-                
                 Spacer()
-                
-                Image(systemName: "banknote.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.green)
-                    .shadow(color: Color.green.opacity(0.4), radius: 3)
             }
+            .padding(.horizontal, 4)
             
-            Divider()
-                .background(Color.white.opacity(0.08))
-            
-            HStack(spacing: 8) {
-                costColumn(title: "Today", queries: viewModel.stats.queriesToday)
-                dividerLine
-                costColumn(title: "Week", queries: viewModel.stats.queriesThisWeek)
-                dividerLine
-                costColumn(title: "Total", queries: viewModel.stats.totalQueries)
+            HStack(spacing: 0) {
+                costColumn(title: "today", queries: viewModel.stats.queriesToday)
+                metricDivider
+                costColumn(title: "week", queries: viewModel.stats.queriesThisWeek)
+                metricDivider
+                costColumn(title: "total", queries: viewModel.stats.totalQueries)
             }
+            .padding(.vertical, 8)
+            .premiumCardStyle()
         }
-        .padding(12)
-        .premiumCardStyle(isHovered: false, accentColor: .green)
     }
     
-    private var dividerLine: some View {
+    private var metricDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.08))
-            .frame(width: 1)
-            .frame(maxHeight: .infinity)
-            .padding(.vertical, 2)
+            .fill(Color.white.opacity(0.05))
+            .frame(width: 0.75)
+            .frame(maxHeight: 18)
     }
     
     private func costColumn(title: String, queries: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.4))
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.35))
             
             Text(String(format: "$%.2f", Double(queries) * selectedModel.costPerQuery))
-                .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
+                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white)
-            
-            Text("\(queries) queries")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.45))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 }

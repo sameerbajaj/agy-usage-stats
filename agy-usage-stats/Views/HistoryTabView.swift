@@ -2,8 +2,6 @@
 //  HistoryTabView.swift
 //  agy-usage-stats
 //
-//  Created by Antigravity on 6/14/26.
-//
 
 import SwiftUI
 import AppKit
@@ -29,41 +27,39 @@ struct HistoryTabView: View {
             // Search Bar
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(searchIsFocused ? .blue : Color.white.opacity(0.35))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(searchIsFocused ? .blue : Color.white.opacity(0.3))
                     .animation(.easeInOut(duration: 0.15), value: searchIsFocused)
                 
-                TextField("Search history...", text: $viewModel.searchQuery)
+                TextField("search history...", text: $viewModel.searchQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.white)
-                    // Custom focus trigger in swiftui can be simulated or we can rely on standard edit state
-                    // We can track focus with standard SwiftUI @FocusState, but since we are targeting a wide range, simple text field is fine.
                 
                 if !viewModel.searchQuery.isEmpty {
                     Button {
                         viewModel.searchQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.white.opacity(0.4))
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.white.opacity(0.35))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(0.04))
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.white.opacity(0.025))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(searchIsFocused ? Color.blue.opacity(0.4) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(searchIsFocused ? Color.blue.opacity(0.25) : Color.white.opacity(0.04), lineWidth: 0.75)
             )
             .padding(.horizontal, 12)
             .padding(.top, 10)
-            .padding(.bottom, 8)
+            .padding(.bottom, 6)
             .onReceive(NotificationCenter.default.publisher(for: NSTextView.didBeginEditingNotification)) { _ in
                 withAnimation(.easeInOut(duration: 0.15)) {
                     searchIsFocused = true
@@ -76,22 +72,22 @@ struct HistoryTabView: View {
             }
             
             Divider()
-                .background(Color.white.opacity(0.08))
+                .background(Color.white.opacity(0.05))
             
             if filteredQueries.isEmpty {
                 Spacer()
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     Image(systemName: "magnifyingglass.bubble")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Color.white.opacity(0.3))
-                    Text("No matching queries found")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.4))
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.white.opacity(0.25))
+                    Text("no matching queries found")
+                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.35))
                 }
                 Spacer()
             } else {
                 ScrollView {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 6) {
                         ForEach(filteredQueries) { query in
                             HistoryRow(query: query, copiedQueryID: copiedQueryID) {
                                 copyToClipboard(text: query.display, id: query.id)
@@ -113,8 +109,7 @@ struct HistoryTabView: View {
             copiedQueryID = id
         }
         
-        // Reset checkmark after 2 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             if copiedQueryID == id {
                 withAnimation(.easeOut(duration: 0.2)) {
                     copiedQueryID = nil
@@ -134,74 +129,74 @@ struct HistoryRow: View {
         Button {
             onCopy()
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top) {
                     Text(query.display)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.85))
                         .multilineTextAlignment(.leading)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                     
                     Spacer()
                     
-                    ZStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.green)
-                            .scaleEffect(copiedQueryID == query.id ? 1.0 : 0.001)
-                            .opacity(copiedQueryID == query.id ? 1.0 : 0.0)
-                        
-                        Image(systemName: "doc.on.doc.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Color.white.opacity(isHovered ? 0.6 : 0.3))
-                            .scaleEffect(copiedQueryID == query.id ? 0.001 : 1.0)
-                            .opacity(copiedQueryID == query.id ? 0.0 : 1.0)
+                    if isHovered || copiedQueryID == query.id {
+                        ZStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.green)
+                                .scaleEffect(copiedQueryID == query.id ? 1.0 : 0.001)
+                                .opacity(copiedQueryID == query.id ? 1.0 : 0.0)
+                            
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Color.white.opacity(0.5))
+                                .scaleEffect(copiedQueryID == query.id ? 0.001 : 1.0)
+                                .opacity(copiedQueryID == query.id ? 0.0 : 1.0)
+                        }
+                        .animation(.spring(response: 0.2, dampingFraction: 0.8), value: copiedQueryID == query.id)
                     }
-                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: copiedQueryID == query.id)
                 }
                 
-                HStack(spacing: 6) {
-                    // Workspace Badge
-                    HStack(spacing: 3) {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 7))
-                        Text(query.cleanWorkspaceName)
-                    }
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.blue)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(Color.blue.opacity(0.12))
-                    )
+                HStack(spacing: 4) {
+                    Text(query.cleanWorkspaceName)
+                        .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(.blue.opacity(0.8))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.blue.opacity(0.06)))
                     
                     if let type = query.type {
-                        Text(type.uppercased())
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.purple)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(Color.purple.opacity(0.12))
-                            )
+                        Text(type.lowercased())
+                            .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                            .foregroundStyle(.purple.opacity(0.8))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.purple.opacity(0.06)))
                     }
                     
                     Spacer()
                     
                     Text(formattedTime(query.timestamp))
                         .font(.system(size: 8))
-                        .foregroundStyle(Color.white.opacity(0.4))
+                        .foregroundStyle(Color.white.opacity(0.3))
                 }
             }
-            .padding(10)
-            .premiumCardStyle(isHovered: isHovered, accentColor: .blue)
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.white.opacity(isHovered ? 0.03 : 0.01))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.white.opacity(isHovered ? 0.05 : 0.02), lineWidth: 0.5)
+            )
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            isHovered = hovering
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
         }
     }
     

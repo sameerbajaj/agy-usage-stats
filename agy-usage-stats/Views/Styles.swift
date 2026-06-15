@@ -20,28 +20,16 @@ public struct PremiumCardModifier: ViewModifier {
     public func body(content: Content) -> some View {
         content
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(
-                        LinearGradient(
-                            colors: isHovered
-                                ? [Color.white.opacity(0.05), Color.white.opacity(0.02)]
-                                : [Color.white.opacity(0.03), Color.white.opacity(0.015)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.white.opacity(isHovered ? 0.06 : 0.025))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 8)
                     .stroke(
-                        LinearGradient(
-                            colors: isHovered && accentColor != nil
-                                ? [accentColor!.opacity(0.35), accentColor!.opacity(0.1)]
-                                : [Color.white.opacity(0.06), Color.white.opacity(0.03)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
+                        isHovered && accentColor != nil
+                            ? accentColor!.opacity(0.2)
+                            : Color.white.opacity(0.04),
+                        lineWidth: 0.75
                     )
             )
     }

@@ -43,13 +43,13 @@ public struct MenuBarPopover: View {
             
             if let update = viewModel.availableUpdate {
                 updateBanner(update)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.03))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.02))
                     .overlay(
                         Rectangle()
                             .frame(height: 1)
-                            .foregroundStyle(Color.white.opacity(0.08)),
+                            .foregroundStyle(Color.white.opacity(0.05)),
                         alignment: .bottom
                     )
             }
@@ -68,23 +68,17 @@ public struct MenuBarPopover: View {
                     SettingsTabView(viewModel: viewModel)
                 }
             }
-            .frame(height: 380)
+            .frame(height: 370)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
             
             Divider()
-                .background(Color.white.opacity(0.08))
+                .background(Color.white.opacity(0.06))
             
             footer
         }
-        .frame(width: 350)
-        .background(
-            LinearGradient(
-                colors: [Color(red: 0.08, green: 0.08, blue: 0.11), Color(red: 0.05, green: 0.05, blue: 0.07)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .frame(width: 330)
+        .background(.ultraThinMaterial)
         .environment(\.colorScheme, .dark)
         .preferredColorScheme(.dark)
         .onAppear {
@@ -94,35 +88,35 @@ public struct MenuBarPopover: View {
     
     // MARK: - Header
     
+    private var isConnected: Bool {
+        let expanded = viewModel.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
+        let path = (expanded as NSString).appendingPathComponent("history.jsonl")
+        return FileManager.default.fileExists(atPath: path)
+    }
+    
     private var header: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 // Logo & Title
-                HStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color(red: 0.58, green: 0.38, blue: 0.95), // Purple
-                                             Color(red: 0.28, green: 0.68, blue: 1.0)], // Blue
-                                    startPoint: .topLeading, endPoint: .bottomTrailing
-                                )
+                HStack(spacing: 6) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color(red: 0.65, green: 0.45, blue: 1.0), Color(red: 0.28, green: 0.68, blue: 1.0)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                            .frame(width: 28, height: 28)
-                            .shadow(color: Color(red: 0.58, green: 0.38, blue: 0.95).opacity(0.35), radius: 4)
-                        Image(systemName: "square.stack.3d.up.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
+                        )
                     
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Antigravity")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("CLI Usage Stats")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.4))
-                    }
+                    Text("antigravity")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    
+                    Circle()
+                        .fill(isConnected ? Color.green : Color.red)
+                        .frame(width: 5, height: 5)
+                        .opacity(0.85)
                 }
                 
                 Spacer()
@@ -132,7 +126,7 @@ public struct MenuBarPopover: View {
                     if viewModel.isRefreshing {
                         ProgressView()
                             .controlSize(.mini)
-                            .tint(Color.white.opacity(0.7))
+                            .tint(Color.white.opacity(0.5))
                     } else {
                         Button {
                             Task {
@@ -140,54 +134,48 @@ public struct MenuBarPopover: View {
                             }
                         } label: {
                             Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(Color.white.opacity(0.6))
-                                .frame(width: 22, height: 22)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.white.opacity(0.06))
-                                )
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Color.white.opacity(0.4))
+                                .frame(width: 20, height: 20)
                         }
                         .buttonStyle(.plain)
-                        .help("Refresh metrics")
                     }
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
             .padding(.top, 12)
             .padding(.bottom, 10)
             
             // Segmented Picker
             tabPicker
-                .padding(.horizontal, 14)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
             
             Divider()
-                .background(Color.white.opacity(0.08))
+                .background(Color.white.opacity(0.06))
         }
-        .background(Color.white.opacity(0.01))
     }
     
     // MARK: - Tab Picker
     
     private var tabPicker: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(PopoverTab.allCases) { tab in
                 Button {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
                         selectedTab = tab
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    VStack(spacing: 4) {
                         Image(systemName: tab.icon)
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(tab.rawValue)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 10))
+                        Text(tab.rawValue.lowercased())
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
                     }
                     .foregroundStyle(
                         selectedTab == tab
                             ? Color.white
-                            : Color.white.opacity(0.45)
+                            : Color.white.opacity(0.35)
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
@@ -195,15 +183,8 @@ public struct MenuBarPopover: View {
                         ZStack {
                             if selectedTab == tab {
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [Color.white.opacity(0.12), Color.white.opacity(0.08)],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        )
-                                    )
+                                    .fill(Color.white.opacity(0.05))
                                     .matchedGeometryEffect(id: "activeTabBackground", in: namespace)
-                                    .shadow(color: Color.black.opacity(0.15), radius: 2, x: 0, y: 1)
                             }
                         }
                     )
@@ -215,7 +196,7 @@ public struct MenuBarPopover: View {
         .padding(2)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.04))
+                .fill(Color.white.opacity(0.02))
         )
     }
     
@@ -223,35 +204,37 @@ public struct MenuBarPopover: View {
     
     private var footer: some View {
         HStack {
-            if let last = viewModel.stats.lastQueryAt {
-                Text("Last active: \(formattedTime(last))")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.4))
-            } else {
-                Text("No queries recorded")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.4))
+            HStack(spacing: 4) {
+                Image(systemName: "clock")
+                    .font(.system(size: 8))
+                if let last = viewModel.stats.lastQueryAt {
+                    Text(formattedTime(last))
+                } else {
+                    Text("idle")
+                }
             }
+            .font(.system(size: 8.5, weight: .medium, design: .rounded))
+            .foregroundStyle(Color.white.opacity(0.35))
             
             Spacer()
             
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
-                Text("Quit App")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color.red.opacity(0.8))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                Image(systemName: "power")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.red.opacity(0.6))
+                    .padding(4)
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                        Circle()
+                            .fill(Color.red.opacity(0.05))
                     )
             }
             .buttonStyle(.plain)
+            .help("Quit App")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(Color.white.opacity(0.005))
     }
     
