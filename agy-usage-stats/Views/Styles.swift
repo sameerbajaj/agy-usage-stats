@@ -7,8 +7,8 @@
 
 import SwiftUI
 
-// MARK: - Premium Card Styling
 public struct PremiumCardModifier: ViewModifier {
+    @Environment(\.colorScheme) var colorScheme
     public var isHovered: Bool
     public var accentColor: Color?
     
@@ -18,17 +18,21 @@ public struct PremiumCardModifier: ViewModifier {
     }
     
     public func body(content: Content) -> some View {
-        content
+        let isDark = colorScheme == .dark
+        let fillOpacity = isHovered ? (isDark ? 0.07 : 0.05) : (isDark ? 0.035 : 0.02)
+        let strokeOpacity = isHovered ? (isDark ? 0.12 : 0.08) : (isDark ? 0.06 : 0.04)
+        
+        return content
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(isHovered ? 0.06 : 0.025))
+                    .fill(Color.primary.opacity(fillOpacity))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
                         isHovered && accentColor != nil
-                            ? accentColor!.opacity(0.2)
-                            : Color.white.opacity(0.04),
+                            ? accentColor!.opacity(isDark ? 0.25 : 0.4)
+                            : Color.primary.opacity(strokeOpacity),
                         lineWidth: 0.75
                     )
             )

@@ -94,7 +94,7 @@ struct CostTabView: View {
                 // Header Label
                 Text("pricing templates")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.45))
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
                     .padding(.top, 4)
@@ -112,13 +112,13 @@ struct CostTabView: View {
                                 Circle()
                                     .fill(isSelected ? Color.green : Color.clear)
                                     .frame(width: 4, height: 4)
-                                    .overlay(Circle().stroke(Color.white.opacity(isSelected ? 0 : 0.2), lineWidth: 0.75))
+                                    .overlay(Circle().stroke(Color.primary.opacity(isSelected ? 0 : 0.2), lineWidth: 0.75))
                                 
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 4) {
                                         Text(model.name)
                                             .font(.system(size: 10, weight: .semibold))
-                                            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.8))
+                                            .foregroundStyle(isSelected ? Color.primary : Color.primary.opacity(0.8))
                                         
                                         if isActive {
                                             Text("active")
@@ -132,7 +132,7 @@ struct CostTabView: View {
                                     
                                     Text(String(format: "$%.3f/q • rate: $%.2f / $%.2f per M", model.costPerQuery, model.inputPricePerMillion, model.outputPricePerMillion))
                                         .font(.system(size: 8, weight: .medium, design: .rounded))
-                                        .foregroundStyle(Color.white.opacity(0.4))
+                                        .foregroundStyle(.secondary)
                                 }
                                 
                                 Spacer()
@@ -141,7 +141,7 @@ struct CostTabView: View {
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(isSelected ? Color.green.opacity(0.04) : (isHovered ? Color.white.opacity(0.02) : Color.clear))
+                                    .fill(isSelected ? Color.green.opacity(0.04) : (isHovered ? Color.primary.opacity(0.02) : Color.clear))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6)
@@ -170,7 +170,7 @@ struct CostTabView: View {
                         .foregroundStyle(.green)
                     Text(selectedModel.name.lowercased())
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(.primary)
                 }
                 Spacer()
             }
@@ -190,7 +190,7 @@ struct CostTabView: View {
     
     private var metricDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.05))
+            .fill(Color.primary.opacity(0.05))
             .frame(width: 0.75)
             .frame(maxHeight: 18)
     }
@@ -199,11 +199,11 @@ struct CostTabView: View {
         VStack(spacing: 2) {
             Text(title)
                 .font(.system(size: 8, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.35))
+                .foregroundStyle(.secondary)
             
             Text(String(format: "$%.2f", Double(queries) * selectedModel.costPerQuery))
                 .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity)
     }

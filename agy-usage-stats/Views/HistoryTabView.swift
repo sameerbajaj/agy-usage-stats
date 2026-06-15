@@ -28,13 +28,13 @@ struct HistoryTabView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(searchIsFocused ? .blue : Color.white.opacity(0.3))
+                    .foregroundStyle(searchIsFocused ? .blue : Color.primary.opacity(0.3))
                     .animation(.easeInOut(duration: 0.15), value: searchIsFocused)
                 
                 TextField("search history...", text: $viewModel.searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 
                 if !viewModel.searchQuery.isEmpty {
                     Button {
@@ -42,7 +42,7 @@ struct HistoryTabView: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 10))
-                            .foregroundStyle(Color.white.opacity(0.35))
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -51,11 +51,11 @@ struct HistoryTabView: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.025))
+                    .fill(Color.primary.opacity(0.025))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(searchIsFocused ? Color.blue.opacity(0.25) : Color.white.opacity(0.04), lineWidth: 0.75)
+                    .stroke(searchIsFocused ? Color.blue.opacity(0.25) : Color.primary.opacity(0.04), lineWidth: 0.75)
             )
             .padding(.horizontal, 12)
             .padding(.top, 10)
@@ -72,17 +72,16 @@ struct HistoryTabView: View {
             }
             
             Divider()
-                .background(Color.white.opacity(0.05))
             
             if filteredQueries.isEmpty {
                 Spacer()
                 VStack(spacing: 6) {
                     Image(systemName: "magnifyingglass.bubble")
                         .font(.system(size: 14))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(.secondary)
                     Text("no matching queries found")
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
             } else {
@@ -133,7 +132,7 @@ struct HistoryRow: View {
                 HStack(alignment: .top) {
                     Text(query.display)
                         .font(.system(size: 10.5, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.primary.opacity(0.85))
                         .multilineTextAlignment(.leading)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
@@ -150,7 +149,7 @@ struct HistoryRow: View {
                             
                             Image(systemName: "doc.on.doc")
                                 .font(.system(size: 9))
-                                .foregroundStyle(Color.white.opacity(0.5))
+                                .foregroundStyle(.secondary)
                                 .scaleEffect(copiedQueryID == query.id ? 0.001 : 1.0)
                                 .opacity(copiedQueryID == query.id ? 0.0 : 1.0)
                         }
@@ -179,17 +178,17 @@ struct HistoryRow: View {
                     
                     Text(formattedTime(query.timestamp))
                         .font(.system(size: 8))
-                        .foregroundStyle(Color.white.opacity(0.3))
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(8)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(isHovered ? 0.03 : 0.01))
+                    .fill(Color.primary.opacity(isHovered ? 0.03 : 0.01))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.white.opacity(isHovered ? 0.05 : 0.02), lineWidth: 0.5)
+                    .stroke(Color.primary.opacity(isHovered ? 0.05 : 0.02), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)

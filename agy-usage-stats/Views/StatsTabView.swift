@@ -7,6 +7,20 @@
 
 import SwiftUI
 
+private extension Color {
+    static func gemini(isDark: Bool) -> Color {
+        isDark
+            ? Color(red: 0.75, green: 0.6, blue: 1.0)      // Pastel Lavender
+            : Color(red: 0.45, green: 0.25, blue: 0.85)    // Deep Indigo
+    }
+    
+    static func claude(isDark: Bool) -> Color {
+        isDark
+            ? Color(red: 1.0, green: 0.65, blue: 0.35)     // Light Pastel Orange
+            : Color(red: 0.85, green: 0.35, blue: 0.05)    // Deep Warm Orange
+    }
+}
+
 // MARK: - Telemetry Badge
 struct TelemetryBadge: View {
     @State private var pulse = false
@@ -38,15 +52,20 @@ struct TelemetryBadge: View {
 
 // MARK: - Quota Bucket Row
 struct QuotaBucketRow: View {
+    @Environment(\.colorScheme) var colorScheme
     let groupDisplayName: String
     let bucket: AgyQuotaBucket
+    
+    private var isDark: Bool { colorScheme == .dark }
+    private var geminiColor: Color { Color.gemini(isDark: isDark) }
+    private var claudeColor: Color { Color.claude(isDark: isDark) }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(bucket.displayName)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.8))
+                    .foregroundStyle(.primary.opacity(0.85))
                 
                 Spacer()
                 
@@ -57,7 +76,7 @@ struct QuotaBucketRow: View {
                 } else {
                     Text("unlimited")
                         .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -65,7 +84,7 @@ struct QuotaBucketRow: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 1.5)
-                            .fill(Color.white.opacity(0.04))
+                            .fill(Color.primary.opacity(0.04))
                         
                         RoundedRectangle(cornerRadius: 1.5)
                             .fill(
@@ -84,7 +103,7 @@ struct QuotaBucketRow: View {
             if let resetDesc = bucket.resetDescription {
                 Text(resetDesc.lowercased())
                     .font(.system(size: 7.5))
-                    .foregroundStyle(Color.white.opacity(0.3))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)
@@ -95,7 +114,7 @@ struct QuotaBucketRow: View {
             return Color(red: 1.0, green: 0.35, blue: 0.35)
         }
         let isGemini = group.lowercased().contains("gemini")
-        return isGemini ? Color(red: 0.65, green: 0.45, blue: 1.0) : Color(red: 1.0, green: 0.6, blue: 0.3)
+        return isGemini ? geminiColor : claudeColor
     }
     
     private func quotaGradientColors(for group: String, fraction: Double) -> [Color] {
@@ -104,9 +123,9 @@ struct QuotaBucketRow: View {
         }
         let isGemini = group.lowercased().contains("gemini")
         if isGemini {
-            return [Color(red: 0.65, green: 0.45, blue: 1.0), Color(red: 0.28, green: 0.68, blue: 1.0)]
+            return [geminiColor, Color(red: 0.28, green: 0.68, blue: 1.0)]
         } else {
-            return [Color(red: 0.98, green: 0.45, blue: 0.09), Color(red: 1.0, green: 0.65, blue: 0.2)]
+            return [claudeColor, Color(red: 1.0, green: 0.65, blue: 0.2)]
         }
     }
 }
@@ -130,18 +149,18 @@ struct ToolStatRow: View {
                 HStack {
                     Text(tool.displayName)
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.primary.opacity(0.85))
                     Spacer()
                     Text("\(tool.count)")
                         .font(.system(size: 9, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(Color.white.opacity(0.7))
+                        .foregroundStyle(.secondary)
                 }
                 
                 GeometryReader { geo in
                     let pct = maxCount > 0 ? Double(tool.count) / maxCount : 0
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 1)
-                            .fill(Color.white.opacity(0.04))
+                            .fill(Color.primary.opacity(0.04))
                         
                         RoundedRectangle(cornerRadius: 1)
                             .fill(tool.categoryColor.opacity(0.8))
@@ -152,7 +171,7 @@ struct ToolStatRow: View {
             }
         }
         .padding(6)
-        .background(Color.white.opacity(isHovered ? 0.025 : 0.0))
+        .background(Color.primary.opacity(isHovered ? 0.035 : 0.0))
         .cornerRadius(6)
         .onHover { hovering in
             isHovered = hovering
@@ -162,10 +181,15 @@ struct ToolStatRow: View {
 
 // MARK: - Main View
 struct StatsTabView: View {
+    @Environment(\.colorScheme) var colorScheme
     let viewModel: AgyStatsViewModel
     
     @State private var quotaCardHovered: [String: Bool] = [:]
     @State private var toolsCardHovered = false
+    
+    private var isDark: Bool { colorScheme == .dark }
+    private var geminiColor: Color { Color.gemini(isDark: isDark) }
+    private var claudeColor: Color { Color.claude(isDark: isDark) }
     
     var body: some View {
         ScrollView {
@@ -192,10 +216,10 @@ struct StatsTabView: View {
             HStack(spacing: 5) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 9))
-                    .foregroundStyle(Color(red: 0.65, green: 0.45, blue: 1.0))
+                    .foregroundStyle(geminiColor)
                 Text(viewModel.settings.model ?? (viewModel.stats.quotaInfo?.plan ?? "Gemini 3.5 Flash"))
                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.primary.opacity(0.85))
             }
             Spacer()
             if viewModel.settings.enableTelemetry == true {
@@ -207,7 +231,7 @@ struct StatsTabView: View {
     
     private var metricsStrip: some View {
         HStack(spacing: 0) {
-            metricItem(title: "today", value: "\(viewModel.stats.queriesToday)", color: Color(red: 0.65, green: 0.45, blue: 1.0))
+            metricItem(title: "today", value: "\(viewModel.stats.queriesToday)", color: geminiColor)
             metricDivider
             metricItem(title: "week", value: "\(viewModel.stats.queriesThisWeek)", color: Color(red: 0.28, green: 0.68, blue: 1.0))
             metricDivider
@@ -221,7 +245,7 @@ struct StatsTabView: View {
     
     private var metricDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.05))
+            .fill(Color.primary.opacity(0.05))
             .frame(width: 0.75)
             .frame(maxHeight: 18)
     }
@@ -230,7 +254,7 @@ struct StatsTabView: View {
         VStack(spacing: 2) {
             Text(title)
                 .font(.system(size: 8, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.35))
+                .foregroundStyle(.secondary)
             Text(value)
                 .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(color)
@@ -243,12 +267,12 @@ struct StatsTabView: View {
             HStack {
                 Text("remaining quotas")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.45))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if let email = viewModel.stats.quotaInfo?.email {
                     Text(email)
                         .font(.system(size: 8, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.3))
+                        .foregroundStyle(.secondary.opacity(0.8))
                 }
             }
             .padding(.horizontal, 4)
@@ -258,9 +282,7 @@ struct StatsTabView: View {
                     ForEach(quota.groups) { group in
                         let isHovered = quotaCardHovered[group.displayName] ?? false
                         let isGemini = group.displayName.lowercased().contains("gemini")
-                        let cardAccent = isGemini 
-                            ? Color(red: 0.65, green: 0.45, blue: 1.0)
-                            : Color(red: 0.98, green: 0.45, blue: 0.09)
+                        let cardAccent = isGemini ? geminiColor : claudeColor
                         
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -294,11 +316,11 @@ struct StatsTabView: View {
                         
                         Text("no active quota session")
                             .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.8))
+                            .foregroundStyle(.primary.opacity(0.85))
                         
                         Text("run agy cli to activate quota info")
                             .font(.system(size: 8.5))
-                            .foregroundStyle(Color.white.opacity(0.35))
+                            .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
                     .padding(.vertical, 16)
@@ -313,7 +335,7 @@ struct StatsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("tool executions")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.45))
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             
             if viewModel.stats.toolStats.isEmpty {
@@ -321,7 +343,7 @@ struct StatsTabView: View {
                     Spacer()
                     Text("no tool calls recorded")
                         .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(.secondary.opacity(0.6))
                         .padding(.vertical, 16)
                     Spacer()
                 }

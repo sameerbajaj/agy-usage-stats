@@ -15,11 +15,11 @@ struct WorkspacesTabView: View {
             HStack {
                 Text("active workspaces")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.45))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Text("\(viewModel.stats.workspaces.count) total")
                     .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.3))
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -30,10 +30,10 @@ struct WorkspacesTabView: View {
                 VStack(spacing: 6) {
                     Image(systemName: "folder.badge.questionmark")
                         .font(.system(size: 14))
-                        .foregroundStyle(Color.white.opacity(0.25))
+                        .foregroundStyle(.secondary)
                     Text("no workspaces tracked")
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.35))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
             } else {
@@ -68,16 +68,16 @@ struct WorkspaceRow: View {
                 HStack(spacing: 6) {
                     Text(ws.name)
                         .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.primary.opacity(0.9))
                     
                     Text(formattedTime(ws.lastActiveAt))
                         .font(.system(size: 8))
-                        .foregroundStyle(Color.white.opacity(0.3))
+                        .foregroundStyle(.secondary)
                 }
                 
                 Text(ws.path)
                     .font(.system(size: 8, weight: .medium).monospaced())
-                    .foregroundStyle(Color.white.opacity(0.35))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -87,12 +87,12 @@ struct WorkspaceRow: View {
             HStack(spacing: 6) {
                 Text("\(ws.queryCount)q")
                     .font(.system(size: 9, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(Color.white.opacity(0.7))
+                    .foregroundStyle(.primary.opacity(0.7))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(
                         Capsule()
-                            .fill(Color.white.opacity(0.06))
+                            .fill(Color.primary.opacity(0.06))
                     )
                 
                 if isHovered {
@@ -112,11 +112,11 @@ struct WorkspaceRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.white.opacity(isHovered ? 0.03 : 0.01))
+                .fill(Color.primary.opacity(isHovered ? 0.03 : 0.01))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.white.opacity(isHovered ? 0.05 : 0.02), lineWidth: 0.5)
+                .stroke(Color.primary.opacity(isHovered ? 0.05 : 0.02), lineWidth: 0.5)
         )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {

@@ -45,11 +45,11 @@ public struct MenuBarPopover: View {
                 updateBanner(update)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.02))
+                    .background(Color.primary.opacity(0.02))
                     .overlay(
                         Rectangle()
                             .frame(height: 1)
-                            .foregroundStyle(Color.white.opacity(0.05)),
+                            .foregroundStyle(Color.primary.opacity(0.05)),
                         alignment: .bottom
                     )
             }
@@ -73,14 +73,11 @@ public struct MenuBarPopover: View {
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
             
             Divider()
-                .background(Color.white.opacity(0.06))
             
             footer
         }
         .frame(width: 330)
         .background(.ultraThinMaterial)
-        .environment(\.colorScheme, .dark)
-        .preferredColorScheme(.dark)
         .onAppear {
             viewModel.setup()
         }
@@ -111,7 +108,7 @@ public struct MenuBarPopover: View {
                     
                     Text("antigravity")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     
                     Circle()
                         .fill(isConnected ? Color.green : Color.red)
@@ -126,7 +123,6 @@ public struct MenuBarPopover: View {
                     if viewModel.isRefreshing {
                         ProgressView()
                             .controlSize(.mini)
-                            .tint(Color.white.opacity(0.5))
                     } else {
                         Button {
                             Task {
@@ -135,7 +131,7 @@ public struct MenuBarPopover: View {
                         } label: {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(Color.white.opacity(0.4))
+                                .foregroundStyle(.secondary)
                                 .frame(width: 20, height: 20)
                         }
                         .buttonStyle(.plain)
@@ -152,7 +148,6 @@ public struct MenuBarPopover: View {
                 .padding(.bottom, 8)
             
             Divider()
-                .background(Color.white.opacity(0.06))
         }
     }
     
@@ -174,8 +169,8 @@ public struct MenuBarPopover: View {
                     }
                     .foregroundStyle(
                         selectedTab == tab
-                            ? Color.white
-                            : Color.white.opacity(0.35)
+                            ? Color.primary
+                            : Color.secondary
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
@@ -183,7 +178,7 @@ public struct MenuBarPopover: View {
                         ZStack {
                             if selectedTab == tab {
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.white.opacity(0.05))
+                                    .fill(Color.primary.opacity(0.08))
                                     .matchedGeometryEffect(id: "activeTabBackground", in: namespace)
                             }
                         }
@@ -196,7 +191,7 @@ public struct MenuBarPopover: View {
         .padding(2)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.02))
+                .fill(Color.primary.opacity(0.03))
         )
     }
     
@@ -214,7 +209,7 @@ public struct MenuBarPopover: View {
                 }
             }
             .font(.system(size: 8.5, weight: .medium, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.35))
+            .foregroundStyle(.secondary)
             
             Spacer()
             
@@ -227,7 +222,7 @@ public struct MenuBarPopover: View {
                     .padding(4)
                     .background(
                         Circle()
-                            .fill(Color.red.opacity(0.05))
+                            .fill(Color.red.opacity(0.1))
                     )
             }
             .buttonStyle(.plain)
@@ -235,7 +230,7 @@ public struct MenuBarPopover: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.white.opacity(0.005))
+        .background(Color.primary.opacity(0.01))
     }
     
     private func formattedTime(_ date: Date) -> String {
@@ -262,10 +257,10 @@ public struct MenuBarPopover: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(update.isRolling ? "New build available" : "Update available — v\(update.version)")
                             .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Text("Installs automatically — no drag & drop")
                             .font(.system(size: 9))
-                            .foregroundStyle(Color.white.opacity(0.60))
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if update.downloadURL != nil {
@@ -292,7 +287,7 @@ public struct MenuBarPopover: View {
                     Button(action: { viewModel.dismissUpdate() }) {
                         Image(systemName: "xmark")
                             .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.35))
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -303,14 +298,14 @@ public struct MenuBarPopover: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Downloading update…")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         ProgressView(value: progress)
                             .progressViewStyle(.linear)
                             .tint(.green)
                     }
                     Text("\(Int(progress * 100))%")
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.80))
+                        .foregroundStyle(.primary)
                         .frame(width: 28, alignment: .trailing)
                 }
 
@@ -319,7 +314,7 @@ public struct MenuBarPopover: View {
                     ProgressView().controlSize(.small)
                     Text("Installing — app will relaunch…")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     Spacer()
                 }
 
@@ -331,10 +326,10 @@ public struct MenuBarPopover: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Update failed")
                             .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                         Text(message)
                             .font(.system(size: 9))
-                            .foregroundStyle(Color.white.opacity(0.60))
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                     Spacer()

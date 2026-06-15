@@ -36,14 +36,14 @@ struct SettingsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("menu bar display")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.45))
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             
             VStack(spacing: 8) {
                 HStack {
                     Text("Display Mode")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.primary.opacity(0.85))
                     Spacer()
                     Picker("", selection: $viewModel.menuBarDisplayMode) {
                         ForEach(MenuBarDisplayMode.allCases) { mode in
@@ -55,12 +55,12 @@ struct SettingsTabView: View {
                     .controlSize(.small)
                 }
                 
-                Divider().background(Color.white.opacity(0.04))
+                Divider()
                 
                 HStack {
                     Text("Show Usage % in Icon")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.primary.opacity(0.85))
                     Spacer()
                     Toggle("", isOn: $viewModel.showModelUsageInIcon.animation(.easeInOut(duration: 0.2)))
                         .toggleStyle(.switch)
@@ -72,7 +72,7 @@ struct SettingsTabView: View {
                     HStack {
                         Text("Model for Icon")
                             .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.5))
+                            .foregroundStyle(.secondary)
                             .padding(.leading, 8)
                         Spacer()
                         Picker("", selection: $viewModel.selectedModelForIcon) {
@@ -86,12 +86,12 @@ struct SettingsTabView: View {
                     }
                 }
                 
-                Divider().background(Color.white.opacity(0.04))
+                Divider()
                 
                 HStack {
                     Text("Show Weekly Limit & Reset")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.primary.opacity(0.85))
                     Spacer()
                     Toggle("", isOn: $viewModel.showWeeklyLimitAndReset)
                         .toggleStyle(.switch)
@@ -110,7 +110,7 @@ struct SettingsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("cli data path")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.45))
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             
             VStack(spacing: 8) {
@@ -119,7 +119,7 @@ struct SettingsTabView: View {
                         TextField("path", text: $tempDir)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 10).monospaced())
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .controlSize(.small)
                         
                         Button("save") {
@@ -134,14 +134,14 @@ struct SettingsTabView: View {
                             isEditingDir = false
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(Color.white.opacity(0.4))
+                        .foregroundStyle(.secondary)
                         .font(.system(size: 9.5, weight: .medium))
                     }
                 } else {
                     HStack(spacing: 8) {
                         Text(viewModel.cliDir)
                             .font(.system(size: 10).monospaced())
-                            .foregroundStyle(Color.white.opacity(0.7))
+                            .foregroundStyle(.primary.opacity(0.7))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         
@@ -182,7 +182,7 @@ struct SettingsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("application updates")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.45))
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
             
             VStack(spacing: 8) {
@@ -190,10 +190,10 @@ struct SettingsTabView: View {
                     HStack(spacing: 4) {
                         Text("version")
                             .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.4))
+                            .foregroundStyle(.secondary)
                         Text("v\(UpdateChecker.currentVersion)")
                             .font(.system(size: 10.5, weight: .bold).monospacedDigit())
-                            .foregroundStyle(Color.white.opacity(0.75))
+                            .foregroundStyle(.primary.opacity(0.75))
                     }
                     
                     Spacer()
@@ -206,7 +206,6 @@ struct SettingsTabView: View {
                         if viewModel.isCheckingForUpdates {
                             ProgressView()
                                 .controlSize(.mini)
-                                .tint(.white)
                         } else {
                             Text("check now")
                                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
@@ -218,7 +217,7 @@ struct SettingsTabView: View {
                 }
                 
                 if let update = viewModel.availableUpdate {
-                    Divider().background(Color.white.opacity(0.04))
+                    Divider()
                     
                     VStack(alignment: .leading, spacing: 6) {
                         Text(update.isRolling ? "New build available" : "Version v\(update.version) is available")
@@ -228,7 +227,7 @@ struct SettingsTabView: View {
                         if let notes = update.releaseNotes, !notes.isEmpty {
                             Text(notes)
                                 .font(.system(size: 9))
-                                .foregroundStyle(Color.white.opacity(0.5))
+                                .foregroundStyle(.secondary)
                                 .lineLimit(2)
                         }
                         
@@ -248,7 +247,7 @@ struct SettingsTabView: View {
                                 Button(action: { viewModel.dismissUpdate() }) {
                                     Text("ignore")
                                         .font(.system(size: 9.5, weight: .semibold))
-                                        .foregroundStyle(Color.white.opacity(0.4))
+                                        .foregroundStyle(.secondary)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 4)
                                 }
@@ -259,7 +258,7 @@ struct SettingsTabView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Downloading (\(Int(progress * 100))%)...")
                                     .font(.system(size: 8.5))
-                                    .foregroundStyle(Color.white.opacity(0.7))
+                                    .foregroundStyle(.primary.opacity(0.7))
                                 
                                 ProgressView(value: progress)
                                     .progressViewStyle(.linear)
@@ -270,10 +269,9 @@ struct SettingsTabView: View {
                             HStack(spacing: 6) {
                                 ProgressView()
                                     .controlSize(.mini)
-                                    .tint(.white)
                                 Text("Installing & relaunching...")
                                     .font(.system(size: 9.5))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(.primary)
                             }
                             
                         case .failed(let errorMsg):
@@ -283,12 +281,12 @@ struct SettingsTabView: View {
                                     .foregroundStyle(.red)
                                 Text(errorMsg)
                                     .font(.system(size: 8.5))
-                                    .foregroundStyle(Color.white.opacity(0.5))
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
                 } else if let msg = viewModel.updateCheckMessage {
-                    Divider().background(Color.white.opacity(0.04))
+                    Divider()
                     
                     HStack {
                         Text(msg.lowercased())
