@@ -56,11 +56,15 @@ jobs:
         run: brew install create-dmg
 
       - name: Import signing certificate
-        if: secrets.APPLE_CERTIFICATE_BASE64 != ''
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          if [[ -z "$CERTIFICATE_BASE64" ]]; then
+            echo "⚠️ No signing certificate found. Skipping certificate import."
+            exit 0
+          fi
+
           KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
           KEYCHAIN_PASSWORD=$(uuidgen)
 
