@@ -8,46 +8,9 @@
 
 With a beautiful, modern interface featuring native macOS design patterns, vibrant HSL gradients, and smooth tab transitions, it helps you track your developer productivity, usage metrics, token quotas, and estimated API costs.
 
----
-
-## 📸 Interface Preview
-
-````carousel
-### 📊 Stats Overview
-The main dashboard displays your daily, weekly, and total query counts, active model status, and remaining quota/rate limits with live-updating progress gauges.
-
-![Stats View](assets/stats.png)
-
-<!-- slide -->
-
-### 💵 Cost Tracking
-Real-time cost estimations based on standard pricing templates. Tracks your spending patterns and details the rates per million tokens/queries for active models.
-
-![Cost View](assets/cost.png)
-
-<!-- slide -->
-
-### 📁 Workspaces Breakdown
-Monitors active projects and directory contexts. Visualizes query distribution per workspace and shows relative time since last activity.
-
-![Workspaces View](assets/workspaces.png)
-
-<!-- slide -->
-
-### 🕒 Query History
-A searchable, chronological list of all recent queries compiled through the Antigravity CLI, tagged by workspace and timestamp.
-
-![History View](assets/history.png)
-
-<!-- slide -->
-
-### ⚙️ Customize Settings
-Toggle menu bar display modes (Icon, Quotas, Queries, or combinations), configure CLI data path directories, and handle automatic application updates.
-
-![Settings View](assets/settings.png)
-````
-
-*(On GitHub, see the individual screenshots in the [assets/](assets/) directory.)*
+<p align="center">
+  <img src="assets/preview.png" width="330" alt="Antigravity Usage Stats Preview">
+</p>
 
 ---
 
