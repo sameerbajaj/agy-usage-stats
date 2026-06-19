@@ -79,11 +79,20 @@ public enum AgyStatsService {
             
             var queries = queriesWithModel.sorted(by: { $0.timestamp > $1.timestamp })
             
+            // Count queries per conversation in history to partition cost & token stats evenly
+            var conversationQueryCounts: [String: Int] = [:]
+            for q in queries {
+                if let cid = q.conversationId {
+                    conversationQueryCounts[cid, default: 0] += 1
+                }
+            }
+            
             // Load DB metadata for recent queries (e.g. today's queries or recent 100)
             let recentQueriesWithMeta = queries.prefix(100).map { q -> QueryEntry in
                 var newQ = q
                 if let conversationId = q.conversationId {
-                    newQ.conversationMeta = getConversationDbMeta(conversationId: conversationId, cliDir: expandedDir)
+                    let countInConv = conversationQueryCounts[conversationId] ?? 1
+                    newQ.conversationMeta = getConversationDbMeta(conversationId: conversationId, cliDir: expandedDir, totalQueriesInConversation: countInConv)
                 }
                 return newQ
             }
@@ -265,7 +274,7 @@ public enum AgyStatsService {
         }.sorted { $0.count > $1.count }
     }
     
-    private static func getConversationDbMeta(conversationId: String, cliDir: String) -> ConversationDbMeta? {
+    private static func getConversationDbMeta(conversationId: String, cliDir: String, totalQueriesInConversation: Int) -> ConversationDbMeta? {
         let dbPath = (cliDir as NSString).appendingPathComponent("conversations/\(conversationId).db")
         
         var db: OpaquePointer?
@@ -290,7 +299,11 @@ public enum AgyStatsService {
         }
         sqlite3_finalize(statement)
         
-        return ConversationDbMeta(llmCalls: count, totalOutputBytes: totalSize)
+        let divisor = max(1, totalQueriesInConversation)
+        let distributedCalls = max(1, Int(ceil(Double(count) / Double(divisor))))
+        let distributedBytes = totalSize / divisor
+        
+        return ConversationDbMeta(llmCalls: distributedCalls, totalOutputBytes: distributedBytes)
     }
     
     private static func queryToolStats(forDbPath dbPath: String) -> [String: Int] {
