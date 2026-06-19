@@ -42,8 +42,51 @@ public enum AgyStatsService {
             print("AgyStatsService: Loaded settings: model=\(settings.model ?? "nil")")
             
             // Load History Lines
-            let (queries, workspaces, lastQuery) = loadHistory(at: historyPath)
-            print("AgyStatsService: Loaded history: queries count = \(queries.count), workspaces count = \(workspaces.count)")
+            var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
+            print("AgyStatsService: Loaded history: queries count = \(loadedQueries.count), workspaces count = \(workspaces.count)")
+            
+            // Reconstruct model changes chronologically
+            let knownModelNames = [
+                "Gemini 3.5 Flash (Low)",
+                "Gemini 3.5 Flash (Medium)",
+                "Gemini 3.5 Flash (High)",
+                "Gemini 3.1 Pro (Low)",
+                "Gemini 3.1 Pro (High)",
+                "Claude Sonnet 4.6 (Thinking)",
+                "Claude Opus 4.6 (Thinking)"
+            ]
+            
+            var currentModelName = settings.model ?? "Gemini 3.5 Flash (High)"
+            let sortedQueries = loadedQueries.sorted(by: { $0.timestamp < $1.timestamp })
+            var queriesWithModel: [QueryEntry] = []
+            
+            for q in sortedQueries {
+                let text = q.display
+                var matchedModel: String? = nil
+                for name in knownModelNames {
+                    let cleanedName = name.replacingOccurrences(of: " (Thinking)", with: "").replacingOccurrences(of: " (Low)", with: "").replacingOccurrences(of: " (Medium)", with: "").replacingOccurrences(of: " (High)", with: "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if text.lowercased().contains(cleanedName) && (text.contains("(current)") || q.type == "slash_command") {
+                        matchedModel = name
+                    }
+                }
+                if let newModel = matchedModel {
+                    currentModelName = newModel
+                }
+                var qCopy = q
+                qCopy.modelName = currentModelName
+                queriesWithModel.append(qCopy)
+            }
+            
+            var queries = queriesWithModel.sorted(by: { $0.timestamp > $1.timestamp })
+            
+            // Load DB metadata for recent queries (e.g. today's queries or recent 100)
+            let recentQueriesWithMeta = queries.prefix(100).map { q -> QueryEntry in
+                var newQ = q
+                if let conversationId = q.conversationId {
+                    newQ.conversationMeta = getConversationDbMeta(conversationId: conversationId, cliDir: expandedDir)
+                }
+                return newQ
+            }
             
             // Count queries today and this week
             let now = Date()
@@ -77,10 +120,45 @@ public enum AgyStatsService {
                 print("AgyStatsService: Fetched quota: NONE")
             }
             
-            // Model distribution
+            // Model distribution and cost calculations
             var modelDist: [String: Int] = [:]
-            if let activeModel = settings.model {
-                modelDist[activeModel] = queries.count
+            var todayCost = 0.0
+            var weekCost = 0.0
+            var totalCost = 0.0
+            
+            for q in queries {
+                if let modelName = q.modelName {
+                    modelDist[modelName, default: 0] += 1
+                }
+                
+                // Find model cost info
+                let name = q.modelName ?? settings.model ?? ""
+                let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let model = knownModels.first(where: {
+                    let mName = $0.name.lowercased()
+                    return cleaned.contains(mName) || mName.contains(cleaned)
+                }) ?? knownModels[2] // default Gemini 3.5 Flash (High)
+                
+                let cost: Double
+                if let meta = q.conversationMeta {
+                    let (_, _, c) = model.estimateTokensAndCost(for: q)
+                    cost = c
+                } else {
+                    let promptLen = q.display.count / 4
+                    let inputTokens = promptLen + 5000
+                    let outputTokens = Int(model.tier.outputTokens)
+                    let inputCost = (Double(inputTokens) / 1_000_000.0) * model.inputPricePerMillion
+                    let outputCost = (Double(outputTokens) / 1_000_000.0) * model.outputPricePerMillion
+                    cost = inputCost + outputCost
+                }
+                
+                totalCost += cost
+                if q.timestamp >= startOfToday {
+                    todayCost += cost
+                }
+                if q.timestamp >= sevenDaysAgo {
+                    weekCost += cost
+                }
             }
             
             let stats = AgyUsageStats(
@@ -90,10 +168,13 @@ public enum AgyStatsService {
                 lastQueryAt: lastQuery,
                 workspaces: workspaces,
                 modelDistribution: modelDist,
-                recentQueries: Array(queries.prefix(100)), // Limit to 100 recent
+                recentQueries: Array(recentQueriesWithMeta),
                 toolStats: toolStats,
                 totalToolCalls: totalToolCalls,
-                quotaInfo: quotaInfo
+                quotaInfo: quotaInfo,
+                totalCostEstimate: totalCost,
+                weeklyCostEstimate: weekCost,
+                todayCostEstimate: todayCost
             )
             
             return (stats, settings)
@@ -182,6 +263,34 @@ public enum AgyStatsService {
         return aggregatedStats.map { toolName, count in
             ToolStat(toolName: toolName, count: count)
         }.sorted { $0.count > $1.count }
+    }
+    
+    private static func getConversationDbMeta(conversationId: String, cliDir: String) -> ConversationDbMeta? {
+        let dbPath = (cliDir as NSString).appendingPathComponent("conversations/\(conversationId).db")
+        
+        var db: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
+        guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        
+        var statement: OpaquePointer?
+        let query = "SELECT count(*), sum(size) FROM gen_metadata"
+        
+        var count = 0
+        var totalSize = 0
+        
+        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
+            if sqlite3_step(statement) == SQLITE_ROW {
+                count = Int(sqlite3_column_int(statement, 0))
+                totalSize = Int(sqlite3_column_int(statement, 1))
+            }
+        }
+        sqlite3_finalize(statement)
+        
+        return ConversationDbMeta(llmCalls: count, totalOutputBytes: totalSize)
     }
     
     private static func queryToolStats(forDbPath dbPath: String) -> [String: Int] {

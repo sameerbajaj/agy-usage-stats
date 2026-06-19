@@ -8,6 +8,11 @@
 import Foundation
 import SwiftUI
 
+public struct ConversationDbMeta: Codable, Hashable, Sendable {
+    public let llmCalls: Int
+    public let totalOutputBytes: Int
+}
+
 public struct QueryEntry: Identifiable, Codable, Hashable {
     public var id: String { "\(timestamp.timeIntervalSince1970)-\(display.prefix(30))" }
     public let display: String
@@ -15,6 +20,8 @@ public struct QueryEntry: Identifiable, Codable, Hashable {
     public let workspace: String
     public let conversationId: String?
     public let type: String?
+    public var conversationMeta: ConversationDbMeta? = nil
+    public var modelName: String? = nil
 
     public var cleanWorkspaceName: String {
         let url = URL(fileURLWithPath: workspace)
@@ -123,6 +130,9 @@ public struct AgyUsageStats: Codable {
     public var toolStats: [ToolStat]
     public var totalToolCalls: Int
     public var quotaInfo: AgyQuotaInfo?
+    public var totalCostEstimate: Double
+    public var weeklyCostEstimate: Double
+    public var todayCostEstimate: Double
     
     public static let empty = AgyUsageStats(
         totalQueries: 0,
@@ -134,7 +144,10 @@ public struct AgyUsageStats: Codable {
         recentQueries: [],
         toolStats: [],
         totalToolCalls: 0,
-        quotaInfo: nil
+        quotaInfo: nil,
+        totalCostEstimate: 0.0,
+        weeklyCostEstimate: 0.0,
+        todayCostEstimate: 0.0
     )
 }
 
@@ -151,3 +164,79 @@ public struct AgySettings: Codable {
         trustedWorkspaces: []
     )
 }
+
+public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
+    public var id: String { name }
+    public let name: String
+    public let inputPricePerMillion: Double
+    public let outputPricePerMillion: Double
+    public let tier: ModelTier
+    
+    public enum ModelTier: String, Codable, Sendable {
+        case low, medium, high, thinking
+        
+        public var name: String {
+            switch self {
+            case .low: return "Low"
+            case .medium: return "Medium"
+            case .high: return "High"
+            case .thinking: return "Thinking"
+            }
+        }
+        
+        public var inputTokens: Double {
+            switch self {
+            case .low: return 15_000
+            case .medium: return 45_000
+            case .high: return 120_000
+            case .thinking: return 80_000
+            }
+        }
+        
+        public var outputTokens: Double {
+            switch self {
+            case .low: return 1_500
+            case .medium: return 3_000
+            case .high: return 6_000
+            case .thinking: return 12_000
+            }
+        }
+    }
+    
+    public var costPerQuery: Double {
+        let inputCost = (tier.inputTokens / 1_000_000.0) * inputPricePerMillion
+        let outputCost = (tier.outputTokens / 1_000_000.0) * outputPricePerMillion
+        return inputCost + outputCost
+    }
+
+    public func estimateTokensAndCost(for query: QueryEntry) -> (inputTokens: Int, outputTokens: Int, cost: Double) {
+        let calls = max(1, query.conversationMeta?.llmCalls ?? 1)
+        let outBytes = query.conversationMeta?.totalOutputBytes ?? 0
+        
+        let promptLen = query.display.count / 4
+        let contextPerCall = tier.inputTokens
+        let inputTokens = promptLen + (calls - 1) * Int(contextPerCall) + 5000
+        
+        let outputTokens: Int
+        if outBytes > 0 {
+            outputTokens = max(50, outBytes / 4)
+        } else {
+            outputTokens = Int(tier.outputTokens) * calls
+        }
+        
+        let inputCost = (Double(inputTokens) / 1_000_000.0) * inputPricePerMillion
+        let outputCost = (Double(outputTokens) / 1_000_000.0) * outputPricePerMillion
+        
+        return (inputTokens, outputTokens, inputCost + outputCost)
+    }
+}
+
+public let knownModels = [
+    ModelCostInfo(name: "Gemini 3.5 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .low),
+    ModelCostInfo(name: "Gemini 3.5 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .medium),
+    ModelCostInfo(name: "Gemini 3.5 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .high),
+    ModelCostInfo(name: "Gemini 3.1 Pro (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, tier: .low),
+    ModelCostInfo(name: "Gemini 3.1 Pro (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, tier: .high),
+    ModelCostInfo(name: "Claude Sonnet 4.6 (Thinking)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, tier: .thinking),
+    ModelCostInfo(name: "Claude Opus 4.6 (Thinking)", inputPricePerMillion: 5.00, outputPricePerMillion: 25.00, tier: .thinking)
+]

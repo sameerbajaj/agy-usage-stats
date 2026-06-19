@@ -100,13 +100,24 @@ struct QuotaBucketRow: View {
                 .frame(height: 3)
             }
             
-            if let resetDesc = bucket.resetDescription {
-                Text(resetDesc.lowercased())
-                    .font(.system(size: 7.5))
-                    .foregroundStyle(.secondary)
+            if let resetDesc = bucket.resetDescription, let cleaned = cleanResetDescription(resetDesc) {
+                Text(cleaned)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.85))
             }
         }
         .padding(.vertical, 2)
+    }
+    
+    private func cleanResetDescription(_ desc: String) -> String? {
+        let lower = desc.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        for key in ["fully refresh in ", "refreshes in ", "refresh in "] {
+            if let range = lower.range(of: key) {
+                let timePart = String(lower[range.upperBound...])
+                return "refreshes in " + timePart
+            }
+        }
+        return lower
     }
     
     private func quotaTextColor(for group: String, fraction: Double) -> Color {
