@@ -7,20 +7,6 @@
 
 import SwiftUI
 
-private extension Color {
-    static func gemini(isDark: Bool) -> Color {
-        isDark
-            ? Color(red: 0.75, green: 0.6, blue: 1.0)      // Pastel Lavender
-            : Color(red: 0.45, green: 0.25, blue: 0.85)    // Deep Indigo
-    }
-    
-    static func claude(isDark: Bool) -> Color {
-        isDark
-            ? Color(red: 1.0, green: 0.65, blue: 0.35)     // Light Pastel Orange
-            : Color(red: 0.85, green: 0.35, blue: 0.05)    // Deep Warm Orange
-    }
-}
-
 // MARK: - Telemetry Badge
 struct TelemetryBadge: View {
     @State private var pulse = false
