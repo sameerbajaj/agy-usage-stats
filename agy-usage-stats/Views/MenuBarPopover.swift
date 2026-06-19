@@ -95,25 +95,19 @@ public struct MenuBarPopover: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 // Logo & Title
-                HStack(spacing: 6) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color(red: 0.65, green: 0.45, blue: 1.0), Color(red: 0.28, green: 0.68, blue: 1.0)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                HStack(spacing: 4) {
+                    Text("AGY://")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
                     
-                    Text("antigravity")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                    Text("stats_readout")
+                        .font(.system(size: 11.5, weight: .black, design: .monospaced))
                         .foregroundStyle(.primary)
                     
                     Circle()
                         .fill(isConnected ? Color.green : Color.red)
-                        .frame(width: 5, height: 5)
-                        .opacity(0.85)
+                        .frame(width: 4, height: 4)
+                        .opacity(0.8)
                 }
                 
                 Spacer()
@@ -130,9 +124,9 @@ public struct MenuBarPopover: View {
                             }
                         } label: {
                             Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(.secondary)
-                                .frame(width: 20, height: 20)
+                                .frame(width: 18, height: 18)
                         }
                         .buttonStyle(.plain)
                     }
@@ -161,27 +155,31 @@ public struct MenuBarPopover: View {
                         selectedTab = tab
                     }
                 } label: {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 3) {
                         Image(systemName: tab.icon)
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                         Text(tab.rawValue.lowercased())
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
                     }
                     .foregroundStyle(
                         selectedTab == tab
                             ? Color.primary
-                            : Color.secondary
+                            : Color.secondary.opacity(0.8)
                     )
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 5)
                     .background(
                         ZStack {
                             if selectedTab == tab {
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.primary.opacity(0.08))
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.primary.opacity(0.06))
                                     .matchedGeometryEffect(id: "activeTabBackground", in: namespace)
                             }
                         }
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(selectedTab == tab ? Color.primary.opacity(0.12) : Color.clear, lineWidth: 0.5)
                     )
                     .contentShape(Rectangle())
                 }
@@ -190,7 +188,7 @@ public struct MenuBarPopover: View {
         }
         .padding(2)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 6)
                 .fill(Color.primary.opacity(0.03))
         )
     }
@@ -200,15 +198,18 @@ public struct MenuBarPopover: View {
     private var footer: some View {
         HStack {
             HStack(spacing: 4) {
-                Image(systemName: "clock")
-                    .font(.system(size: 8))
+                Text("SYS.STATUS:")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                
                 if let last = viewModel.stats.lastQueryAt {
-                    Text(formattedTime(last))
+                    Text(formattedTime(last).uppercased())
+                        .font(.system(size: 7.5, weight: .medium, design: .monospaced))
                 } else {
-                    Text("idle")
+                    Text("IDLE")
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
                 }
             }
-            .font(.system(size: 8.5, weight: .medium, design: .rounded))
             .foregroundStyle(.secondary)
             
             Spacer()
@@ -216,17 +217,21 @@ public struct MenuBarPopover: View {
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Color.red.opacity(0.6))
-                    .padding(4)
+                Text("SHUTDOWN")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.red.opacity(0.7))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .background(
-                        Circle()
-                            .fill(Color.red.opacity(0.1))
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.red.opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color.red.opacity(0.15), lineWidth: 0.5)
                     )
             }
             .buttonStyle(.plain)
-            .help("Quit App")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
