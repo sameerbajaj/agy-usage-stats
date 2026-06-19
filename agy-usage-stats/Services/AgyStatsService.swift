@@ -87,14 +87,20 @@ public enum AgyStatsService {
                 }
             }
             
-            // Load DB metadata for recent queries (e.g. today's queries or recent 100)
-            let recentQueriesWithMeta = queries.prefix(100).map { q -> QueryEntry in
+            // Load DB metadata and exact model names from SQLite for the first 150 queries
+            var queriesWithMeta: [QueryEntry] = []
+            for (index, q) in queries.enumerated() {
                 var newQ = q
-                if let conversationId = q.conversationId {
+                if index < 150, let conversationId = q.conversationId {
                     let countInConv = conversationQueryCounts[conversationId] ?? 1
                     newQ.conversationMeta = getConversationDbMeta(conversationId: conversationId, cliDir: expandedDir, totalQueriesInConversation: countInConv)
+                    
+                    // Extract the actual model name used from the DB if available
+                    if let dbModel = getModelNameFromDb(conversationId: conversationId, cliDir: expandedDir) {
+                        newQ.modelName = dbModel
+                    }
                 }
-                return newQ
+                queriesWithMeta.append(newQ)
             }
             
             // Count queries today and this week
@@ -106,7 +112,7 @@ public enum AgyStatsService {
             let startOfToday = calendar.startOfDay(for: now)
             let sevenDaysAgo = calendar.date(byAdding: .day, value: -7, to: now) ?? now
             
-            for q in queries {
+            for q in queriesWithMeta {
                 if q.timestamp >= startOfToday {
                     queriesToday += 1
                 }
@@ -135,7 +141,7 @@ public enum AgyStatsService {
             var weekCost = 0.0
             var totalCost = 0.0
             
-            for q in queries {
+            for q in queriesWithMeta {
                 if let modelName = q.modelName {
                     modelDist[modelName, default: 0] += 1
                 }
@@ -148,18 +154,7 @@ public enum AgyStatsService {
                     return cleaned.contains(mName) || mName.contains(cleaned)
                 }) ?? knownModels[2] // default Gemini 3.5 Flash (High)
                 
-                let cost: Double
-                if let meta = q.conversationMeta {
-                    let (_, _, c) = model.estimateTokensAndCost(for: q)
-                    cost = c
-                } else {
-                    let promptLen = q.display.count / 4
-                    let inputTokens = promptLen + 5000
-                    let outputTokens = Int(model.tier.outputTokens)
-                    let inputCost = (Double(inputTokens) / 1_000_000.0) * model.inputPricePerMillion
-                    let outputCost = (Double(outputTokens) / 1_000_000.0) * model.outputPricePerMillion
-                    cost = inputCost + outputCost
-                }
+                let (_, _, cost) = model.estimateTokensAndCost(for: q)
                 
                 totalCost += cost
                 if q.timestamp >= startOfToday {
@@ -177,7 +172,7 @@ public enum AgyStatsService {
                 lastQueryAt: lastQuery,
                 workspaces: workspaces,
                 modelDistribution: modelDist,
-                recentQueries: Array(recentQueriesWithMeta),
+                recentQueries: Array(queriesWithMeta.prefix(100)),
                 toolStats: toolStats,
                 totalToolCalls: totalToolCalls,
                 quotaInfo: quotaInfo,
@@ -304,6 +299,51 @@ public enum AgyStatsService {
         let distributedBytes = totalSize / divisor
         
         return ConversationDbMeta(llmCalls: distributedCalls, totalOutputBytes: distributedBytes)
+    }
+    
+    private static func getModelNameFromDb(conversationId: String, cliDir: String) -> String? {
+        let dbPath = (cliDir as NSString).appendingPathComponent("conversations/\(conversationId).db")
+        var db: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
+        guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        
+        var statement: OpaquePointer?
+        let query = "SELECT data FROM gen_metadata ORDER BY idx DESC LIMIT 1"
+        
+        var foundModel: String? = nil
+        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
+            if sqlite3_step(statement) == SQLITE_ROW {
+                if let blob = sqlite3_column_blob(statement, 0) {
+                    let blobSize = sqlite3_column_bytes(statement, 0)
+                    if blobSize > 0 {
+                        let data = Data(bytes: blob, count: Int(blobSize))
+                        
+                        let knownModelNames = [
+                            "Gemini 3.5 Flash (Low)",
+                            "Gemini 3.5 Flash (Medium)",
+                            "Gemini 3.5 Flash (High)",
+                            "Gemini 3.1 Pro (Low)",
+                            "Gemini 3.1 Pro (High)",
+                            "Claude Sonnet 4.6 (Thinking)",
+                            "Claude Opus 4.6 (Thinking)"
+                        ]
+                        
+                        for name in knownModelNames {
+                            if data.range(of: Data(name.utf8)) != nil {
+                                foundModel = name
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        sqlite3_finalize(statement)
+        return foundModel
     }
     
     private static func queryToolStats(forDbPath dbPath: String) -> [String: Int] {

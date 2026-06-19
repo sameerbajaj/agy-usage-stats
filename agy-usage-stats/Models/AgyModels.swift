@@ -214,7 +214,7 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
         let outBytes = query.conversationMeta?.totalOutputBytes ?? 0
         
         let promptLen = query.display.count / 4
-        let contextPerCall = tier.inputTokens
+        let contextPerCall = min(12000.0, tier.inputTokens)
         let inputTokens = promptLen + (calls - 1) * Int(contextPerCall) + 5000
         
         let outputTokens: Int
