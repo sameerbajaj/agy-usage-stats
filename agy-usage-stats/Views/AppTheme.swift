@@ -9,15 +9,15 @@ import SwiftUI
 
 // MARK: - AppTheme
 
-enum AppTheme: String, Codable, CaseIterable, Identifiable {
+public enum AppTheme: String, Codable, CaseIterable, Identifiable {
     case midnight
     case sandstone
     case arctic
     case dusk
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .midnight: return "Midnight"
         case .sandstone: return "Sandstone"
@@ -26,7 +26,7 @@ enum AppTheme: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    var iconName: String {
+    public var iconName: String {
         switch self {
         case .midnight: return "moon.stars.fill"
         case .sandstone: return "sun.dust.fill"
@@ -38,35 +38,35 @@ enum AppTheme: String, Codable, CaseIterable, Identifiable {
 
 // MARK: - ThemeColors
 
-struct ThemeColors {
-    let cardFill: Color
-    let cardStroke: Color
-    let cardFillHovered: Color
-    let cardStrokeHovered: Color
+public struct ThemeColors {
+    public let cardFill: Color
+    public let cardStroke: Color
+    public let cardFillHovered: Color
+    public let cardStrokeHovered: Color
 
-    let surfacePrimary: Color
-    let surfaceSecondary: Color
+    public let surfacePrimary: Color
+    public let surfaceSecondary: Color
 
-    let textPrimary: Color
-    let textSecondary: Color
-    let textTertiary: Color
+    public let textPrimary: Color
+    public let textSecondary: Color
+    public let textTertiary: Color
 
-    let divider: Color
-    let searchBackground: Color
-    let searchBorderFocused: Color
+    public let divider: Color
+    public let searchBackground: Color
+    public let searchBorderFocused: Color
 
-    let badgeBackground: Color
-    let progressTrack: Color
+    public let badgeBackground: Color
+    public let progressTrack: Color
 
-    let geminiAccent: Color
-    let claudeAccent: Color
-    let costGreen: Color
-    let dangerRed: Color
-    let linkBlue: Color
+    public let geminiAccent: Color
+    public let claudeAccent: Color
+    public let costGreen: Color
+    public let dangerRed: Color
+    public let linkBlue: Color
 
     // MARK: - Factory
 
-    static func colors(for theme: AppTheme, colorScheme: ColorScheme) -> ThemeColors {
+    public static func colors(for theme: AppTheme, colorScheme: ColorScheme) -> ThemeColors {
         switch theme {
         case .midnight:
             return midnightColors()
