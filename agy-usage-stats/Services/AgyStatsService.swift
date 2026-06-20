@@ -45,39 +45,13 @@ public enum AgyStatsService {
             var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
             print("AgyStatsService: Loaded history: queries count = \(loadedQueries.count), workspaces count = \(workspaces.count)")
             
-            // Reconstruct model changes chronologically
-            let knownModelNames = [
-                "Gemini 3.5 Flash (Low)",
-                "Gemini 3.5 Flash (Medium)",
-                "Gemini 3.5 Flash (High)",
-                "Gemini 3.1 Pro (Low)",
-                "Gemini 3.1 Pro (High)",
-                "Claude Sonnet 4.6 (Thinking)",
-                "Claude Opus 4.6 (Thinking)"
-            ]
-            
-            var currentModelName = settings.model ?? "Gemini 3.5 Flash (High)"
-            let sortedQueries = loadedQueries.sorted(by: { $0.timestamp < $1.timestamp })
-            var queriesWithModel: [QueryEntry] = []
-            
-            for q in sortedQueries {
-                let text = q.display
-                var matchedModel: String? = nil
-                for name in knownModelNames {
-                    let cleanedName = name.replacingOccurrences(of: " (Thinking)", with: "").replacingOccurrences(of: " (Low)", with: "").replacingOccurrences(of: " (Medium)", with: "").replacingOccurrences(of: " (High)", with: "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    if text.lowercased().contains(cleanedName) && (text.contains("(current)") || q.type == "slash_command") {
-                        matchedModel = name
-                    }
-                }
-                if let newModel = matchedModel {
-                    currentModelName = newModel
-                }
-                var qCopy = q
-                qCopy.modelName = currentModelName
-                queriesWithModel.append(qCopy)
+            // Default to settings.model or Gemini 3.5 Flash (High)
+            let defaultModel = settings.model ?? "Gemini 3.5 Flash (High)"
+            let queries = loadedQueries.map { q -> QueryEntry in
+                var copy = q
+                copy.modelName = defaultModel
+                return copy
             }
-            
-            var queries = queriesWithModel.sorted(by: { $0.timestamp > $1.timestamp })
             
             // Count queries per conversation in history to partition cost & token stats evenly
             var conversationQueryCounts: [String: Int] = [:]
