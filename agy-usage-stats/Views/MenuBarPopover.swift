@@ -32,6 +32,8 @@ public struct MenuBarPopover: View {
     @Bindable public var viewModel: AgyStatsViewModel
     @State private var selectedTab: PopoverTab = .stats
     @Namespace private var namespace
+    @Environment(\.colorScheme) var colorScheme
+    private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     
     public init(viewModel: AgyStatsViewModel) {
         self.viewModel = viewModel
@@ -45,11 +47,11 @@ public struct MenuBarPopover: View {
                 updateBanner(update)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.primary.opacity(0.02))
+                    .background(theme.surfacePrimary)
                     .overlay(
                         Rectangle()
                             .frame(height: 1)
-                            .foregroundStyle(Color.primary.opacity(0.05)),
+                            .foregroundStyle(theme.divider),
                         alignment: .bottom
                     )
             }
@@ -172,14 +174,14 @@ public struct MenuBarPopover: View {
                         ZStack {
                             if selectedTab == tab {
                                 RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.primary.opacity(0.06))
+                                    .fill(theme.cardFill)
                                     .matchedGeometryEffect(id: "activeTabBackground", in: namespace)
                             }
                         }
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 4)
-                            .stroke(selectedTab == tab ? Color.primary.opacity(0.12) : Color.clear, lineWidth: 0.5)
+                            .stroke(selectedTab == tab ? theme.cardStroke : Color.clear, lineWidth: 0.5)
                     )
                     .contentShape(Rectangle())
                 }
@@ -189,7 +191,7 @@ public struct MenuBarPopover: View {
         .padding(2)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.03))
+                .fill(theme.surfaceSecondary)
         )
     }
     
@@ -219,23 +221,23 @@ public struct MenuBarPopover: View {
             } label: {
                 Text("SHUTDOWN")
                     .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.red.opacity(0.7))
+                    .foregroundStyle(theme.dangerRed)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.red.opacity(0.06))
+                            .fill(theme.dangerRed.opacity(0.08))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 3)
-                            .stroke(Color.red.opacity(0.15), lineWidth: 0.5)
+                            .stroke(theme.dangerRed.opacity(0.18), lineWidth: 0.5)
                     )
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.01))
+        .background(theme.surfacePrimary)
     }
     
     private func formattedTime(_ date: Date) -> String {

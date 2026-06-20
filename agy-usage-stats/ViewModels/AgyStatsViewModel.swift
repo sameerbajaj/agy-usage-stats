@@ -96,6 +96,12 @@ public final class AgyStatsViewModel {
         }
     }
     
+    public var selectedTheme: AppTheme {
+        didSet {
+            UserDefaults.standard.set(selectedTheme.rawValue, forKey: "agy_selectedTheme")
+        }
+    }
+    
     // UI States
     public var stats: AgyUsageStats = .empty
     public var settings: AgySettings = .default
@@ -147,6 +153,13 @@ public final class AgyStatsViewModel {
         }
         
         self.showWeeklyLimitAndReset = UserDefaults.standard.bool(forKey: "agy_showWeeklyLimitAndReset")
+        
+        let savedTheme = UserDefaults.standard.string(forKey: "agy_selectedTheme")
+        if let savedTheme, let theme = AppTheme(rawValue: savedTheme) {
+            self.selectedTheme = theme
+        } else {
+            self.selectedTheme = .midnight
+        }
     }
 
     private func getActiveGroup() -> AgyQuotaGroup? {

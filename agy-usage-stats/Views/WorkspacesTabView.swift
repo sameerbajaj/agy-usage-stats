@@ -8,6 +8,9 @@ import AppKit
 
 struct WorkspacesTabView: View {
     let viewModel: AgyStatsViewModel
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -40,7 +43,7 @@ struct WorkspacesTabView: View {
                 ScrollView {
                     VStack(spacing: 6) {
                         ForEach(viewModel.stats.workspaces) { ws in
-                            WorkspaceRow(ws: ws) {
+                            WorkspaceRow(ws: ws, theme: theme) {
                                 revealInFinder(path: ws.path)
                              }
                         }
@@ -59,6 +62,7 @@ struct WorkspacesTabView: View {
 
 struct WorkspaceRow: View {
     let ws: WorkspaceStats
+    let theme: ThemeColors
     let onReveal: () -> Void
     @State private var isHovered = false
     
@@ -92,7 +96,7 @@ struct WorkspaceRow: View {
                     .padding(.vertical, 2)
                     .background(
                         Capsule()
-                            .fill(Color.primary.opacity(0.06))
+                            .fill(theme.badgeBackground)
                     )
                 
                 if isHovered {
@@ -101,7 +105,7 @@ struct WorkspaceRow: View {
                     } label: {
                         Image(systemName: "arrow.up.right.circle.fill")
                             .font(.system(size: 12))
-                            .foregroundStyle(Color.blue.opacity(0.8))
+                            .foregroundStyle(theme.linkBlue)
                     }
                     .buttonStyle(.plain)
                     .transition(.opacity)
@@ -112,11 +116,11 @@ struct WorkspaceRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(isHovered ? 0.03 : 0.01))
+                .fill(isHovered ? theme.cardFillHovered : theme.cardFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.primary.opacity(isHovered ? 0.05 : 0.02), lineWidth: 0.5)
+                .stroke(isHovered ? theme.cardStrokeHovered : theme.cardStroke, lineWidth: 0.5)
         )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {

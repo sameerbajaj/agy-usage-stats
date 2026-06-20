@@ -45,6 +45,41 @@ extension View {
     }
 }
 
+struct ThemedCardModifier: ViewModifier {
+    var isHovered: Bool
+    var accentColor: Color?
+    var theme: ThemeColors
+    
+    init(isHovered: Bool = false, accentColor: Color? = nil, theme: ThemeColors) {
+        self.isHovered = isHovered
+        self.accentColor = accentColor
+        self.theme = theme
+    }
+    
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovered ? theme.cardFillHovered : theme.cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(
+                        isHovered && accentColor != nil
+                            ? accentColor!.opacity(0.35)
+                            : (isHovered ? theme.cardStrokeHovered : theme.cardStroke),
+                        lineWidth: 0.75
+                    )
+            )
+    }
+}
+
+extension View {
+    func themedCardStyle(theme: ThemeColors, isHovered: Bool = false, accentColor: Color? = nil) -> some View {
+        modifier(ThemedCardModifier(isHovered: isHovered, accentColor: accentColor, theme: theme))
+    }
+}
+
 public extension Color {
     static func gemini(isDark: Bool) -> Color {
         isDark

@@ -185,8 +185,9 @@ struct StatsTabView: View {
     @State private var toolsCardHovered = false
     
     private var isDark: Bool { colorScheme == .dark }
-    private var geminiColor: Color { Color.gemini(isDark: isDark) }
-    private var claudeColor: Color { Color.claude(isDark: isDark) }
+    private var geminiColor: Color { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme).geminiAccent }
+    private var claudeColor: Color { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme).claudeAccent }
+    private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     
     var body: some View {
         ScrollView {
@@ -237,12 +238,12 @@ struct StatsTabView: View {
             metricItem(title: "tools", value: "\(viewModel.stats.totalToolCalls)", color: Color(red: 1.0, green: 0.45, blue: 0.45))
         }
         .padding(.vertical, 8)
-        .premiumCardStyle()
+        .themedCardStyle(theme: theme)
     }
     
     private var metricDivider: some View {
         Rectangle()
-            .fill(Color.primary.opacity(0.05))
+            .fill(theme.divider)
             .frame(width: 0.75)
             .frame(maxHeight: 18)
     }
@@ -297,7 +298,7 @@ struct StatsTabView: View {
                             }
                         }
                         .padding(10)
-                        .premiumCardStyle(isHovered: isHovered, accentColor: cardAccent)
+                        .themedCardStyle(theme: theme, isHovered: isHovered, accentColor: cardAccent)
                         .onHover { hovering in
                             quotaCardHovered[group.displayName] = hovering
                         }
@@ -323,7 +324,7 @@ struct StatsTabView: View {
                     .padding(.vertical, 16)
                     Spacer()
                 }
-                .premiumCardStyle()
+                .themedCardStyle(theme: theme)
             }
         }
     }
@@ -344,7 +345,7 @@ struct StatsTabView: View {
                         .padding(.vertical, 16)
                     Spacer()
                 }
-                .premiumCardStyle()
+                .themedCardStyle(theme: theme)
             } else {
                 VStack(spacing: 4) {
                     let maxCount = Double(viewModel.stats.toolStats.first?.count ?? 1)
@@ -353,7 +354,7 @@ struct StatsTabView: View {
                     }
                 }
                 .padding(8)
-                .premiumCardStyle(isHovered: toolsCardHovered, accentColor: Color(red: 1.0, green: 0.45, blue: 0.45))
+                .themedCardStyle(theme: theme, isHovered: toolsCardHovered, accentColor: Color(red: 1.0, green: 0.45, blue: 0.45))
                 .onHover { hovering in
                     toolsCardHovered = hovering
                 }

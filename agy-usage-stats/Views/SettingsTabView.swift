@@ -8,16 +8,21 @@ import AppKit
 
 struct SettingsTabView: View {
     @Bindable var viewModel: AgyStatsViewModel
+    @Environment(\.colorScheme) var colorScheme
     @State private var isEditingDir = false
     @State private var tempDir = ""
     
     @State private var isHoveredMenu = false
     @State private var isHoveredPath = false
     @State private var isHoveredUpdates = false
+    @State private var isHoveredAppearance = false
     
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
+                // Section 0: Appearance
+                appearanceSection
+                
                 // Section 1: Menu Bar Settings
                 menuBarSection
                 
@@ -28,6 +33,66 @@ struct SettingsTabView: View {
                 updatesSection
             }
             .padding(12)
+        }
+    }
+    
+    // MARK: - Appearance Settings
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("appearance")
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+            
+            VStack(spacing: 8) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    ForEach(AppTheme.allCases) { theme in
+                        let themeColors = ThemeColors.colors(for: theme, colorScheme: colorScheme)
+                        let isSelected = viewModel.selectedTheme == theme
+                        
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                viewModel.selectedTheme = theme
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                HStack(spacing: 2) {
+                                    Circle().fill(themeColors.cardFill).frame(width: 8, height: 8)
+                                        .overlay(Circle().stroke(themeColors.cardStroke, lineWidth: 0.5))
+                                    Circle().fill(themeColors.geminiAccent).frame(width: 8, height: 8)
+                                    Circle().fill(themeColors.claudeAccent).frame(width: 8, height: 8)
+                                }
+                                
+                                Text(theme.displayName)
+                                    .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
+                                    .foregroundStyle(isSelected ? .primary : .secondary)
+                                
+                                Spacer()
+                                
+                                if isSelected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(isSelected ? Color.green.opacity(0.06) : Color.primary.opacity(0.02))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSelected ? Color.green.opacity(0.2) : Color.primary.opacity(0.04), lineWidth: 0.75)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(10)
+            .premiumCardStyle(isHovered: isHoveredAppearance)
+            .onHover { h in isHoveredAppearance = h }
         }
     }
     

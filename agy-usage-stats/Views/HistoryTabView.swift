@@ -8,6 +8,9 @@ import AppKit
 
 struct HistoryTabView: View {
     @Bindable var viewModel: AgyStatsViewModel
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     @State private var copiedQueryID: String? = nil
     @State private var searchIsFocused = false
     
@@ -28,7 +31,7 @@ struct HistoryTabView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(searchIsFocused ? .blue : Color.primary.opacity(0.3))
+                    .foregroundStyle(searchIsFocused ? theme.linkBlue : theme.textTertiary)
                     .animation(.easeInOut(duration: 0.15), value: searchIsFocused)
                 
                 TextField("search history...", text: $viewModel.searchQuery)
@@ -51,11 +54,11 @@ struct HistoryTabView: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(0.025))
+                    .fill(theme.searchBackground)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(searchIsFocused ? Color.blue.opacity(0.25) : Color.primary.opacity(0.04), lineWidth: 0.75)
+                    .stroke(searchIsFocused ? theme.searchBorderFocused : theme.cardStroke, lineWidth: 0.75)
             )
             .padding(.horizontal, 12)
             .padding(.top, 10)
@@ -88,7 +91,7 @@ struct HistoryTabView: View {
                 ScrollView {
                     VStack(spacing: 6) {
                         ForEach(filteredQueries) { query in
-                            HistoryRow(query: query, copiedQueryID: copiedQueryID) {
+                            HistoryRow(query: query, copiedQueryID: copiedQueryID, theme: theme) {
                                 copyToClipboard(text: query.display, id: query.id)
                             }
                         }
@@ -121,6 +124,7 @@ struct HistoryTabView: View {
 struct HistoryRow: View {
     let query: QueryEntry
     let copiedQueryID: String?
+    let theme: ThemeColors
     let onCopy: () -> Void
     @State private var isHovered = false
     
@@ -160,10 +164,10 @@ struct HistoryRow: View {
                 HStack(spacing: 4) {
                     Text(query.cleanWorkspaceName)
                         .font(.system(size: 7.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(.blue.opacity(0.8))
+                        .foregroundStyle(theme.linkBlue)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.blue.opacity(0.06)))
+                        .background(Capsule().fill(theme.linkBlue.opacity(0.08)))
                     
                     if let type = query.type {
                         Text(type.lowercased())
@@ -184,11 +188,11 @@ struct HistoryRow: View {
             .padding(8)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(isHovered ? 0.03 : 0.01))
+                    .fill(isHovered ? theme.cardFillHovered : theme.cardFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.primary.opacity(isHovered ? 0.05 : 0.02), lineWidth: 0.5)
+                    .stroke(isHovered ? theme.cardStrokeHovered : theme.cardStroke, lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)

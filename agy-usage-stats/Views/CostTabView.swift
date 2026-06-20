@@ -17,6 +17,7 @@ struct CostTabView: View {
     @State private var showQueryLogs = false
     
     private var isDark: Bool { colorScheme == .dark }
+    private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     
     struct ModelAnalysis: Identifiable {
         let id: String
@@ -258,7 +259,7 @@ struct CostTabView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 20)
-                            .premiumCardStyle()
+                            .themedCardStyle(theme: theme)
                         } else {
                             VStack(spacing: 4) {
                                 ForEach(todayQueries) { query in
@@ -266,7 +267,7 @@ struct CostTabView: View {
                                     let (inTokens, outTokens, cost) = modelInfo.estimateTokensAndCost(for: query)
                                     let calls = query.conversationMeta?.llmCalls ?? 1
                                     let isGemini = modelInfo.name.lowercased().contains("gemini")
-                                    let modelColor = isGemini ? Color.gemini(isDark: isDark) : Color.claude(isDark: isDark)
+                                    let modelColor = isGemini ? theme.geminiAccent : theme.claudeAccent
                                     
                                     VStack(alignment: .leading, spacing: 6) {
                                         HStack(alignment: .top) {
@@ -281,7 +282,7 @@ struct CostTabView: View {
                                             
                                             Text(String(format: "$%.3f", cost))
                                                 .font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit())
-                                                .foregroundStyle(Color.costGreen(isDark: isDark))
+                                                .foregroundStyle(theme.costGreen)
                                         }
                                         
                                         HStack(spacing: 4) {
@@ -299,10 +300,10 @@ struct CostTabView: View {
                                             if calls > 1 {
                                                 Text("\(calls) turns")
                                                     .font(.system(size: 8, weight: .semibold, design: .rounded))
-                                                    .foregroundStyle(.blue.opacity(0.8))
+                                                    .foregroundStyle(theme.linkBlue)
                                                     .padding(.horizontal, 4)
                                                     .padding(.vertical, 1)
-                                                    .background(Capsule().fill(Color.blue.opacity(0.06)))
+                                                    .background(Capsule().fill(theme.linkBlue.opacity(0.08)))
                                             }
                                             
                                             Spacer()
@@ -315,16 +316,16 @@ struct CostTabView: View {
                                     .padding(8)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .fill(isDark ? Color.primary.opacity(0.015) : Color.black.opacity(0.01))
+                                            .fill(theme.surfaceSecondary)
                                     )
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .stroke(isDark ? Color.primary.opacity(0.03) : Color.black.opacity(0.04), lineWidth: 0.5)
+                                            .stroke(theme.cardStroke, lineWidth: 0.5)
                                     )
                                 }
                             }
                             .padding(8)
-                            .premiumCardStyle()
+                            .themedCardStyle(theme: theme)
                         }
                     }
                 }
@@ -358,13 +359,13 @@ struct CostTabView: View {
                 costColumn(title: "total", cost: viewModel.stats.totalCostEstimate)
             }
             .padding(.vertical, 8)
-            .premiumCardStyle()
+            .themedCardStyle(theme: theme)
         }
     }
     
     private var metricDivider: some View {
         Rectangle()
-            .fill(Color.primary.opacity(0.05))
+            .fill(theme.divider)
             .frame(width: 0.75)
             .frame(maxHeight: 18)
     }
@@ -392,7 +393,7 @@ struct CostTabView: View {
             HStack {
                 Image(systemName: "chart.pie.fill")
                     .font(.system(size: 9))
-                    .foregroundStyle(Color.gemini(isDark: isDark))
+                    .foregroundStyle(theme.geminiAccent)
                 Text("today's cost & token analysis")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -419,7 +420,7 @@ struct CostTabView: View {
                     VStack(spacing: 8) {
                         ForEach(analysis) { model in
                             let isGemini = model.modelName.lowercased().contains("gemini")
-                            let modelColor = isGemini ? Color.gemini(isDark: isDark) : Color.claude(isDark: isDark)
+                            let modelColor = isGemini ? theme.geminiAccent : theme.claudeAccent
                             
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
@@ -438,7 +439,7 @@ struct CostTabView: View {
                                     
                                     Text(String(format: "$%.2f", model.totalCost))
                                         .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
-                                        .foregroundStyle(Color.costGreen(isDark: isDark))
+                                        .foregroundStyle(theme.costGreen)
                                 }
                                 
                                 // Cost Share Progress Bar
@@ -473,11 +474,11 @@ struct CostTabView: View {
                             .padding(8)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(isDark ? Color.primary.opacity(0.015) : Color.black.opacity(0.01))
+                                    .fill(theme.surfaceSecondary)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.primary.opacity(0.03), lineWidth: 0.5)
+                                    .stroke(theme.cardStroke, lineWidth: 0.5)
                             )
                         }
                     }
@@ -496,7 +497,7 @@ struct CostTabView: View {
                                 HStack(alignment: .top, spacing: 5) {
                                     Image(systemName: "sparkles")
                                         .font(.system(size: 8))
-                                        .foregroundStyle(Color.gemini(isDark: isDark))
+                                        .foregroundStyle(theme.geminiAccent)
                                         .padding(.top, 2)
                                     
                                     Text(insight)
@@ -513,7 +514,7 @@ struct CostTabView: View {
                 }
             }
             .padding(10)
-            .premiumCardStyle(accentColor: Color.gemini(isDark: isDark))
+            .themedCardStyle(theme: theme, accentColor: theme.geminiAccent)
         }
     }
     
