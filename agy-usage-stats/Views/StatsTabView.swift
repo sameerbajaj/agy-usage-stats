@@ -86,7 +86,7 @@ struct QuotaBucketRow: View {
                 .frame(height: 3)
             }
             
-            if let resetDesc = bucket.resetDescription, let cleaned = cleanResetDescription(resetDesc) {
+            if let cleaned = resolveResetDescription() {
                 Text(cleaned)
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(.secondary.opacity(0.85))
@@ -95,7 +95,45 @@ struct QuotaBucketRow: View {
         .padding(.vertical, 2)
     }
     
-    private func cleanResetDescription(_ desc: String) -> String? {
+    private func resolveResetDescription() -> String? {
+        if let resetTimeStr = bucket.resetTime,
+           let date = ISO8601DateFormatter().date(from: resetTimeStr) {
+            let now = Date()
+            let diff = date.timeIntervalSince(now)
+            if diff > 0 {
+                let days = Int(diff) / 86400
+                let hours = (Int(diff) % 86400) / 3600
+                let minutes = (Int(diff) % 3600) / 60
+                
+                let timeString: String
+                if days > 0 {
+                    timeString = "refreshes in \(days) day\(days == 1 ? "" : "s"), \(hours) hour\(hours == 1 ? "" : "s")"
+                } else if hours > 0 {
+                    timeString = "refreshes in \(hours) hour\(hours == 1 ? "" : "s"), \(minutes) minute\(minutes == 1 ? "" : "s")"
+                } else {
+                    timeString = "refreshes in \(minutes) minute\(minutes == 1 ? "" : "s")"
+                }
+                
+                if let desc = bucket.resetDescription {
+                    let sentences = desc.components(separatedBy: ".")
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                    
+                    let extraSentences = sentences.filter { sentence in
+                        let lower = sentence.lowercased()
+                        return !lower.contains("refresh") && !lower.contains("reset") && !lower.contains("limit")
+                    }
+                    
+                    if !extraSentences.isEmpty {
+                        let joinedExtra = extraSentences.joined(separator: ". ")
+                        return timeString + ". " + joinedExtra.lowercased()
+                    }
+                }
+                return timeString
+            }
+        }
+        
+        guard let desc = bucket.resetDescription else { return nil }
         let lower = desc.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ". "))
         for key in ["fully refresh in ", "refreshes in ", "refresh in "] {
             if let range = lower.range(of: key) {
