@@ -47,67 +47,26 @@ struct SettingsTabView: View {
                 .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 4)
             
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                ForEach(AppTheme.allCases) { t in
-                    themeButton(for: t)
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Theme")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(theme.textPrimary.opacity(0.85))
+                    Spacer()
+                    Picker("", selection: $viewModel.selectedTheme) {
+                        ForEach(AppTheme.allCases) { t in
+                            Text(t.displayName).tag(t)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
                 }
             }
             .padding(10)
             .themedCardStyle(theme: theme, isHovered: isHoveredAppearance)
             .onHover { h in isHoveredAppearance = h }
         }
-    }
-    
-    private func themeButton(for t: AppTheme) -> some View {
-        let preview = ThemeColors.colors(for: t)
-        let isSelected = viewModel.selectedTheme == t
-        
-        return Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                viewModel.selectedTheme = t
-            }
-        } label: {
-            HStack(spacing: 6) {
-                // Color swatch trio
-                HStack(spacing: 2) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(preview.surfacePrimary)
-                        .frame(width: 8, height: 14)
-                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(preview.cardStroke, lineWidth: 0.5))
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(preview.geminiAccent)
-                        .frame(width: 8, height: 14)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(preview.claudeAccent)
-                        .frame(width: 8, height: 14)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(preview.cardStroke, lineWidth: 0.5))
-                
-                Text(t.displayName)
-                    .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
-                    .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
-                
-                Spacer()
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.costGreen)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? theme.costGreen.opacity(0.08) : theme.cardFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? theme.costGreen.opacity(0.25) : theme.cardStroke, lineWidth: 0.75)
-            )
-        }
-        .buttonStyle(.plain)
     }
     
     // MARK: - Menu Bar View Settings

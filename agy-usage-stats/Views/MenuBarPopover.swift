@@ -80,6 +80,7 @@ public struct MenuBarPopover: View {
         .frame(width: 330)
         .background(theme.surfacePrimary)
         .preferredColorScheme(viewModel.selectedTheme.preferredColorScheme)
+        .environment(\.colorScheme, viewModel.selectedTheme.preferredColorScheme)
         .onAppear {
             viewModel.setup()
         }
@@ -98,13 +99,13 @@ public struct MenuBarPopover: View {
             HStack(spacing: 0) {
                 // Logo & Title
                 HStack(spacing: 4) {
-                    Text("AGY://")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
-                    
-                    Text("stats_readout")
+                    Text("AGY")
                         .font(.system(size: 11.5, weight: .black, design: .monospaced))
                         .foregroundStyle(theme.textPrimary)
+                    
+                    Text("usage stats")
+                        .font(.system(size: 11.5, weight: .light, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
                     
                     Circle()
                         .fill(isConnected ? Color.green : Color.red)
