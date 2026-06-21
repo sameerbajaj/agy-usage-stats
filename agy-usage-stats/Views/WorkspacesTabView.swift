@@ -18,11 +18,11 @@ struct WorkspacesTabView: View {
             HStack {
                 Text("active workspaces")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
                 Spacer()
                 Text("\(viewModel.stats.workspaces.count) total")
                     .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -33,10 +33,10 @@ struct WorkspacesTabView: View {
                 VStack(spacing: 6) {
                     Image(systemName: "folder.badge.questionmark")
                         .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                     Text("no workspaces tracked")
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 }
                 Spacer()
             } else {
@@ -52,6 +52,7 @@ struct WorkspacesTabView: View {
                 }
             }
         }
+        .background(theme.surfacePrimary)
     }
     
     private func revealInFinder(path: String) {

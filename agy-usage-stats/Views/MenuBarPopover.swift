@@ -47,7 +47,7 @@ public struct MenuBarPopover: View {
                 updateBanner(update)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(theme.surfacePrimary)
+                    .background(theme.surfaceSecondary)
                     .overlay(
                         Rectangle()
                             .frame(height: 1)
@@ -71,15 +71,15 @@ public struct MenuBarPopover: View {
                 }
             }
             .frame(height: 370)
+            .background(theme.surfacePrimary)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
-            
-            Divider()
             
             footer
         }
         .frame(width: 330)
-        .background(.ultraThinMaterial)
+        .background(theme.surfacePrimary)
+        .preferredColorScheme(viewModel.selectedTheme.preferredColorScheme)
         .onAppear {
             viewModel.setup()
         }
@@ -100,11 +100,11 @@ public struct MenuBarPopover: View {
                 HStack(spacing: 4) {
                     Text("AGY://")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                     
                     Text("stats_readout")
                         .font(.system(size: 11.5, weight: .black, design: .monospaced))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(theme.textPrimary)
                     
                     Circle()
                         .fill(isConnected ? Color.green : Color.red)
@@ -127,7 +127,7 @@ public struct MenuBarPopover: View {
                         } label: {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.textSecondary)
                                 .frame(width: 18, height: 18)
                         }
                         .buttonStyle(.plain)
@@ -143,8 +143,12 @@ public struct MenuBarPopover: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
             
-            Divider()
+            // Theme-aware divider
+            Rectangle()
+                .fill(theme.divider)
+                .frame(height: 1)
         }
+        .background(theme.surfacePrimary)
     }
     
     // MARK: - Tab Picker
@@ -198,45 +202,50 @@ public struct MenuBarPopover: View {
     // MARK: - Footer
     
     private var footer: some View {
-        HStack {
-            HStack(spacing: 4) {
-                Text("SYS.STATUS:")
-                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                
-                if let last = viewModel.stats.lastQueryAt {
-                    Text(formattedTime(last).uppercased())
-                        .font(.system(size: 7.5, weight: .medium, design: .monospaced))
-                } else {
-                    Text("IDLE")
+        VStack(spacing: 0) {
+            Rectangle().fill(theme.divider).frame(height: 1)
+            
+            HStack {
+                HStack(spacing: 4) {
+                    Text("SYS.STATUS:")
                         .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
+                    
+                    if let last = viewModel.stats.lastQueryAt {
+                        Text(formattedTime(last).uppercased())
+                            .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+                    } else {
+                        Text("IDLE")
+                            .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+                    }
                 }
+                
+                Spacer()
+                
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Text("SHUTDOWN")
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.dangerRed)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(theme.dangerRed.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(theme.dangerRed.opacity(0.18), lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(.plain)
             }
-            .foregroundStyle(.secondary)
-            
-            Spacer()
-            
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Text("SHUTDOWN")
-                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.dangerRed)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(theme.dangerRed.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(theme.dangerRed.opacity(0.18), lineWidth: 0.5)
-                    )
-            }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
         .background(theme.surfacePrimary)
     }
     

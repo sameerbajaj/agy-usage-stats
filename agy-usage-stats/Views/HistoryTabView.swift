@@ -74,17 +74,17 @@ struct HistoryTabView: View {
                 }
             }
             
-            Divider()
+            Rectangle().fill(theme.divider).frame(height: 1)
             
             if filteredQueries.isEmpty {
                 Spacer()
                 VStack(spacing: 6) {
                     Image(systemName: "magnifyingglass.bubble")
                         .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                     Text("no matching queries found")
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                 }
                 Spacer()
             } else {
@@ -100,6 +100,7 @@ struct HistoryTabView: View {
                 }
             }
         }
+        .background(theme.surfacePrimary)
     }
     
     private func copyToClipboard(text: String, id: String) {

@@ -245,6 +245,7 @@ struct StatsTabView: View {
             }
             .padding(12)
         }
+        .background(theme.surfacePrimary)
     }
     
     private var activeModelRow: some View {

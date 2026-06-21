@@ -332,6 +332,7 @@ struct CostTabView: View {
             }
             .padding(12)
         }
+        .background(theme.surfacePrimary)
     }
     
     // MARK: - Cost Summary Card

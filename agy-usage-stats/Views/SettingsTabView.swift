@@ -17,6 +17,8 @@ struct SettingsTabView: View {
     @State private var isHoveredUpdates = false
     @State private var isHoveredAppearance = false
     
+    private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
@@ -34,6 +36,7 @@ struct SettingsTabView: View {
             }
             .padding(12)
         }
+        .background(theme.surfacePrimary)
     }
     
     // MARK: - Appearance Settings
@@ -41,59 +44,70 @@ struct SettingsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("appearance")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 4)
             
-            VStack(spacing: 8) {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                    ForEach(AppTheme.allCases) { theme in
-                        let themeColors = ThemeColors.colors(for: theme, colorScheme: colorScheme)
-                        let isSelected = viewModel.selectedTheme == theme
-                        
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                viewModel.selectedTheme = theme
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                HStack(spacing: 2) {
-                                    Circle().fill(themeColors.cardFill).frame(width: 8, height: 8)
-                                        .overlay(Circle().stroke(themeColors.cardStroke, lineWidth: 0.5))
-                                    Circle().fill(themeColors.geminiAccent).frame(width: 8, height: 8)
-                                    Circle().fill(themeColors.claudeAccent).frame(width: 8, height: 8)
-                                }
-                                
-                                Text(theme.displayName)
-                                    .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
-                                    .foregroundStyle(isSelected ? .primary : .secondary)
-                                
-                                Spacer()
-                                
-                                if isSelected {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.green)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(isSelected ? Color.green.opacity(0.06) : Color.primary.opacity(0.02))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(isSelected ? Color.green.opacity(0.2) : Color.primary.opacity(0.04), lineWidth: 0.75)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                ForEach(AppTheme.allCases) { t in
+                    themeButton(for: t)
                 }
             }
             .padding(10)
-            .premiumCardStyle(isHovered: isHoveredAppearance)
+            .themedCardStyle(theme: theme, isHovered: isHoveredAppearance)
             .onHover { h in isHoveredAppearance = h }
         }
+    }
+    
+    private func themeButton(for t: AppTheme) -> some View {
+        let preview = ThemeColors.colors(for: t)
+        let isSelected = viewModel.selectedTheme == t
+        
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                viewModel.selectedTheme = t
+            }
+        } label: {
+            HStack(spacing: 6) {
+                // Color swatch trio
+                HStack(spacing: 2) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(preview.surfacePrimary)
+                        .frame(width: 8, height: 14)
+                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(preview.cardStroke, lineWidth: 0.5))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(preview.geminiAccent)
+                        .frame(width: 8, height: 14)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(preview.claudeAccent)
+                        .frame(width: 8, height: 14)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(preview.cardStroke, lineWidth: 0.5))
+                
+                Text(t.displayName)
+                    .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
+                    .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+                
+                Spacer()
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.costGreen)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? theme.costGreen.opacity(0.08) : theme.cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isSelected ? theme.costGreen.opacity(0.25) : theme.cardStroke, lineWidth: 0.75)
+            )
+        }
+        .buttonStyle(.plain)
     }
     
     // MARK: - Menu Bar View Settings
@@ -101,14 +115,14 @@ struct SettingsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("menu bar display")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 4)
             
             VStack(spacing: 8) {
                 HStack {
                     Text("Display Mode")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.primary.opacity(0.85))
+                        .foregroundStyle(theme.textPrimary.opacity(0.85))
                     Spacer()
                     Picker("", selection: $viewModel.menuBarDisplayMode) {
                         ForEach(MenuBarDisplayMode.allCases) { mode in
@@ -120,12 +134,12 @@ struct SettingsTabView: View {
                     .controlSize(.small)
                 }
                 
-                Divider()
+                Rectangle().fill(theme.divider).frame(height: 0.75)
                 
                 HStack {
                     Text("Show Usage % in Icon")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.primary.opacity(0.85))
+                        .foregroundStyle(theme.textPrimary.opacity(0.85))
                     Spacer()
                     Toggle("", isOn: $viewModel.showModelUsageInIcon.animation(.easeInOut(duration: 0.2)))
                         .toggleStyle(.switch)
@@ -137,7 +151,7 @@ struct SettingsTabView: View {
                     HStack {
                         Text("Model for Icon")
                             .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                             .padding(.leading, 8)
                         Spacer()
                         Picker("", selection: $viewModel.selectedModelForIcon) {
@@ -153,7 +167,7 @@ struct SettingsTabView: View {
                     HStack {
                         Text("Quota Limit for Icon")
                             .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                             .padding(.leading, 8)
                         Spacer()
                         Picker("", selection: $viewModel.iconQuotaLimitTarget) {
@@ -169,7 +183,7 @@ struct SettingsTabView: View {
                     HStack {
                         Text("Circle Fill Completion")
                             .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                             .padding(.leading, 8)
                         Spacer()
                         Picker("", selection: $viewModel.iconCircleFillMetric) {
@@ -183,12 +197,12 @@ struct SettingsTabView: View {
                     }
                 }
                 
-                Divider()
+                Rectangle().fill(theme.divider).frame(height: 0.75)
                 
                 HStack {
                     Text("Show Weekly Limit & Reset")
                         .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.primary.opacity(0.85))
+                        .foregroundStyle(theme.textPrimary.opacity(0.85))
                     Spacer()
                     Toggle("", isOn: $viewModel.showWeeklyLimitAndReset)
                         .toggleStyle(.switch)
@@ -197,7 +211,7 @@ struct SettingsTabView: View {
                 }
             }
             .padding(10)
-            .premiumCardStyle(isHovered: isHoveredMenu)
+            .themedCardStyle(theme: theme, isHovered: isHoveredMenu)
             .onHover { h in isHoveredMenu = h }
         }
     }
@@ -207,7 +221,7 @@ struct SettingsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("cli data path")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 4)
             
             VStack(spacing: 8) {
@@ -216,7 +230,7 @@ struct SettingsTabView: View {
                         TextField("path", text: $tempDir)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 10).monospaced())
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(theme.textPrimary)
                             .controlSize(.small)
                         
                         Button("save") {
@@ -231,14 +245,14 @@ struct SettingsTabView: View {
                             isEditingDir = false
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondary)
                         .font(.system(size: 9.5, weight: .medium))
                     }
                 } else {
                     HStack(spacing: 8) {
                         Text(viewModel.cliDir)
                             .font(.system(size: 10).monospaced())
-                            .foregroundStyle(.primary.opacity(0.7))
+                            .foregroundStyle(theme.textPrimary.opacity(0.7))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         
@@ -260,7 +274,7 @@ struct SettingsTabView: View {
                             Text("show in finder")
                         }
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(.blue.opacity(0.85))
+                        .foregroundStyle(theme.linkBlue)
                     }
                     .buttonStyle(.plain)
                     
@@ -269,7 +283,7 @@ struct SettingsTabView: View {
                 .padding(.top, 2)
             }
             .padding(10)
-            .premiumCardStyle(isHovered: isHoveredPath)
+            .themedCardStyle(theme: theme, isHovered: isHoveredPath)
             .onHover { h in isHoveredPath = h }
         }
     }
@@ -279,7 +293,7 @@ struct SettingsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("application updates")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 4)
             
             VStack(spacing: 8) {
@@ -287,10 +301,10 @@ struct SettingsTabView: View {
                     HStack(spacing: 4) {
                         Text("version")
                             .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.textSecondary)
                         Text("v\(UpdateChecker.currentVersion)")
                             .font(.system(size: 10.5, weight: .bold).monospacedDigit())
-                            .foregroundStyle(.primary.opacity(0.75))
+                            .foregroundStyle(theme.textPrimary.opacity(0.75))
                     }
                     
                     Spacer()
@@ -310,21 +324,21 @@ struct SettingsTabView: View {
                     }
                     .disabled(viewModel.isCheckingForUpdates)
                     .buttonStyle(.plain)
-                    .foregroundStyle(.blue.opacity(0.85))
+                    .foregroundStyle(theme.linkBlue)
                 }
                 
                 if let update = viewModel.availableUpdate {
-                    Divider()
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
                     
                     VStack(alignment: .leading, spacing: 6) {
                         Text(update.isRolling ? "New build available" : "Version v\(update.version) is available")
                             .font(.system(size: 10.5, weight: .bold))
-                            .foregroundStyle(.green)
+                            .foregroundStyle(theme.costGreen)
                         
                         if let notes = update.releaseNotes, !notes.isEmpty {
                             Text(notes)
                                 .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.textSecondary)
                                 .lineLimit(2)
                         }
                         
@@ -337,14 +351,14 @@ struct SettingsTabView: View {
                                         .foregroundStyle(.black)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 4)
-                                        .background(Capsule().fill(Color.green))
+                                        .background(Capsule().fill(theme.costGreen))
                                 }
                                 .buttonStyle(.plain)
                                 
                                 Button(action: { viewModel.dismissUpdate() }) {
                                     Text("ignore")
                                         .font(.system(size: 9.5, weight: .semibold))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(theme.textSecondary)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 4)
                                 }
@@ -355,11 +369,11 @@ struct SettingsTabView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Downloading (\(Int(progress * 100))%)...")
                                     .font(.system(size: 8.5))
-                                    .foregroundStyle(.primary.opacity(0.7))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.7))
                                 
                                 ProgressView(value: progress)
                                     .progressViewStyle(.linear)
-                                    .tint(.green)
+                                    .tint(theme.costGreen)
                             }
                             
                         case .installing:
@@ -368,33 +382,33 @@ struct SettingsTabView: View {
                                     .controlSize(.mini)
                                 Text("Installing & relaunching...")
                                     .font(.system(size: 9.5))
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(theme.textPrimary)
                             }
                             
                         case .failed(let errorMsg):
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Update Failed")
                                     .font(.system(size: 9.5, weight: .bold))
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(theme.dangerRed)
                                 Text(errorMsg)
                                     .font(.system(size: 8.5))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(theme.textSecondary)
                             }
                         }
                     }
                 } else if let msg = viewModel.updateCheckMessage {
-                    Divider()
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
                     
                     HStack {
                         Text(msg.lowercased())
                             .font(.system(size: 9))
-                            .foregroundStyle(.green)
+                            .foregroundStyle(theme.costGreen)
                         Spacer()
                     }
                 }
             }
             .padding(10)
-            .premiumCardStyle(isHovered: isHoveredUpdates)
+            .themedCardStyle(theme: theme, isHovered: isHoveredUpdates)
             .onHover { h in isHoveredUpdates = h }
         }
     }
