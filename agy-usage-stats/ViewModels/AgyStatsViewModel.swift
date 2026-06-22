@@ -226,15 +226,13 @@ public final class AgyStatsViewModel {
             return group.buckets.first { bucket in
                 let name = bucket.displayName.lowercased()
                 let id = bucket.bucketId.lowercased()
-                let desc = (bucket.resetDescription ?? "").lowercased()
-                return name.contains("week") || id.contains("week") || desc.contains("week")
+                return name.contains("week") || id.contains("week")
             } ?? group.buckets.first
         case .fiveHour:
             return group.buckets.first { bucket in
                 let name = bucket.displayName.lowercased()
                 let id = bucket.bucketId.lowercased()
-                let desc = (bucket.resetDescription ?? "").lowercased()
-                return name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five") || desc.contains("5-hour") || desc.contains("5 hour")
+                return name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five")
             } ?? group.buckets.first
         case .minimum:
             return group.buckets.min(by: { ($0.remainingFraction ?? 1.0) < ($1.remainingFraction ?? 1.0) })
@@ -277,11 +275,10 @@ public final class AgyStatsViewModel {
     private func getWindowDuration(for bucket: AgyQuotaBucket) -> TimeInterval {
         let id = bucket.bucketId.lowercased()
         let name = bucket.displayName.lowercased()
-        let desc = (bucket.resetDescription ?? "").lowercased()
         
-        if id.contains("5h") || id.contains("five") || name.contains("5h") || name.contains("five") || desc.contains("5-hour") || desc.contains("5 hour") {
+        if id.contains("5h") || id.contains("five") || name.contains("5h") || name.contains("five") {
             return 5.0 * 3600.0
-        } else if id.contains("week") || name.contains("week") || desc.contains("week") {
+        } else if id.contains("week") || name.contains("week") {
             return 7.0 * 24.0 * 3600.0
         }
         return 5.0 * 3600.0
@@ -343,9 +340,8 @@ public final class AgyStatsViewModel {
         for group in quota.groups {
             for bucket in group.buckets {
                 let name = bucket.displayName.lowercased()
-                let desc = (bucket.resetDescription ?? "").lowercased()
                 let id = bucket.bucketId.lowercased()
-                if name.contains("week") || desc.contains("week") || id.contains("week") {
+                if name.contains("week") || id.contains("week") {
                     return WeeklyLimitInfo(
                         remainingFraction: bucket.remainingFraction,
                         resetTimeDescription: bucket.resetTime ?? bucket.resetDescription
