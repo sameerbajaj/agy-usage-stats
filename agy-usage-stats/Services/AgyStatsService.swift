@@ -286,7 +286,8 @@ public enum AgyStatsService {
         defer { sqlite3_close(db) }
         
         var statement: OpaquePointer?
-        let query = "SELECT data FROM gen_metadata ORDER BY idx DESC LIMIT 1"
+        // Query the first generation entry (idx ASC). This is tiny (1KB) and doesn't contain conversational history/mentions of other models.
+        let query = "SELECT data FROM gen_metadata ORDER BY idx ASC LIMIT 1"
         
         var foundModel: String? = nil
         if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
@@ -296,33 +297,94 @@ public enum AgyStatsService {
                     if blobSize > 0 {
                         let data = Data(bytes: blob, count: Int(blobSize))
                         
-                        // Map internal CLI model identifier patterns to user-facing display names
-                        let mappings: [(pattern: String, modelName: String)] = [
-                            ("opus", "Claude Opus 4.6 (Thinking)"),
-                            ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
-                            ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
-                            ("pro-low", "Gemini 3.1 Pro (Low)"),
-                            ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
-                            ("pro-high", "Gemini 3.1 Pro (High)"),
-                            ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
-                            ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
-                            ("flash-extra-low", "Gemini 3.5 Flash (Low)"),
-                            ("flash-low", "Gemini 3.5 Flash (Low)"),
-                            ("flash-medium", "Gemini 3.5 Flash (Medium)"),
-                            ("flash-a", "Gemini 3.5 Flash (High)"),
-                            ("flash-agent", "Gemini 3.5 Flash (High)"),
-                            ("flash-high", "Gemini 3.5 Flash (High)"),
-                            ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
-                            ("gemini-3-flash-preview", "Gemini 3.5 Flash (High)"),
-                            ("gemini-3-flash", "Gemini 3.5 Flash (High)"),
-                            ("gemini-2.0-flash", "Gemini 3.5 Flash (High)"),
-                            ("gemini-5h", "Gemini 3.5 Flash (High)")
-                        ]
-                        
-                        for mapping in mappings {
-                            if data.range(of: Data(mapping.pattern.utf8)) != nil {
-                                foundModel = mapping.modelName
+                        // Search for the exact model name from protobuf field tag 19 (\x9a\x01)
+                        var searchIndex = data.startIndex
+                        while searchIndex < data.endIndex {
+                            guard let range = data.range(of: Data([0x9a, 0x01]), in: searchIndex..<data.endIndex) else {
                                 break
+                            }
+                            let lengthIndex = range.upperBound
+                            if lengthIndex < data.endIndex {
+                                let length = Int(data[lengthIndex])
+                                let stringStartIndex = data.index(after: lengthIndex)
+                                if let stringEndIndex = data.index(stringStartIndex, offsetBy: length, limitedBy: data.endIndex),
+                                   stringStartIndex < stringEndIndex {
+                                    let modelData = data[stringStartIndex..<stringEndIndex]
+                                    if let extractedName = String(data: modelData, encoding: .utf8) {
+                                        let cleaned = extractedName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                                        
+                                        // Ensure it represents an LLM model identifier
+                                        if cleaned.contains("gemini") || cleaned.contains("claude") || cleaned.contains("sonnet") || cleaned.contains("opus") {
+                                            
+                                            let mappings: [(pattern: String, modelName: String)] = [
+                                                ("opus", "Claude Opus 4.6 (Thinking)"),
+                                                ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
+                                                ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
+                                                ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
+                                                ("pro-low", "Gemini 3.1 Pro (Low)"),
+                                                ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
+                                                ("pro-high", "Gemini 3.1 Pro (High)"),
+                                                ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
+                                                ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
+                                                ("flash-extra-low", "Gemini 3.5 Flash (Low)"),
+                                                ("flash-low", "Gemini 3.5 Flash (Low)"),
+                                                ("flash-medium", "Gemini 3.5 Flash (Medium)"),
+                                                ("flash-a", "Gemini 3.5 Flash (High)"),
+                                                ("flash-agent", "Gemini 3.5 Flash (High)"),
+                                                ("flash-high", "Gemini 3.5 Flash (High)"),
+                                                ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
+                                                ("gemini-3-flash-preview", "Gemini 3.5 Flash (High)"),
+                                                ("gemini-3-flash", "Gemini 3.5 Flash (High)"),
+                                                ("gemini-2.0-flash", "Gemini 3.5 Flash (High)"),
+                                                ("gemini-5h", "Gemini 3.5 Flash (High)")
+                                            ]
+                                            
+                                            for mapping in mappings {
+                                                if cleaned.contains(mapping.pattern) {
+                                                    foundModel = mapping.modelName
+                                                    break
+                                                }
+                                            }
+                                            
+                                            if foundModel != nil {
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            searchIndex = range.upperBound
+                        }
+                        
+                        // Backward compatible fallback: direct string checks
+                        if foundModel == nil {
+                            let mappings: [(pattern: String, modelName: String)] = [
+                                ("opus", "Claude Opus 4.6 (Thinking)"),
+                                ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
+                                ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
+                                ("pro-low", "Gemini 3.1 Pro (Low)"),
+                                ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
+                                ("pro-high", "Gemini 3.1 Pro (High)"),
+                                ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
+                                ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
+                                ("flash-extra-low", "Gemini 3.5 Flash (Low)"),
+                                ("flash-low", "Gemini 3.5 Flash (Low)"),
+                                ("flash-medium", "Gemini 3.5 Flash (Medium)"),
+                                ("flash-a", "Gemini 3.5 Flash (High)"),
+                                ("flash-agent", "Gemini 3.5 Flash (High)"),
+                                ("flash-high", "Gemini 3.5 Flash (High)"),
+                                ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
+                                ("gemini-3-flash-preview", "Gemini 3.5 Flash (High)"),
+                                ("gemini-3-flash", "Gemini 3.5 Flash (High)"),
+                                ("gemini-2.0-flash", "Gemini 3.5 Flash (High)"),
+                                ("gemini-5h", "Gemini 3.5 Flash (High)")
+                            ]
+                            
+                            for mapping in mappings {
+                                if data.range(of: Data(mapping.pattern.utf8)) != nil {
+                                    foundModel = mapping.modelName
+                                    break
+                                }
                             }
                         }
                         
