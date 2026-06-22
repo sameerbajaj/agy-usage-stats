@@ -296,20 +296,51 @@ public enum AgyStatsService {
                     if blobSize > 0 {
                         let data = Data(bytes: blob, count: Int(blobSize))
                         
-                        let knownModelNames = [
-                            "Gemini 3.5 Flash (Low)",
-                            "Gemini 3.5 Flash (Medium)",
-                            "Gemini 3.5 Flash (High)",
-                            "Gemini 3.1 Pro (Low)",
-                            "Gemini 3.1 Pro (High)",
-                            "Claude Sonnet 4.6 (Thinking)",
-                            "Claude Opus 4.6 (Thinking)"
+                        // Map internal CLI model identifier patterns to user-facing display names
+                        let mappings: [(pattern: String, modelName: String)] = [
+                            ("opus", "Claude Opus 4.6 (Thinking)"),
+                            ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
+                            ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
+                            ("pro-low", "Gemini 3.1 Pro (Low)"),
+                            ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
+                            ("pro-high", "Gemini 3.1 Pro (High)"),
+                            ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
+                            ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
+                            ("flash-extra-low", "Gemini 3.5 Flash (Low)"),
+                            ("flash-low", "Gemini 3.5 Flash (Low)"),
+                            ("flash-medium", "Gemini 3.5 Flash (Medium)"),
+                            ("flash-a", "Gemini 3.5 Flash (High)"),
+                            ("flash-agent", "Gemini 3.5 Flash (High)"),
+                            ("flash-high", "Gemini 3.5 Flash (High)"),
+                            ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
+                            ("gemini-3-flash-preview", "Gemini 3.5 Flash (High)"),
+                            ("gemini-3-flash", "Gemini 3.5 Flash (High)"),
+                            ("gemini-2.0-flash", "Gemini 3.5 Flash (High)"),
+                            ("gemini-5h", "Gemini 3.5 Flash (High)")
                         ]
                         
-                        for name in knownModelNames {
-                            if data.range(of: Data(name.utf8)) != nil {
-                                foundModel = name
+                        for mapping in mappings {
+                            if data.range(of: Data(mapping.pattern.utf8)) != nil {
+                                foundModel = mapping.modelName
                                 break
+                            }
+                        }
+                        
+                        if foundModel == nil {
+                            let knownModelNames = [
+                                "Gemini 3.5 Flash (Low)",
+                                "Gemini 3.5 Flash (Medium)",
+                                "Gemini 3.5 Flash (High)",
+                                "Gemini 3.1 Pro (Low)",
+                                "Gemini 3.1 Pro (High)",
+                                "Claude Sonnet 4.6 (Thinking)",
+                                "Claude Opus 4.6 (Thinking)"
+                            ]
+                            for name in knownModelNames {
+                                if data.range(of: Data(name.utf8)) != nil {
+                                    foundModel = name
+                                    break
+                                }
                             }
                         }
                     }
