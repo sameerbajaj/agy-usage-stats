@@ -7,7 +7,7 @@
 A macOS menu bar app that tracks your local Antigravity CLI (`agy`) usage. It shows queries, token quotas, and estimated API costs in a simple status-bar dashboard.
 
 <p align="center">
-  <img src="assets/preview.png" width="330" alt="Antigravity Usage Stats Preview">
+  <img src="assets/preview.png" width="640" alt="Antigravity Usage Stats Preview">
 </p>
 
 ---
