@@ -331,7 +331,7 @@ struct StatsTabView: View {
                             }
                             
                             VStack(spacing: 8) {
-                                ForEach(group.buckets) { bucket in
+                                ForEach(group.sortedBuckets) { bucket in
                                     QuotaBucketRow(groupDisplayName: group.displayName, bucket: bucket)
                                 }
                             }

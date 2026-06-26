@@ -111,6 +111,44 @@ public struct AgyQuotaGroup: Identifiable, Codable, Hashable, Sendable {
     public let displayName: String
     public let description: String?
     public let buckets: [AgyQuotaBucket]
+    
+    public var sortedBuckets: [AgyQuotaBucket] {
+        buckets.sorted { a, b in
+            let aName = a.displayName.lowercased()
+            let aId = a.bucketId.lowercased()
+            let bName = b.displayName.lowercased()
+            let bId = b.bucketId.lowercased()
+            
+            let aIsWeekly = aName.contains("week") || aId.contains("week")
+            let bIsWeekly = bName.contains("week") || bId.contains("week")
+            let aIsFiveHour = aName.contains("5h") || aId.contains("5h") || aName.contains("five") || aId.contains("five")
+            let bIsFiveHour = bName.contains("5h") || bId.contains("5h") || bName.contains("five") || bId.contains("five")
+            
+            let aWeight: Int
+            if aIsFiveHour {
+                aWeight = 0
+            } else if aIsWeekly {
+                aWeight = 2
+            } else {
+                aWeight = 1
+            }
+            
+            let bWeight: Int
+            if bIsFiveHour {
+                bWeight = 0
+            } else if bIsWeekly {
+                bWeight = 2
+            } else {
+                bWeight = 1
+            }
+            
+            if aWeight != bWeight {
+                return aWeight < bWeight
+            }
+            
+            return a.displayName < b.displayName
+        }
+    }
 }
 
 public struct AgyQuotaInfo: Codable, Hashable, Sendable {
