@@ -53,25 +53,66 @@ public enum AgyStatsService {
                 return copy
             }
             
-            // Count queries per conversation in history to partition cost & token stats evenly
-            var conversationQueryCounts: [String: Int] = [:]
-            for q in queries {
-                if let cid = q.conversationId {
-                    conversationQueryCounts[cid, default: 0] += 1
-                }
-            }
-            
             // Load DB metadata and exact model names from SQLite for the first 150 queries
             var queriesWithMeta: [QueryEntry] = []
+            var dbCache: [String: DbConversationData] = [:]
+            
             for (index, q) in queries.enumerated() {
                 var newQ = q
                 if index < 150, let conversationId = q.conversationId {
-                    let countInConv = conversationQueryCounts[conversationId] ?? 1
-                    newQ.conversationMeta = getConversationDbMeta(conversationId: conversationId, cliDir: expandedDir, totalQueriesInConversation: countInConv)
+                    let convData: DbConversationData
+                    if let cached = dbCache[conversationId] {
+                        convData = cached
+                    } else {
+                        convData = loadDbConversationData(conversationId: conversationId, cliDir: expandedDir)
+                        dbCache[conversationId] = convData
+                    }
                     
-                    // Extract the actual model name used from the DB if available
-                    if let dbModel = getModelNameFromDb(conversationId: conversationId, cliDir: expandedDir) {
-                        newQ.modelName = dbModel
+                    // Align queries with second-resolution timestamps in gen_metadata
+                    let start = Date(timeIntervalSince1970: floor(q.timestamp.timeIntervalSince1970))
+                    
+                    // Find the next chronological query in the same conversation to establish the time window
+                    var end = Date.distantFuture
+                    for i in (0..<index).reversed() {
+                        let nextQ = queries[i]
+                        if nextQ.conversationId == conversationId {
+                            end = Date(timeIntervalSince1970: floor(nextQ.timestamp.timeIntervalSince1970))
+                            break
+                        }
+                    }
+                    
+                    // Find generations within this query's time window [start, end)
+                    let turnGens = convData.generations.filter { gen in
+                        guard let gTs = gen.timestamp else { return false }
+                        return gTs >= start && gTs < end
+                    }
+                    
+                    if !turnGens.isEmpty {
+                        let llmCalls = turnGens.count
+                        let totalOutputBytes = turnGens.reduce(0) { $0 + $1.size }
+                        newQ.conversationMeta = ConversationDbMeta(llmCalls: llmCalls, totalOutputBytes: totalOutputBytes)
+                        
+                        let turnModels = turnGens.compactMap { $0.modelName }
+                        if let model = turnModels.last {
+                            newQ.modelName = model
+                        } else {
+                            newQ.modelName = defaultModel
+                        }
+                    } else {
+                        newQ.conversationMeta = ConversationDbMeta(llmCalls: 0, totalOutputBytes: 0)
+                        
+                        // Fallback: Use the latest model used prior to this query
+                        let priorGens = convData.generations.filter { gen in
+                            guard let gTs = gen.timestamp else { return false }
+                            return gTs < start
+                        }
+                        if let lastPriorModel = priorGens.compactMap({ $0.modelName }).last {
+                            newQ.modelName = lastPriorModel
+                        } else if let firstPostModel = convData.generations.compactMap({ $0.modelName }).first {
+                            newQ.modelName = firstPostModel
+                        } else {
+                            newQ.modelName = defaultModel
+                        }
                     }
                 }
                 queriesWithMeta.append(newQ)
@@ -243,174 +284,221 @@ public enum AgyStatsService {
         }.sorted { $0.count > $1.count }
     }
     
-    private static func getConversationDbMeta(conversationId: String, cliDir: String, totalQueriesInConversation: Int) -> ConversationDbMeta? {
-        let dbPath = (cliDir as NSString).appendingPathComponent("conversations/\(conversationId).db")
-        
-        var db: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
-        guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
-            sqlite3_close(db)
-            return nil
-        }
-        defer { sqlite3_close(db) }
-        
-        var statement: OpaquePointer?
-        let query = "SELECT count(*), sum(size) FROM gen_metadata"
-        
-        var count = 0
-        var totalSize = 0
-        
-        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
-            if sqlite3_step(statement) == SQLITE_ROW {
-                count = Int(sqlite3_column_int(statement, 0))
-                totalSize = Int(sqlite3_column_int(statement, 1))
-            }
-        }
-        sqlite3_finalize(statement)
-        
-        let divisor = max(1, totalQueriesInConversation)
-        let distributedCalls = max(1, Int(ceil(Double(count) / Double(divisor))))
-        let distributedBytes = totalSize / divisor
-        
-        return ConversationDbMeta(llmCalls: distributedCalls, totalOutputBytes: distributedBytes)
+    private struct DbGeneration {
+        let idx: Int
+        let size: Int
+        let timestamp: Date?
+        let modelName: String?
     }
     
-    private static func getModelNameFromDb(conversationId: String, cliDir: String) -> String? {
+    private struct DbConversationData {
+        let generations: [DbGeneration]
+    }
+    
+    private static func loadDbConversationData(conversationId: String, cliDir: String) -> DbConversationData {
         let dbPath = (cliDir as NSString).appendingPathComponent("conversations/\(conversationId).db")
+        var generations: [DbGeneration] = []
+        
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
         guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
             sqlite3_close(db)
-            return nil
+            return DbConversationData(generations: [])
         }
         defer { sqlite3_close(db) }
         
         var statement: OpaquePointer?
-        // Query the first generation entry (idx ASC). This is tiny (1KB) and doesn't contain conversational history/mentions of other models.
-        let query = "SELECT data FROM gen_metadata ORDER BY idx ASC LIMIT 1"
+        let query = "SELECT idx, data, size FROM gen_metadata ORDER BY idx ASC"
         
-        var foundModel: String? = nil
         if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
-            if sqlite3_step(statement) == SQLITE_ROW {
-                if let blob = sqlite3_column_blob(statement, 0) {
-                    let blobSize = sqlite3_column_bytes(statement, 0)
+            var lastTimestamp: Date? = nil
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let idx = Int(sqlite3_column_int(statement, 0))
+                let size = Int(sqlite3_column_int(statement, 2))
+                var modelName: String? = nil
+                var timestamp: Date? = nil
+                
+                if let blob = sqlite3_column_blob(statement, 1) {
+                    let blobSize = sqlite3_column_bytes(statement, 1)
                     if blobSize > 0 {
                         let data = Data(bytes: blob, count: Int(blobSize))
-                        
-                        // Search for the exact model name from protobuf field tag 19 (\x9a\x01)
-                        var searchIndex = data.startIndex
-                        while searchIndex < data.endIndex {
-                            guard let range = data.range(of: Data([0x9a, 0x01]), in: searchIndex..<data.endIndex) else {
-                                break
-                            }
-                            let lengthIndex = range.upperBound
-                            if lengthIndex < data.endIndex {
-                                let length = Int(data[lengthIndex])
-                                let stringStartIndex = data.index(after: lengthIndex)
-                                if let stringEndIndex = data.index(stringStartIndex, offsetBy: length, limitedBy: data.endIndex),
-                                   stringStartIndex < stringEndIndex {
-                                    let modelData = data[stringStartIndex..<stringEndIndex]
-                                    if let extractedName = String(data: modelData, encoding: .utf8) {
-                                        let cleaned = extractedName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                                        
-                                        // Ensure it represents an LLM model identifier
-                                        if cleaned.contains("gemini") || cleaned.contains("claude") || cleaned.contains("sonnet") || cleaned.contains("opus") {
-                                            
-                                            let mappings: [(pattern: String, modelName: String)] = [
-                                                ("opus", "Claude Opus 4.6 (Thinking)"),
-                                                ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
-                                                ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
-                                                ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
-                                                ("pro-low", "Gemini 3.1 Pro (Low)"),
-                                                ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
-                                                ("pro-high", "Gemini 3.1 Pro (High)"),
-                                                ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
-                                                ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
-                                                ("flash-extra-low", "Gemini 3.5 Flash (Low)"),
-                                                ("flash-low", "Gemini 3.5 Flash (Low)"),
-                                                ("flash-medium", "Gemini 3.5 Flash (Medium)"),
-                                                ("flash-a", "Gemini 3.5 Flash (High)"),
-                                                ("flash-agent", "Gemini 3.5 Flash (High)"),
-                                                ("flash-high", "Gemini 3.5 Flash (High)"),
-                                                ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
-                                                ("gemini-3-flash-preview", "Gemini 3.5 Flash (High)"),
-                                                ("gemini-3-flash", "Gemini 3.5 Flash (High)"),
-                                                ("gemini-2.0-flash", "Gemini 3.5 Flash (High)"),
-                                                ("gemini-5h", "Gemini 3.5 Flash (High)")
-                                            ]
-                                            
-                                            for mapping in mappings {
-                                                if cleaned.contains(mapping.pattern) {
-                                                    foundModel = mapping.modelName
-                                                    break
-                                                }
-                                            }
-                                            
-                                            if foundModel != nil {
-                                                break
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            searchIndex = range.upperBound
-                        }
-                        
-                        // Backward compatible fallback: direct string checks
-                        if foundModel == nil {
-                            let mappings: [(pattern: String, modelName: String)] = [
-                                ("opus", "Claude Opus 4.6 (Thinking)"),
-                                ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
-                                ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
-                                ("pro-low", "Gemini 3.1 Pro (Low)"),
-                                ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
-                                ("pro-high", "Gemini 3.1 Pro (High)"),
-                                ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
-                                ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
-                                ("flash-extra-low", "Gemini 3.5 Flash (Low)"),
-                                ("flash-low", "Gemini 3.5 Flash (Low)"),
-                                ("flash-medium", "Gemini 3.5 Flash (Medium)"),
-                                ("flash-a", "Gemini 3.5 Flash (High)"),
-                                ("flash-agent", "Gemini 3.5 Flash (High)"),
-                                ("flash-high", "Gemini 3.5 Flash (High)"),
-                                ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
-                                ("gemini-3-flash-preview", "Gemini 3.5 Flash (High)"),
-                                ("gemini-3-flash", "Gemini 3.5 Flash (High)"),
-                                ("gemini-2.0-flash", "Gemini 3.5 Flash (High)"),
-                                ("gemini-5h", "Gemini 3.5 Flash (High)")
-                            ]
-                            
-                            for mapping in mappings {
-                                if data.range(of: Data(mapping.pattern.utf8)) != nil {
-                                    foundModel = mapping.modelName
-                                    break
-                                }
-                            }
-                        }
-                        
-                        if foundModel == nil {
-                            let knownModelNames = [
-                                "Gemini 3.5 Flash (Low)",
-                                "Gemini 3.5 Flash (Medium)",
-                                "Gemini 3.5 Flash (High)",
-                                "Gemini 3.1 Pro (Low)",
-                                "Gemini 3.1 Pro (High)",
-                                "Claude Sonnet 4.6 (Thinking)",
-                                "Claude Opus 4.6 (Thinking)"
-                            ]
-                            for name in knownModelNames {
-                                if data.range(of: Data(name.utf8)) != nil {
-                                    foundModel = name
-                                    break
-                                }
-                            }
-                        }
+                        let meta = extractMetadata(from: data)
+                        modelName = meta.modelName
+                        timestamp = meta.timestamp
                     }
                 }
+                
+                if timestamp == nil {
+                    timestamp = lastTimestamp
+                } else {
+                    lastTimestamp = timestamp
+                }
+                
+                generations.append(DbGeneration(idx: idx, size: size, timestamp: timestamp, modelName: modelName))
             }
         }
         sqlite3_finalize(statement)
-        return foundModel
+        
+        return DbConversationData(generations: generations)
+    }
+    
+    private static func parseProtobufFields(data: Data) -> [Int: Any] {
+        var fields: [Int: Any] = [:]
+        var index = data.startIndex
+        while index < data.endIndex {
+            var tag = 0
+            var shift = 0
+            var tagReadSuccess = false
+            while index < data.endIndex {
+                let b = data[index]
+                index += 1
+                tag |= Int(b & 0x7F) << shift
+                if (b & 0x80) == 0 {
+                    tagReadSuccess = true
+                    break
+                }
+                shift += 7
+            }
+            guard tagReadSuccess, tag > 0 else { break }
+            
+            let wireType = tag & 0x07
+            let fieldNumber = tag >> 3
+            
+            if wireType == 0 { // Varint
+                var val = 0
+                var valShift = 0
+                var valReadSuccess = false
+                while index < data.endIndex {
+                    let b = data[index]
+                    index += 1
+                    val |= Int(b & 0x7F) << valShift
+                    if (b & 0x80) == 0 {
+                        valReadSuccess = true
+                        break
+                    }
+                    valShift += 7
+                }
+                guard valReadSuccess else { break }
+                fields[fieldNumber] = val
+            } else if wireType == 1 { // 64-bit
+                guard index + 8 <= data.endIndex else { break }
+                let sub = data[index..<(index + 8)]
+                index += 8
+                fields[fieldNumber] = sub
+            } else if wireType == 2 { // Length-delimited
+                var length = 0
+                var lenShift = 0
+                var lenReadSuccess = false
+                while index < data.endIndex {
+                    let b = data[index]
+                    index += 1
+                    length |= Int(b & 0x7F) << lenShift
+                    if (b & 0x80) == 0 {
+                        lenReadSuccess = true
+                        break
+                    }
+                    lenShift += 7
+                }
+                guard lenReadSuccess, index + length <= data.endIndex else { break }
+                let sub = data[index..<(index + length)]
+                index += length
+                
+                if fieldNumber == 1 || fieldNumber == 8 || fieldNumber == 9 || fieldNumber == 4 {
+                    let subfields = parseProtobufFields(data: sub)
+                    fields[fieldNumber] = subfields
+                } else {
+                    fields[fieldNumber] = sub
+                }
+            } else if wireType == 5 { // 32-bit
+                guard index + 4 <= data.endIndex else { break }
+                let sub = data[index..<(index + 4)]
+                index += 4
+                fields[fieldNumber] = sub
+            } else {
+                break
+            }
+        }
+        return fields
+    }
+    
+    private static func extractMetadata(from data: Data) -> (modelName: String?, timestamp: Date?) {
+        let fields = parseProtobufFields(data: data)
+        var modelName: String? = nil
+        var timestamp: Date? = nil
+        
+        // Try getting model from nested Field 1
+        if let f1 = fields[1] as? [Int: Any] {
+            if let modelData = f1[19] as? Data,
+               let name = String(data: modelData, encoding: .utf8) {
+                modelName = cleanAndMapModelName(name)
+            }
+            
+            // Try getting timestamp from Field 1 -> Field 9 -> Field 4 -> Field 1
+            if let f9 = f1[9] as? [Int: Any],
+               let f4 = f9[4] as? [Int: Any],
+               let seconds = f4[1] as? Int {
+                timestamp = Date(timeIntervalSince1970: TimeInterval(seconds))
+            }
+        }
+        
+        // Fallback: Try getting model from top-level field 19 if present
+        if modelName == nil,
+           let modelData = fields[19] as? Data,
+           let name = String(data: modelData, encoding: .utf8) {
+            modelName = cleanAndMapModelName(name)
+        }
+        
+        return (modelName, timestamp)
+    }
+    
+    private static func cleanAndMapModelName(_ name: String) -> String? {
+        let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let mappings: [(pattern: String, modelName: String)] = [
+            ("opus", "Claude Opus 4.6 (Thinking)"),
+            ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
+            ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
+            ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
+            ("pro-low", "Gemini 3.1 Pro (Low)"),
+            ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
+            ("pro-high", "Gemini 3.1 Pro (High)"),
+            ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
+            ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
+            ("flash-extra-low", "Gemini 3.5 Flash (Low)"),
+            ("flash-low", "Gemini 3.5 Flash (Low)"),
+            ("flash-medium", "Gemini 3.5 Flash (Medium)"),
+            ("flash-a", "Gemini 3.5 Flash (High)"),
+            ("flash-agent", "Gemini 3.5 Flash (High)"),
+            ("flash-high", "Gemini 3.5 Flash (High)"),
+            ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
+            ("gemini-3-flash-preview", "Gemini 3.5 Flash (High)"),
+            ("gemini-3-flash", "Gemini 3.5 Flash (High)"),
+            ("gemini-2.0-flash", "Gemini 3.5 Flash (High)"),
+            ("gemini-5h", "Gemini 3.5 Flash (High)")
+        ]
+        
+        for mapping in mappings {
+            if cleaned.contains(mapping.pattern) {
+                return mapping.modelName
+            }
+        }
+        
+        let knownModelNames = [
+            "Gemini 3.5 Flash (Low)",
+            "Gemini 3.5 Flash (Medium)",
+            "Gemini 3.5 Flash (High)",
+            "Gemini 3.1 Pro (Low)",
+            "Gemini 3.1 Pro (High)",
+            "Claude Sonnet 4.6 (Thinking)",
+            "Claude Opus 4.6 (Thinking)"
+        ]
+        for knownName in knownModelNames {
+            if cleaned.contains(knownName.lowercased()) {
+                return knownName
+            }
+        }
+        
+        return nil
     }
     
     private static func queryToolStats(forDbPath dbPath: String) -> [String: Int] {
