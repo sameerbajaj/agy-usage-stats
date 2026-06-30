@@ -11,6 +11,8 @@ import SwiftUI
 public struct ConversationDbMeta: Codable, Hashable, Sendable {
     public let llmCalls: Int
     public let totalOutputBytes: Int
+    public var inputTokens: Int? = nil
+    public var outputTokens: Int? = nil
 }
 
 public struct QueryEntry: Identifiable, Codable, Hashable {
@@ -248,6 +250,18 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
     }
 
     public func estimateTokensAndCost(for query: QueryEntry) -> (inputTokens: Int, outputTokens: Int, cost: Double) {
+        if let meta = query.conversationMeta {
+            if meta.llmCalls == 0 {
+                return (0, 0, 0.0)
+            }
+            if let inTokens = meta.inputTokens, inTokens > 0,
+               let outTokens = meta.outputTokens, outTokens > 0 {
+                let inputCost = (Double(inTokens) / 1_000_000.0) * inputPricePerMillion
+                let outputCost = (Double(outTokens) / 1_000_000.0) * outputPricePerMillion
+                return (inTokens, outTokens, inputCost + outputCost)
+            }
+        }
+        
         let calls = max(1, query.conversationMeta?.llmCalls ?? 1)
         let outBytes = query.conversationMeta?.totalOutputBytes ?? 0
         

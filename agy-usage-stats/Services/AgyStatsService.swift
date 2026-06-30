@@ -90,7 +90,14 @@ public enum AgyStatsService {
                     if !turnGens.isEmpty {
                         let llmCalls = turnGens.count
                         let totalOutputBytes = turnGens.reduce(0) { $0 + $1.size }
-                        newQ.conversationMeta = ConversationDbMeta(llmCalls: llmCalls, totalOutputBytes: totalOutputBytes)
+                        let totalInTokens = turnGens.compactMap { $0.inputTokens }.reduce(0, +)
+                        let totalOutTokens = turnGens.compactMap { $0.outputTokens }.reduce(0, +)
+                        newQ.conversationMeta = ConversationDbMeta(
+                            llmCalls: llmCalls,
+                            totalOutputBytes: totalOutputBytes,
+                            inputTokens: totalInTokens,
+                            outputTokens: totalOutTokens
+                        )
                         
                         let turnModels = turnGens.compactMap { $0.modelName }
                         if let model = turnModels.last {
@@ -289,6 +296,8 @@ public enum AgyStatsService {
         let size: Int
         let timestamp: Date?
         let modelName: String?
+        let inputTokens: Int?
+        let outputTokens: Int?
     }
     
     private struct DbConversationData {
@@ -317,6 +326,8 @@ public enum AgyStatsService {
                 let size = Int(sqlite3_column_int(statement, 2))
                 var modelName: String? = nil
                 var timestamp: Date? = nil
+                var inputTokens: Int? = nil
+                var outputTokens: Int? = nil
                 
                 if let blob = sqlite3_column_blob(statement, 1) {
                     let blobSize = sqlite3_column_bytes(statement, 1)
@@ -325,6 +336,8 @@ public enum AgyStatsService {
                         let meta = extractMetadata(from: data)
                         modelName = meta.modelName
                         timestamp = meta.timestamp
+                        inputTokens = meta.inputTokens
+                        outputTokens = meta.outputTokens
                     }
                 }
                 
@@ -334,7 +347,14 @@ public enum AgyStatsService {
                     lastTimestamp = timestamp
                 }
                 
-                generations.append(DbGeneration(idx: idx, size: size, timestamp: timestamp, modelName: modelName))
+                generations.append(DbGeneration(
+                    idx: idx,
+                    size: size,
+                    timestamp: timestamp,
+                    modelName: modelName,
+                    inputTokens: inputTokens,
+                    outputTokens: outputTokens
+                ))
             }
         }
         sqlite3_finalize(statement)
@@ -421,10 +441,12 @@ public enum AgyStatsService {
         return fields
     }
     
-    private static func extractMetadata(from data: Data) -> (modelName: String?, timestamp: Date?) {
+    private static func extractMetadata(from data: Data) -> (modelName: String?, timestamp: Date?, inputTokens: Int?, outputTokens: Int?) {
         let fields = parseProtobufFields(data: data)
         var modelName: String? = nil
         var timestamp: Date? = nil
+        var inputTokens: Int? = nil
+        var outputTokens: Int? = nil
         
         // Try getting model from nested Field 1
         if let f1 = fields[1] as? [Int: Any] {
@@ -439,6 +461,16 @@ public enum AgyStatsService {
                let seconds = f4[1] as? Int {
                 timestamp = Date(timeIntervalSince1970: TimeInterval(seconds))
             }
+            
+            // Try getting input/output tokens from Field 1 -> Field 4 -> Field 2 and Field 3
+            if let f4 = f1[4] as? [Int: Any] {
+                if let input = f4[2] as? Int {
+                    inputTokens = input
+                }
+                if let output = f4[3] as? Int {
+                    outputTokens = output
+                }
+            }
         }
         
         // Fallback: Try getting model from top-level field 19 if present
@@ -448,7 +480,7 @@ public enum AgyStatsService {
             modelName = cleanAndMapModelName(name)
         }
         
-        return (modelName, timestamp)
+        return (modelName, timestamp, inputTokens, outputTokens)
     }
     
     private static func cleanAndMapModelName(_ name: String) -> String? {
