@@ -47,7 +47,7 @@ struct QuotaBucketRow: View {
     private var claudeColor: Color { Color.claude(isDark: isDark) }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline) {
                 Text(bucket.displayName)
                     .font(.system(size: 10, weight: .medium))
@@ -88,11 +88,11 @@ struct QuotaBucketRow: View {
             
             if let cleaned = resolveResetDescription() {
                 Text(cleaned)
-                    .font(.system(size: 9.5, weight: .medium))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary.opacity(0.85))
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
     }
     
     private func resolveResetDescription() -> String? {
@@ -229,10 +229,10 @@ struct StatsTabView: View {
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 // Active Model Row
                 activeModelRow
-                    .padding(.top, 4)
+                    .padding(.top, 2)
                 
                 // Metrics Strip
                 metricsStrip
@@ -240,10 +240,13 @@ struct StatsTabView: View {
                 // Remaining Quotas List
                 remainingQuotasList
                 
-                // Tool Execution Breakdown
-                toolExecutionBreakdown
+                if viewModel.showToolBreakdown {
+                    // Tool Execution Breakdown
+                    toolExecutionBreakdown
+                }
             }
-            .padding(12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
         .background(theme.surfacePrimary)
     }
@@ -300,7 +303,7 @@ struct StatsTabView: View {
     }
     
     private var remainingQuotasList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("remaining quotas")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
@@ -315,13 +318,13 @@ struct StatsTabView: View {
             .padding(.horizontal, 4)
             
             if let quota = viewModel.stats.quotaInfo, !quota.groups.isEmpty {
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     ForEach(quota.groups) { group in
                         let isHovered = quotaCardHovered[group.displayName] ?? false
                         let isGemini = group.displayName.lowercased().contains("gemini")
                         let cardAccent = isGemini ? geminiColor : claudeColor
                         
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(group.displayName.lowercased())
                                     .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -330,13 +333,14 @@ struct StatsTabView: View {
                                 Spacer()
                             }
                             
-                            VStack(spacing: 8) {
+                            VStack(spacing: 4) {
                                 ForEach(group.sortedBuckets) { bucket in
                                     QuotaBucketRow(groupDisplayName: group.displayName, bucket: bucket)
                                 }
                             }
                         }
-                        .padding(10)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
                         .themedCardStyle(theme: theme, isHovered: isHovered, accentColor: cardAccent)
                         .onHover { hovering in
                             quotaCardHovered[group.displayName] = hovering

@@ -168,6 +168,19 @@ struct SettingsTabView: View {
                         .controlSize(.small)
                         .labelsHidden()
                 }
+                
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+                
+                HStack {
+                    Text("Show Tool Executions")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(theme.textPrimary.opacity(0.85))
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showToolBreakdown)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
             }
             .padding(10)
             .themedCardStyle(theme: theme, isHovered: isHoveredMenu)

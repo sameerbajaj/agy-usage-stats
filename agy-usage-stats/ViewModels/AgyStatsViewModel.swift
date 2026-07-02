@@ -96,6 +96,12 @@ public final class AgyStatsViewModel {
         }
     }
     
+    public var showToolBreakdown: Bool {
+        didSet {
+            UserDefaults.standard.set(showToolBreakdown, forKey: "agy_showToolBreakdown")
+        }
+    }
+    
     public var selectedTheme: AppTheme {
         didSet {
             UserDefaults.standard.set(selectedTheme.rawValue, forKey: "agy_selectedTheme")
@@ -153,6 +159,7 @@ public final class AgyStatsViewModel {
         }
         
         self.showWeeklyLimitAndReset = UserDefaults.standard.bool(forKey: "agy_showWeeklyLimitAndReset")
+        self.showToolBreakdown = UserDefaults.standard.bool(forKey: "agy_showToolBreakdown")
         
         let savedTheme = UserDefaults.standard.string(forKey: "agy_selectedTheme")
         if let savedTheme, let theme = AppTheme(rawValue: savedTheme) {
