@@ -257,7 +257,7 @@ struct StatsTabView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 9))
                     .foregroundStyle(geminiColor)
-                Text(viewModel.settings.model ?? (viewModel.stats.quotaInfo?.plan ?? "Gemini 3.5 Flash"))
+                Text(viewModel.settings.model ?? (viewModel.stats.quotaInfo?.plan ?? "Gemini 3.6 Flash"))
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary.opacity(0.85))
             }

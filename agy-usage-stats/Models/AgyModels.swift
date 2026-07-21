@@ -284,6 +284,9 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
 }
 
 public let knownModels = [
+    ModelCostInfo(name: "Gemini 3.6 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .low),
+    ModelCostInfo(name: "Gemini 3.6 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .medium),
+    ModelCostInfo(name: "Gemini 3.6 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .high),
     ModelCostInfo(name: "Gemini 3.5 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .low),
     ModelCostInfo(name: "Gemini 3.5 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .medium),
     ModelCostInfo(name: "Gemini 3.5 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .high),
@@ -292,3 +295,8 @@ public let knownModels = [
     ModelCostInfo(name: "Claude Sonnet 4.6 (Thinking)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, tier: .thinking),
     ModelCostInfo(name: "Claude Opus 4.6 (Thinking)", inputPricePerMillion: 5.00, outputPricePerMillion: 25.00, tier: .thinking)
 ]
+
+public var defaultGeminiModel: ModelCostInfo {
+    knownModels.first(where: { $0.name == "Gemini 3.6 Flash (High)" }) ?? knownModels[0]
+}
+

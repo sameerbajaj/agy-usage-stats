@@ -106,7 +106,7 @@ struct CostTabView: View {
             return matched
         }
         
-        return knownModels[2] // Gemini 3.5 Flash (High)
+        return defaultGeminiModel
     }
     
     private var selectedModel: ModelCostInfo {
@@ -126,7 +126,7 @@ struct CostTabView: View {
         }) {
             return found
         }
-        return knownModels[2] // default Gemini 3.5 Flash (High)
+        return defaultGeminiModel
     }
     
     var body: some View {
