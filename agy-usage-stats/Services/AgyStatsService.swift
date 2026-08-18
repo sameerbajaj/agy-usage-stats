@@ -157,11 +157,32 @@ public enum AgyStatsService {
                 print("AgyStatsService: Fetched quota: NONE")
             }
             
-            // Model distribution and cost calculations
+            // Model distribution, cost calculations, and daily/monthly time buckets
             var modelDist: [String: Int] = [:]
             var todayCost = 0.0
             var weekCost = 0.0
             var totalCost = 0.0
+            
+            let dayKeyFormatter = DateFormatter()
+            dayKeyFormatter.dateFormat = "yyyy-MM-dd"
+            
+            let dayLabelFormatter = DateFormatter()
+            dayLabelFormatter.dateFormat = "EEE, MMM d"
+            
+            let dayShortLabelFormatter = DateFormatter()
+            dayShortLabelFormatter.dateFormat = "MMM d"
+            
+            let monthKeyFormatter = DateFormatter()
+            monthKeyFormatter.dateFormat = "yyyy-MM"
+            
+            let monthLabelFormatter = DateFormatter()
+            monthLabelFormatter.dateFormat = "MMMM yyyy"
+            
+            let monthShortLabelFormatter = DateFormatter()
+            monthShortLabelFormatter.dateFormat = "MMM ''yy"
+            
+            var dailyBuckets: [String: UsageTimeBucket] = [:]
+            var monthlyBuckets: [String: UsageTimeBucket] = [:]
             
             for q in queriesWithMeta {
                 if let modelName = q.modelName {
@@ -176,7 +197,7 @@ public enum AgyStatsService {
                     return cleaned.contains(mName) || mName.contains(cleaned)
                 }) ?? defaultGeminiModel
                 
-                let (_, _, cost) = model.estimateTokensAndCost(for: q)
+                let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
                 
                 totalCost += cost
                 if q.timestamp >= startOfToday {
@@ -185,7 +206,60 @@ public enum AgyStatsService {
                 if q.timestamp >= sevenDaysAgo {
                     weekCost += cost
                 }
+                
+                // Daily Bucket
+                let dayKey = dayKeyFormatter.string(from: q.timestamp)
+                let startOfDay = calendar.startOfDay(for: q.timestamp)
+                var dayBucket = dailyBuckets[dayKey] ?? UsageTimeBucket(
+                    periodKey: dayKey,
+                    label: dayLabelFormatter.string(from: q.timestamp),
+                    shortLabel: dayShortLabelFormatter.string(from: q.timestamp),
+                    date: startOfDay
+                )
+                dayBucket.queryCount += 1
+                dayBucket.totalCost += cost
+                dayBucket.inputTokens += inTokens
+                dayBucket.outputTokens += outTokens
+                dayBucket.modelBreakdown[model.name, default: 0.0] += cost
+                dayBucket.modelQueryBreakdown[model.name, default: 0] += 1
+                dailyBuckets[dayKey] = dayBucket
+                
+                // Monthly Bucket
+                let monthKey = monthKeyFormatter.string(from: q.timestamp)
+                let components = calendar.dateComponents([.year, .month], from: q.timestamp)
+                let startOfMonth = calendar.date(from: components) ?? q.timestamp
+                var monthBucket = monthlyBuckets[monthKey] ?? UsageTimeBucket(
+                    periodKey: monthKey,
+                    label: monthLabelFormatter.string(from: q.timestamp),
+                    shortLabel: monthShortLabelFormatter.string(from: q.timestamp),
+                    date: startOfMonth
+                )
+                monthBucket.queryCount += 1
+                monthBucket.totalCost += cost
+                monthBucket.inputTokens += inTokens
+                monthBucket.outputTokens += outTokens
+                monthBucket.modelBreakdown[model.name, default: 0.0] += cost
+                monthBucket.modelQueryBreakdown[model.name, default: 0] += 1
+                monthlyBuckets[monthKey] = monthBucket
             }
+            
+            // Fill in missing days for the last 14 days to provide a continuous daily timeline
+            for dayOffset in (0..<14).reversed() {
+                if let targetDate = calendar.date(byAdding: .day, value: -dayOffset, to: startOfToday) {
+                    let key = dayKeyFormatter.string(from: targetDate)
+                    if dailyBuckets[key] == nil {
+                        dailyBuckets[key] = UsageTimeBucket(
+                            periodKey: key,
+                            label: dayLabelFormatter.string(from: targetDate),
+                            shortLabel: dayShortLabelFormatter.string(from: targetDate),
+                            date: targetDate
+                        )
+                    }
+                }
+            }
+            
+            let sortedDaily = dailyBuckets.values.sorted { $0.date < $1.date }
+            let sortedMonthly = monthlyBuckets.values.sorted { $0.date < $1.date }
             
             let stats = AgyUsageStats(
                 totalQueries: queries.count,
@@ -194,13 +268,15 @@ public enum AgyStatsService {
                 lastQueryAt: lastQuery,
                 workspaces: workspaces,
                 modelDistribution: modelDist,
-                recentQueries: Array(queriesWithMeta.prefix(100)),
+                recentQueries: Array(queriesWithMeta.prefix(250)),
                 toolStats: toolStats,
                 totalToolCalls: totalToolCalls,
                 quotaInfo: quotaInfo,
                 totalCostEstimate: totalCost,
                 weeklyCostEstimate: weekCost,
-                todayCostEstimate: todayCost
+                todayCostEstimate: todayCost,
+                dailyUsage: sortedDaily,
+                monthlyUsage: sortedMonthly
             )
             
             return (stats, settings)

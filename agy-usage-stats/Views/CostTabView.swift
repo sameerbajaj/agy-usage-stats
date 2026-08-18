@@ -11,6 +11,25 @@ struct CostTabView: View {
     @Environment(\.colorScheme) var colorScheme
     let viewModel: AgyStatsViewModel
     
+    enum TimeScope: String, CaseIterable, Identifiable {
+        case daily = "Daily"
+        case monthly = "Monthly"
+        
+        var id: String { rawValue }
+    }
+    
+    enum MetricType: String, CaseIterable, Identifiable {
+        case cost = "Cost ($)"
+        case queries = "Queries"
+        case tokens = "Tokens"
+        
+        var id: String { rawValue }
+    }
+    
+    @State private var timeScope: TimeScope = .daily
+    @State private var metricType: MetricType = .cost
+    @State private var hoveredBucketId: String? = nil
+    
     @State private var hoveredModelId: String? = nil
     @State private var localSelectedModelId: String? = nil
     @State private var showPricingTemplates = false
@@ -134,6 +153,9 @@ struct CostTabView: View {
             VStack(spacing: 12) {
                 // API Cost Estimates Summary Card
                 costSummaryCard
+                
+                // Interactive Usage & Cost History Bar Chart
+                usageTrendsSection
                 
                 // Today's Usage & Cost Analysis Section
                 todayAnalysisSection
@@ -382,6 +404,296 @@ struct CostTabView: View {
                 .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity)
+    }
+    
+    // MARK: - Interactive Usage & Cost History Bar Chart Section
+    
+    private var activeBuckets: [UsageTimeBucket] {
+        switch timeScope {
+        case .daily:
+            return viewModel.stats.dailyUsage
+        case .monthly:
+            return viewModel.stats.monthlyUsage
+        }
+    }
+    
+    private var activeHoveredBucket: UsageTimeBucket? {
+        if let id = hoveredBucketId, let found = activeBuckets.first(where: { $0.id == id }) {
+            return found
+        }
+        return activeBuckets.last
+    }
+    
+    private func value(for bucket: UsageTimeBucket) -> Double {
+        switch metricType {
+        case .cost:
+            return bucket.totalCost
+        case .queries:
+            return Double(bucket.queryCount)
+        case .tokens:
+            return Double(bucket.inputTokens + bucket.outputTokens)
+        }
+    }
+    
+    private func formattedValue(_ val: Double) -> String {
+        switch metricType {
+        case .cost:
+            return String(format: "$%.2f", val)
+        case .queries:
+            return "\(Int(val)) q"
+        case .tokens:
+            if val >= 1_000_000 {
+                return String(format: "%.1fM", val / 1_000_000)
+            } else if val >= 1_000 {
+                return String(format: "%.0fk", val / 1_000)
+            } else {
+                return "\(Int(val))"
+            }
+        }
+    }
+    
+    private var usageTrendsSection: some View {
+        let buckets = activeBuckets
+        let maxVal = max(0.001, buckets.map { value(for: $0) }.max() ?? 1.0)
+        let inspected = activeHoveredBucket
+        
+        return VStack(alignment: .leading, spacing: 8) {
+            // Header Controls
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 9))
+                        .foregroundStyle(theme.geminiAccent)
+                    Text("usage & cost trends")
+                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                // Time Scope Selector
+                HStack(spacing: 2) {
+                    ForEach(TimeScope.allCases) { scope in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                timeScope = scope
+                                hoveredBucketId = nil
+                            }
+                        } label: {
+                            Text(scope.rawValue)
+                                .font(.system(size: 8, weight: timeScope == scope ? .bold : .medium, design: .rounded))
+                                .foregroundStyle(timeScope == scope ? Color.primary : Color.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(timeScope == scope ? theme.surfaceSecondary : Color.clear)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(2)
+                .background(
+                    Capsule()
+                        .fill(theme.surfacePrimary.opacity(0.6))
+                )
+                
+                // Metric Selector
+                HStack(spacing: 2) {
+                    ForEach(MetricType.allCases) { metric in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                metricType = metric
+                            }
+                        } label: {
+                            Text(metric.rawValue)
+                                .font(.system(size: 8, weight: metricType == metric ? .bold : .medium, design: .rounded))
+                                .foregroundStyle(metricType == metric ? theme.geminiAccent : Color.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(metricType == metric ? theme.geminiAccent.opacity(0.12) : Color.clear)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(2)
+                .background(
+                    Capsule()
+                        .fill(theme.surfacePrimary.opacity(0.6))
+                )
+            }
+            .padding(.horizontal, 4)
+            
+            // Interactive Chart Card
+            VStack(alignment: .leading, spacing: 10) {
+                // Interactive Hover Inspector Strip
+                if let bucket = inspected {
+                    HStack(alignment: .center, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(bucket.label)
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .foregroundStyle(.primary.opacity(0.85))
+                            
+                            HStack(spacing: 6) {
+                                Text("\(bucket.queryCount) \(bucket.queryCount == 1 ? "query" : "queries")")
+                                    .font(.system(size: 8, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                
+                                Text("•")
+                                    .font(.system(size: 7))
+                                    .foregroundStyle(.secondary.opacity(0.4))
+                                
+                                Text("\(formatNumber(bucket.inputTokens)) in / \(formatNumber(bucket.outputTokens)) out")
+                                    .font(.system(size: 8, weight: .medium, design: .rounded).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(formattedValue(value(for: bucket)))
+                                .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(metricType == .cost ? theme.costGreen : theme.geminiAccent)
+                            
+                            if metricType != .cost {
+                                Text(String(format: "$%.2f est.", bucket.totalCost))
+                                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(theme.costGreen)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(theme.surfaceSecondary.opacity(0.8))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(theme.cardStroke, lineWidth: 0.5)
+                    )
+                }
+                
+                // Bars Canvas
+                if buckets.isEmpty {
+                    VStack(spacing: 4) {
+                        Image(systemName: "chart.bar")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary.opacity(0.5))
+                        Text("no historical usage data yet")
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary.opacity(0.7))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 90)
+                } else {
+                    HStack(alignment: .bottom, spacing: timeScope == .daily ? 3 : 6) {
+                        ForEach(buckets) { bucket in
+                            let val = value(for: bucket)
+                            let heightRatio = maxVal > 0 ? CGFloat(val / maxVal) : 0
+                            let isHovered = hoveredBucketId == bucket.id || (hoveredBucketId == nil && bucket.id == buckets.last?.id)
+                            
+                            VStack(spacing: 4) {
+                                GeometryReader { geo in
+                                    ZStack(alignment: .bottom) {
+                                        // Background Track
+                                        RoundedRectangle(cornerRadius: 2.5)
+                                            .fill(theme.surfaceSecondary.opacity(0.4))
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        
+                                        // Foreground Value Bar
+                                        let barHeight = max(val > 0 ? 4.0 : 0.0, geo.size.height * heightRatio)
+                                        
+                                        RoundedRectangle(cornerRadius: 2.5)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: barGradientColors(isHovered: isHovered),
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                )
+                                            )
+                                            .frame(height: barHeight)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 2.5)
+                                                    .stroke(isHovered ? theme.geminiAccent : Color.clear, lineWidth: 1)
+                                            )
+                                            .shadow(color: isHovered ? theme.geminiAccent.opacity(0.3) : Color.clear, radius: 3, y: 1)
+                                    }
+                                }
+                                .frame(height: 75)
+                                
+                                // Label
+                                Text(bucket.shortLabel)
+                                    .font(.system(size: 7.5, weight: isHovered ? .bold : .medium, design: .rounded).monospacedDigit())
+                                    .foregroundStyle(isHovered ? theme.geminiAccent : Color.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .contentShape(Rectangle())
+                            .onHover { hovering in
+                                withAnimation(.easeInOut(duration: 0.12)) {
+                                    if hovering {
+                                        hoveredBucketId = bucket.id
+                                    } else if hoveredBucketId == bucket.id {
+                                        hoveredBucketId = nil
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 95)
+                    .padding(.horizontal, 2)
+                }
+                
+                // Quick Summary Strip
+                if !buckets.isEmpty {
+                    Divider()
+                        .padding(.vertical, 2)
+                    
+                    HStack {
+                        let totalSum = buckets.reduce(0.0) { $0 + value(for: $1) }
+                        let avg = totalSum / Double(max(1, buckets.count))
+                        let peak = buckets.map { value(for: $0) }.max() ?? 0
+                        
+                        summaryItem(title: "Peak", value: formattedValue(peak))
+                        Spacer()
+                        summaryItem(title: "Avg/\(timeScope == .daily ? "day" : "mo")", value: formattedValue(avg))
+                        Spacer()
+                        summaryItem(title: "Scope Total", value: formattedValue(totalSum))
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
+            .padding(10)
+            .themedCardStyle(theme: theme, accentColor: theme.geminiAccent)
+        }
+    }
+    
+    private func barGradientColors(isHovered: Bool) -> [Color] {
+        switch metricType {
+        case .cost:
+            return isHovered ? [theme.costGreen, theme.costGreen.opacity(0.8)] : [theme.costGreen.opacity(0.9), theme.costGreen.opacity(0.5)]
+        case .queries:
+            return isHovered ? [theme.geminiAccent, theme.geminiAccent.opacity(0.8)] : [theme.geminiAccent.opacity(0.9), theme.geminiAccent.opacity(0.5)]
+        case .tokens:
+            return isHovered ? [Color.cyan, Color.blue.opacity(0.8)] : [Color.cyan.opacity(0.85), Color.blue.opacity(0.45)]
+        }
+    }
+    
+    private func summaryItem(title: String, value: String) -> some View {
+        HStack(spacing: 3) {
+            Text(title + ":")
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 8.5, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.primary.opacity(0.85))
+        }
     }
     
     // MARK: - Today's Cost & Token Analysis Section

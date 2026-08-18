@@ -159,6 +159,44 @@ public struct AgyQuotaInfo: Codable, Hashable, Sendable {
     public let groups: [AgyQuotaGroup]
 }
 
+public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
+    public var id: String { periodKey }
+    public let periodKey: String
+    public let label: String
+    public let shortLabel: String
+    public let date: Date
+    public var queryCount: Int
+    public var totalCost: Double
+    public var inputTokens: Int
+    public var outputTokens: Int
+    public var modelBreakdown: [String: Double]
+    public var modelQueryBreakdown: [String: Int]
+    
+    public init(
+        periodKey: String,
+        label: String,
+        shortLabel: String,
+        date: Date,
+        queryCount: Int = 0,
+        totalCost: Double = 0.0,
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        modelBreakdown: [String: Double] = [:],
+        modelQueryBreakdown: [String: Int] = [:]
+    ) {
+        self.periodKey = periodKey
+        self.label = label
+        self.shortLabel = shortLabel
+        self.date = date
+        self.queryCount = queryCount
+        self.totalCost = totalCost
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.modelBreakdown = modelBreakdown
+        self.modelQueryBreakdown = modelQueryBreakdown
+    }
+}
+
 public struct AgyUsageStats: Codable {
     public var totalQueries: Int
     public var queriesToday: Int
@@ -173,6 +211,8 @@ public struct AgyUsageStats: Codable {
     public var totalCostEstimate: Double
     public var weeklyCostEstimate: Double
     public var todayCostEstimate: Double
+    public var dailyUsage: [UsageTimeBucket]
+    public var monthlyUsage: [UsageTimeBucket]
     
     public static let empty = AgyUsageStats(
         totalQueries: 0,
@@ -187,7 +227,9 @@ public struct AgyUsageStats: Codable {
         quotaInfo: nil,
         totalCostEstimate: 0.0,
         weeklyCostEstimate: 0.0,
-        todayCostEstimate: 0.0
+        todayCostEstimate: 0.0,
+        dailyUsage: [],
+        monthlyUsage: []
     )
 }
 
@@ -250,10 +292,20 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
     }
 
     public func estimateTokensAndCost(for query: QueryEntry) -> (inputTokens: Int, outputTokens: Int, cost: Double) {
+        let trimmed = query.display.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isLocalSlash = trimmed.hasPrefix("/") && 
+            !trimmed.hasPrefix("/plan") && 
+            !trimmed.hasPrefix("/learn") && 
+            !trimmed.hasPrefix("/grill-me") && 
+            !trimmed.hasPrefix("/goal") && 
+            (query.conversationMeta?.totalOutputBytes ?? 0) == 0 && 
+            (query.conversationMeta?.inputTokens ?? 0) == 0
+        
+        if isLocalSlash && query.conversationMeta?.llmCalls == 0 {
+            return (0, 0, 0.0)
+        }
+        
         if let meta = query.conversationMeta {
-            if meta.llmCalls == 0 {
-                return (0, 0, 0.0)
-            }
             if let inTokens = meta.inputTokens, inTokens > 0,
                let outTokens = meta.outputTokens, outTokens > 0 {
                 let inputCost = (Double(inTokens) / 1_000_000.0) * inputPricePerMillion
@@ -265,13 +317,13 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
         let calls = max(1, query.conversationMeta?.llmCalls ?? 1)
         let outBytes = query.conversationMeta?.totalOutputBytes ?? 0
         
-        let promptLen = query.display.count / 4
-        let contextPerCall = min(12000.0, tier.inputTokens)
-        let inputTokens = promptLen + (calls - 1) * Int(contextPerCall) + 5000
+        let promptLen = max(10, trimmed.count / 4)
+        let contextPerCall = min(15000.0, tier.inputTokens)
+        let inputTokens = promptLen + (calls - 1) * Int(contextPerCall) + Int(tier.inputTokens * 0.35)
         
         let outputTokens: Int
         if outBytes > 0 {
-            outputTokens = max(50, outBytes / 4)
+            outputTokens = max(80, outBytes / 4)
         } else {
             outputTokens = Int(tier.outputTokens) * calls
         }
