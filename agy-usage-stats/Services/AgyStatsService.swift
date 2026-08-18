@@ -243,19 +243,26 @@ public enum AgyStatsService {
                 monthlyBuckets[monthKey] = monthBucket
             }
             
-            // Fill in missing days for the last 30 days to provide a continuous daily timeline
-            for dayOffset in (0..<30).reversed() {
-                if let targetDate = calendar.date(byAdding: .day, value: -dayOffset, to: startOfToday) {
-                    let key = dayKeyFormatter.string(from: targetDate)
-                    if dailyBuckets[key] == nil {
-                        dailyBuckets[key] = UsageTimeBucket(
-                            periodKey: key,
-                            label: dayLabelFormatter.string(from: targetDate),
-                            shortLabel: dayShortLabelFormatter.string(from: targetDate),
-                            date: targetDate
-                        )
-                    }
+            // Fill in missing days from the earliest recorded query up to today so every calendar month has complete daily buckets
+            let earliestDate = queries.last?.timestamp ?? startOfToday
+            let earliestMonthComponents = calendar.dateComponents([.year, .month], from: earliestDate)
+            let startOfEarliestMonth = calendar.date(from: earliestMonthComponents) ?? startOfToday
+            let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: startOfToday) ?? startOfToday
+            let fillStartDate = min(startOfEarliestMonth, thirtyDaysAgo)
+            
+            var dayCursor = fillStartDate
+            while dayCursor <= startOfToday {
+                let key = dayKeyFormatter.string(from: dayCursor)
+                if dailyBuckets[key] == nil {
+                    dailyBuckets[key] = UsageTimeBucket(
+                        periodKey: key,
+                        label: dayLabelFormatter.string(from: dayCursor),
+                        shortLabel: dayShortLabelFormatter.string(from: dayCursor),
+                        date: dayCursor
+                    )
                 }
+                guard let nextDay = calendar.date(byAdding: .day, value: 1, to: dayCursor) else { break }
+                dayCursor = nextDay
             }
             
             let sortedDaily = dailyBuckets.values.sorted { $0.date < $1.date }

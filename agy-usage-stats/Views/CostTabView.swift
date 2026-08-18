@@ -32,6 +32,7 @@ struct CostTabView: View {
     
     @State private var timeScope: TimeScope = .week
     @State private var metricType: MetricType = .cost
+    @State private var monthOffset: Int = 0
     @State private var hoveredBucketId: String? = nil
     
     @State private var hoveredModelId: String? = nil
@@ -412,14 +413,75 @@ struct CostTabView: View {
     
     // MARK: - Interactive Usage & Cost History Bar Chart Section
     
+    // MARK: - Calendar Month Navigation & Active Buckets Helpers
+    
+    private var currentTargetMonthDate: Date {
+        let calendar = Calendar.current
+        return calendar.date(byAdding: .month, value: monthOffset, to: Date()) ?? Date()
+    }
+    
+    private var monthDisplayTitle: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: currentTargetMonthDate)
+    }
+    
+    private var earliestRecordedDate: Date {
+        viewModel.stats.dailyUsage.first?.date ?? Date()
+    }
+    
+    private var canGoBack: Bool {
+        let calendar = Calendar.current
+        let targetComp = calendar.dateComponents([.year, .month], from: currentTargetMonthDate)
+        let earliestComp = calendar.dateComponents([.year, .month], from: earliestRecordedDate)
+        
+        let tYear = targetComp.year ?? 0
+        let tMonth = targetComp.month ?? 0
+        let eYear = earliestComp.year ?? 0
+        let eMonth = earliestComp.month ?? 0
+        
+        if tYear > eYear { return true }
+        if tYear == eYear { return tMonth > eMonth }
+        return false
+    }
+    
+    private var canGoForward: Bool {
+        monthOffset < 0
+    }
+    
+    private func getMonthBuckets(for targetDate: Date) -> [UsageTimeBucket] {
+        let calendar = Calendar.current
+        let comp = calendar.dateComponents([.year, .month], from: targetDate)
+        guard let targetYear = comp.year, let targetMonth = comp.month else { return [] }
+        
+        return viewModel.stats.dailyUsage.filter { bucket in
+            let bComp = calendar.dateComponents([.year, .month], from: bucket.date)
+            return bComp.year == targetYear && bComp.month == targetMonth
+        }
+    }
+    
     private var activeBuckets: [UsageTimeBucket] {
         switch timeScope {
         case .week:
-            return Array(viewModel.stats.dailyUsage.suffix(7))
+            if monthOffset == 0 {
+                return Array(viewModel.stats.dailyUsage.suffix(7))
+            } else {
+                let monthDays = getMonthBuckets(for: currentTargetMonthDate)
+                return Array(monthDays.suffix(7))
+            }
         case .twoWeeks:
-            return Array(viewModel.stats.dailyUsage.suffix(14))
+            if monthOffset == 0 {
+                return Array(viewModel.stats.dailyUsage.suffix(14))
+            } else {
+                let monthDays = getMonthBuckets(for: currentTargetMonthDate)
+                return Array(monthDays.suffix(14))
+            }
         case .month:
-            return Array(viewModel.stats.dailyUsage.suffix(30))
+            let monthDays = getMonthBuckets(for: currentTargetMonthDate)
+            if monthDays.isEmpty && monthOffset == 0 {
+                return Array(viewModel.stats.dailyUsage.suffix(30))
+            }
+            return monthDays
         case .monthly:
             return viewModel.stats.monthlyUsage
         }
@@ -479,11 +541,16 @@ struct CostTabView: View {
         return VStack(alignment: .leading, spacing: 8) {
             trendsHeaderRow
             
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 trendsRangePicker
                 
                 if let bucket = inspected {
                     trendsInspectorView(bucket: bucket)
+                }
+                
+                // Month navigator bar directly above chart
+                if timeScope != .monthly {
+                    monthNavigatorBar
                 }
                 
                 if buckets.isEmpty {
@@ -491,7 +558,7 @@ struct CostTabView: View {
                         Image(systemName: "chart.bar")
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary.opacity(0.5))
-                        Text("no historical usage data yet")
+                        Text("no historical usage data for \(monthDisplayTitle.lowercased())")
                             .font(.system(size: 9, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary.opacity(0.7))
                     }
@@ -512,6 +579,91 @@ struct CostTabView: View {
             .padding(10)
             .themedCardStyle(theme: theme, accentColor: theme.geminiAccent)
         }
+    }
+    
+    private var monthNavigatorBar: some View {
+        HStack(alignment: .center, spacing: 4) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    if canGoBack {
+                        monthOffset -= 1
+                        hoveredBucketId = nil
+                    }
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .foregroundStyle(canGoBack ? Color.primary.opacity(0.85) : Color.secondary.opacity(0.25))
+                .frame(width: 22, height: 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(canGoBack ? theme.surfaceSecondary : Color.clear)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!canGoBack)
+            
+            Spacer()
+            
+            HStack(spacing: 5) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 8))
+                    .foregroundStyle(theme.geminiAccent)
+                
+                Text(monthDisplayTitle)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary.opacity(0.9))
+                
+                if monthOffset != 0 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            monthOffset = 0
+                            hoveredBucketId = nil
+                        }
+                    } label: {
+                        Text("Current")
+                            .font(.system(size: 7.5, weight: .bold, design: .rounded))
+                            .foregroundStyle(theme.geminiAccent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(theme.geminiAccent.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            
+            Spacer()
+            
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    if canGoForward {
+                        monthOffset += 1
+                        hoveredBucketId = nil
+                    }
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .foregroundStyle(canGoForward ? Color.primary.opacity(0.85) : Color.secondary.opacity(0.25))
+                .frame(width: 22, height: 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(canGoForward ? theme.surfaceSecondary : Color.clear)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!canGoForward)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(theme.surfaceSecondary.opacity(0.4))
+        )
     }
     
     private var trendsHeaderRow: some View {
@@ -775,14 +927,18 @@ struct CostTabView: View {
                     }
                 }
             } else if timeScope == .month {
-                ForEach([0, 7, 14, 21, buckets.count - 1], id: \.self) { idx in
-                    if idx < buckets.count {
-                        let b = buckets[idx]
-                        Text(b.shortLabel)
-                            .font(.system(size: 7.5, weight: .medium, design: .rounded).monospacedDigit())
-                            .foregroundStyle(inspected?.id == b.id ? theme.geminiAccent : Color.secondary)
-                        if idx != buckets.count - 1 {
-                            Spacer()
+                let count = buckets.count
+                if count > 0 {
+                    let indices = Array(Set([0, count / 4, count / 2, (count * 3) / 4, count - 1])).sorted()
+                    ForEach(indices, id: \.self) { idx in
+                        if idx < count {
+                            let b = buckets[idx]
+                            Text(b.shortLabel)
+                                .font(.system(size: 7.5, weight: .medium, design: .rounded).monospacedDigit())
+                                .foregroundStyle(inspected?.id == b.id ? theme.geminiAccent : Color.secondary)
+                            if idx != indices.last {
+                                Spacer()
+                            }
                         }
                     }
                 }
