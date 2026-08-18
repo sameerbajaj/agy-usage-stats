@@ -243,8 +243,8 @@ public enum AgyStatsService {
                 monthlyBuckets[monthKey] = monthBucket
             }
             
-            // Fill in missing days for the last 14 days to provide a continuous daily timeline
-            for dayOffset in (0..<14).reversed() {
+            // Fill in missing days for the last 30 days to provide a continuous daily timeline
+            for dayOffset in (0..<30).reversed() {
                 if let targetDate = calendar.date(byAdding: .day, value: -dayOffset, to: startOfToday) {
                     let key = dayKeyFormatter.string(from: targetDate)
                     if dailyBuckets[key] == nil {
