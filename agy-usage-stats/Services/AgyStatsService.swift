@@ -45,8 +45,8 @@ public enum AgyStatsService {
             var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
             print("AgyStatsService: Loaded history: queries count = \(loadedQueries.count), workspaces count = \(workspaces.count)")
             
-            // Default to settings.model or Gemini 3.6 Flash (High)
-            let defaultModel = settings.model ?? "Gemini 3.6 Flash (High)"
+            // Default to settings.model or Gemini 3.7 Flash (High)
+            let defaultModel = settings.model ?? "Gemini 3.7 Flash (High)"
             let queries = loadedQueries.map { q -> QueryEntry in
                 var copy = q
                 copy.modelName = defaultModel
@@ -490,6 +490,15 @@ public enum AgyStatsService {
             ("opus", "Claude Opus 4.6 (Thinking)"),
             ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
             ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
+            ("gpt-oss", "GPT-OSS-120B"),
+            ("oss-120b", "GPT-OSS-120B"),
+            ("gemini-3.7-flash-low", "Gemini 3.7 Flash (Low)"),
+            ("gemini-3.7-flash-medium", "Gemini 3.7 Flash (Medium)"),
+            ("gemini-3.7-flash-high", "Gemini 3.7 Flash (High)"),
+            ("gemini-3.7-flash", "Gemini 3.7 Flash (High)"),
+            ("gemini-3.7", "Gemini 3.7 Flash (High)"),
+            ("3.7-flash", "Gemini 3.7 Flash (High)"),
+            ("flash-3.7", "Gemini 3.7 Flash (High)"),
             ("gemini-3.6-flash-low", "Gemini 3.6 Flash (Low)"),
             ("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)"),
             ("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)"),
@@ -505,18 +514,20 @@ public enum AgyStatsService {
             ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
             ("pro-high", "Gemini 3.1 Pro (High)"),
             ("gemini-3.1-pro-preview", "Gemini 3.1 Pro (High)"),
+            ("gemini-3.1-pro", "Gemini 3.1 Pro (High)"),
+            ("gemini-3.1", "Gemini 3.1 Pro (High)"),
             ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
-            ("flash-extra-low", "Gemini 3.6 Flash (Low)"),
-            ("flash-low", "Gemini 3.6 Flash (Low)"),
-            ("flash-medium", "Gemini 3.6 Flash (Medium)"),
-            ("flash-a", "Gemini 3.6 Flash (High)"),
-            ("flash-agent", "Gemini 3.6 Flash (High)"),
-            ("flash-high", "Gemini 3.6 Flash (High)"),
+            ("flash-extra-low", "Gemini 3.7 Flash (Low)"),
+            ("flash-low", "Gemini 3.7 Flash (Low)"),
+            ("flash-medium", "Gemini 3.7 Flash (Medium)"),
+            ("flash-a", "Gemini 3.7 Flash (High)"),
+            ("flash-agent", "Gemini 3.7 Flash (High)"),
+            ("flash-high", "Gemini 3.7 Flash (High)"),
             ("gemini-3.5-flash", "Gemini 3.5 Flash (High)"),
-            ("gemini-3-flash-preview", "Gemini 3.6 Flash (High)"),
-            ("gemini-3-flash", "Gemini 3.6 Flash (High)"),
-            ("gemini-2.0-flash", "Gemini 3.6 Flash (High)"),
-            ("gemini-5h", "Gemini 3.6 Flash (High)")
+            ("gemini-3-flash-preview", "Gemini 3.7 Flash (High)"),
+            ("gemini-3-flash", "Gemini 3.7 Flash (High)"),
+            ("gemini-2.0-flash", "Gemini 3.7 Flash (High)"),
+            ("gemini-5h", "Gemini 3.7 Flash (High)")
         ]
         
         for mapping in mappings {
@@ -526,6 +537,9 @@ public enum AgyStatsService {
         }
         
         let knownModelNames = [
+            "Gemini 3.7 Flash (Low)",
+            "Gemini 3.7 Flash (Medium)",
+            "Gemini 3.7 Flash (High)",
             "Gemini 3.6 Flash (Low)",
             "Gemini 3.6 Flash (Medium)",
             "Gemini 3.6 Flash (High)",
@@ -535,7 +549,8 @@ public enum AgyStatsService {
             "Gemini 3.1 Pro (Low)",
             "Gemini 3.1 Pro (High)",
             "Claude Sonnet 4.6 (Thinking)",
-            "Claude Opus 4.6 (Thinking)"
+            "Claude Opus 4.6 (Thinking)",
+            "GPT-OSS-120B"
         ]
         for knownName in knownModelNames {
             if cleaned.contains(knownName.lowercased()) {
