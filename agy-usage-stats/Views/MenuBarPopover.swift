@@ -70,14 +70,14 @@ public struct MenuBarPopover: View {
                     SettingsTabView(viewModel: viewModel)
                 }
             }
-            .frame(height: 370)
+            .frame(height: 420)
             .background(theme.surfacePrimary)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
             
             footer
         }
-        .frame(width: 330)
+        .frame(width: 360)
         .background(theme.surfacePrimary)
         .preferredColorScheme(viewModel.selectedTheme.preferredColorScheme)
         .environment(\.colorScheme, viewModel.selectedTheme.preferredColorScheme)
