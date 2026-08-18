@@ -45,21 +45,26 @@ public enum AgyStatsService {
             var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
             print("AgyStatsService: Loaded history: queries count = \(loadedQueries.count), workspaces count = \(workspaces.count)")
             
-            // Default to settings.model or Gemini 3.7 Flash (High)
-            let defaultModel = settings.model ?? "Gemini 3.7 Flash (High)"
+            // Date-aware fallback threshold: Gemini 3.7 Flash was released in August 2026
+            let calendar = Calendar.current
+            let aug2026 = calendar.date(from: DateComponents(year: 2026, month: 8, day: 1)) ?? Date.distantFuture
+            
             let queries = loadedQueries.map { q -> QueryEntry in
                 var copy = q
-                copy.modelName = defaultModel
+                let fallback = q.timestamp >= aug2026 ? (settings.model ?? "Gemini 3.7 Flash (High)") : "Gemini 3.6 Flash (High)"
+                copy.modelName = fallback
                 return copy
             }
             
-            // Load DB metadata and exact model names from SQLite for the first 150 queries
+            // Load DB metadata and exact model names from SQLite for all available queries
             var queriesWithMeta: [QueryEntry] = []
             var dbCache: [String: DbConversationData] = [:]
             
             for (index, q) in queries.enumerated() {
                 var newQ = q
-                if index < 150, let conversationId = q.conversationId {
+                let queryDefaultModel = q.timestamp >= aug2026 ? (settings.model ?? "Gemini 3.7 Flash (High)") : "Gemini 3.6 Flash (High)"
+                
+                if let conversationId = q.conversationId {
                     let convData: DbConversationData
                     if let cached = dbCache[conversationId] {
                         convData = cached
@@ -101,9 +106,14 @@ public enum AgyStatsService {
                         
                         let turnModels = turnGens.compactMap { $0.modelName }
                         if let model = turnModels.last {
-                            newQ.modelName = model
+                            // Enforce date validity: Gemini 3.7 only existed starting Aug 2026
+                            if q.timestamp < aug2026 && model.contains("3.7") {
+                                newQ.modelName = "Gemini 3.6 Flash (High)"
+                            } else {
+                                newQ.modelName = model
+                            }
                         } else {
-                            newQ.modelName = defaultModel
+                            newQ.modelName = queryDefaultModel
                         }
                     } else {
                         newQ.conversationMeta = ConversationDbMeta(llmCalls: 0, totalOutputBytes: 0)
@@ -114,11 +124,19 @@ public enum AgyStatsService {
                             return gTs < start
                         }
                         if let lastPriorModel = priorGens.compactMap({ $0.modelName }).last {
-                            newQ.modelName = lastPriorModel
+                            if q.timestamp < aug2026 && lastPriorModel.contains("3.7") {
+                                newQ.modelName = "Gemini 3.6 Flash (High)"
+                            } else {
+                                newQ.modelName = lastPriorModel
+                            }
                         } else if let firstPostModel = convData.generations.compactMap({ $0.modelName }).first {
-                            newQ.modelName = firstPostModel
+                            if q.timestamp < aug2026 && firstPostModel.contains("3.7") {
+                                newQ.modelName = "Gemini 3.6 Flash (High)"
+                            } else {
+                                newQ.modelName = firstPostModel
+                            }
                         } else {
-                            newQ.modelName = defaultModel
+                            newQ.modelName = queryDefaultModel
                         }
                     }
                 }
@@ -127,7 +145,6 @@ public enum AgyStatsService {
             
             // Count queries today and this week
             let now = Date()
-            let calendar = Calendar.current
             var queriesToday = 0
             var queriesThisWeek = 0
             

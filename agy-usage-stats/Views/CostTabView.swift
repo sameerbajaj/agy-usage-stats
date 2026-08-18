@@ -840,20 +840,24 @@ struct CostTabView: View {
                         .animation(.spring(response: 0.2, dampingFraction: 0.8), value: bucket.id)
                 }
                 
-                HStack(alignment: .bottom, spacing: timeScope == .week ? 8 : (timeScope == .twoWeeks ? 4 : 2)) {
+                let spacing: CGFloat = timeScope == .monthly ? 14 : (timeScope == .week ? 8 : (timeScope == .twoWeeks ? 4 : 2))
+                let maxBarWidth: CGFloat = timeScope == .monthly ? 34 : (timeScope == .week ? 26 : (timeScope == .twoWeeks ? 16 : .infinity))
+                let cornerRadius: CGFloat = timeScope == .monthly ? 5 : (timeScope == .week ? 4 : 3)
+                
+                HStack(alignment: .bottom, spacing: spacing) {
                     ForEach(buckets) { bucket in
                         let val = value(for: bucket)
                         let heightRatio = maxVal > 0 ? CGFloat(val / maxVal) : 0
                         let isHovered = inspected?.id == bucket.id
                         
                         ZStack(alignment: .bottom) {
-                            RoundedRectangle(cornerRadius: 3)
+                            RoundedRectangle(cornerRadius: cornerRadius)
                                 .fill(theme.surfaceSecondary.opacity(isHovered ? 0.8 : 0.45))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .frame(maxWidth: maxBarWidth, maxHeight: .infinity)
                             
                             let barHeight = max(val > 0 ? 5.0 : 0.0, canvasGeo.size.height * heightRatio)
                             
-                            RoundedRectangle(cornerRadius: 3)
+                            RoundedRectangle(cornerRadius: cornerRadius)
                                 .fill(
                                     LinearGradient(
                                         colors: barGradientColors(isHovered: isHovered),
@@ -861,9 +865,9 @@ struct CostTabView: View {
                                         endPoint: .bottom
                                     )
                                 )
-                                .frame(height: barHeight)
+                                .frame(width: maxBarWidth == .infinity ? nil : maxBarWidth, height: barHeight)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 3)
+                                    RoundedRectangle(cornerRadius: cornerRadius)
                                         .stroke(isHovered ? Color.white.opacity(0.4) : Color.clear, lineWidth: 1)
                                 )
                         }
