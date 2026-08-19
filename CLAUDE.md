@@ -34,9 +34,20 @@ Always report build status explicitly (`BUILD SUCCEEDED` or failure reason) in h
 
 ### Key Data Flow
 
-**Startup:** `viewModel.setup()` → starts `AgyFileWatcher` → reads `history.jsonl` and settings → scans sqlite databases under `conversations/*.db` → aggregates tool calls.
+**Startup:** `viewModel.setup()` → starts `AgyFileWatcher` → reads `history.jsonl` and settings → scans sqlite databases under `conversations/*.db` → aggregates tool calls and LLM generations.
 
 **Refresh:** Real-time refresh happens on `AgyFileWatcher` change callbacks or manual refresh button clicks.
+
+### Cost & Token Estimation Architecture
+
+- **SQLite Database Parsing (`AgyStatsService`):**
+  - Reads `steps` table (`metadata` field 1.1) to extract exact step timestamps.
+  - Reads `gen_metadata` table to extract prompt tokens (field 1.4.2), output tokens (field 1.4.3), and cached context tokens (field 1.4.5).
+  - Correlates each generation with `last_step_index` (field 1.20) to align with chronological query windows `[start, end)`.
+- **Official API Billing Formula (`ModelCostInfo`):**
+  - `Cost = (Prompt Tokens * Input Rate) + (Cached Tokens * Cached Rate) + (Output Tokens * Output Rate)`
+  - Gemini Flash: $0.75/M prompt in, $0.1875/M cached in (75% cache discount), $3.75/M out.
+  - Claude Sonnet: $3.00/M in, $0.30/M cached in (90% cache discount), $15.00/M out.
 
 ### Persistence
 
