@@ -13,6 +13,7 @@ public struct ConversationDbMeta: Codable, Hashable, Sendable {
     public let totalOutputBytes: Int
     public var inputTokens: Int? = nil
     public var outputTokens: Int? = nil
+    public var cachedInputTokens: Int? = nil
 }
 
 public struct QueryEntry: Identifiable, Codable, Hashable {
@@ -252,7 +253,22 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
     public let name: String
     public let inputPricePerMillion: Double
     public let outputPricePerMillion: Double
+    public let cachedInputPricePerMillion: Double
     public let tier: ModelTier
+    
+    public init(
+        name: String,
+        inputPricePerMillion: Double,
+        outputPricePerMillion: Double,
+        cachedInputPricePerMillion: Double? = nil,
+        tier: ModelTier
+    ) {
+        self.name = name
+        self.inputPricePerMillion = inputPricePerMillion
+        self.outputPricePerMillion = outputPricePerMillion
+        self.cachedInputPricePerMillion = cachedInputPricePerMillion ?? (inputPricePerMillion * 0.25)
+        self.tier = tier
+    }
     
     public enum ModelTier: String, Codable, Sendable {
         case low, medium, high, thinking
@@ -299,18 +315,24 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
             !trimmed.hasPrefix("/grill-me") && 
             !trimmed.hasPrefix("/goal") && 
             (query.conversationMeta?.totalOutputBytes ?? 0) == 0 && 
-            (query.conversationMeta?.inputTokens ?? 0) == 0
+            (query.conversationMeta?.inputTokens ?? 0) == 0 &&
+            (query.conversationMeta?.cachedInputTokens ?? 0) == 0
         
         if isLocalSlash && query.conversationMeta?.llmCalls == 0 {
             return (0, 0, 0.0)
         }
         
         if let meta = query.conversationMeta {
-            if let inTokens = meta.inputTokens, inTokens > 0,
-               let outTokens = meta.outputTokens, outTokens > 0 {
-                let inputCost = (Double(inTokens) / 1_000_000.0) * inputPricePerMillion
+            let promptTokens = meta.inputTokens ?? 0
+            let cachedTokens = meta.cachedInputTokens ?? 0
+            let outTokens = meta.outputTokens ?? 0
+            
+            if promptTokens > 0 || cachedTokens > 0 || outTokens > 0 {
+                let promptCost = (Double(promptTokens) / 1_000_000.0) * inputPricePerMillion
+                let cachedCost = (Double(cachedTokens) / 1_000_000.0) * cachedInputPricePerMillion
                 let outputCost = (Double(outTokens) / 1_000_000.0) * outputPricePerMillion
-                return (inTokens, outTokens, inputCost + outputCost)
+                let totalInput = promptTokens + cachedTokens
+                return (totalInput, outTokens, promptCost + cachedCost + outputCost)
             }
         }
         
@@ -336,20 +358,20 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
 }
 
 public let knownModels = [
-    ModelCostInfo(name: "Gemini 3.7 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, tier: .low),
-    ModelCostInfo(name: "Gemini 3.7 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, tier: .medium),
-    ModelCostInfo(name: "Gemini 3.7 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, tier: .high),
-    ModelCostInfo(name: "Gemini 3.6 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, tier: .low),
-    ModelCostInfo(name: "Gemini 3.6 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, tier: .medium),
-    ModelCostInfo(name: "Gemini 3.6 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, tier: .high),
-    ModelCostInfo(name: "Gemini 3.5 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .low),
-    ModelCostInfo(name: "Gemini 3.5 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .medium),
-    ModelCostInfo(name: "Gemini 3.5 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, tier: .high),
-    ModelCostInfo(name: "Gemini 3.1 Pro (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, tier: .low),
-    ModelCostInfo(name: "Gemini 3.1 Pro (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, tier: .high),
-    ModelCostInfo(name: "Claude Sonnet 4.6 (Thinking)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, tier: .thinking),
-    ModelCostInfo(name: "Claude Opus 4.6 (Thinking)", inputPricePerMillion: 5.00, outputPricePerMillion: 25.00, tier: .thinking),
-    ModelCostInfo(name: "GPT-OSS-120B", inputPricePerMillion: 0.15, outputPricePerMillion: 0.60, tier: .medium)
+    ModelCostInfo(name: "Gemini 3.7 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.1875, tier: .low),
+    ModelCostInfo(name: "Gemini 3.7 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.1875, tier: .medium),
+    ModelCostInfo(name: "Gemini 3.7 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.1875, tier: .high),
+    ModelCostInfo(name: "Gemini 3.6 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.375, tier: .low),
+    ModelCostInfo(name: "Gemini 3.6 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.375, tier: .medium),
+    ModelCostInfo(name: "Gemini 3.6 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.375, tier: .high),
+    ModelCostInfo(name: "Gemini 3.5 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.375, tier: .low),
+    ModelCostInfo(name: "Gemini 3.5 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.375, tier: .medium),
+    ModelCostInfo(name: "Gemini 3.5 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.375, tier: .high),
+    ModelCostInfo(name: "Gemini 3.1 Pro (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.50, tier: .low),
+    ModelCostInfo(name: "Gemini 3.1 Pro (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.50, tier: .high),
+    ModelCostInfo(name: "Claude Sonnet 4.6 (Thinking)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, cachedInputPricePerMillion: 0.30, tier: .thinking),
+    ModelCostInfo(name: "Claude Opus 4.6 (Thinking)", inputPricePerMillion: 5.00, outputPricePerMillion: 25.00, cachedInputPricePerMillion: 0.50, tier: .thinking),
+    ModelCostInfo(name: "GPT-OSS-120B", inputPricePerMillion: 0.15, outputPricePerMillion: 0.60, cachedInputPricePerMillion: 0.0375, tier: .medium)
 ]
 
 public var defaultGeminiModel: ModelCostInfo {

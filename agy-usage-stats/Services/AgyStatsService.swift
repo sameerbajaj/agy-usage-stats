@@ -97,11 +97,13 @@ public enum AgyStatsService {
                         let totalOutputBytes = turnGens.reduce(0) { $0 + $1.size }
                         let totalInTokens = turnGens.compactMap { $0.inputTokens }.reduce(0, +)
                         let totalOutTokens = turnGens.compactMap { $0.outputTokens }.reduce(0, +)
+                        let totalCachedTokens = turnGens.compactMap { $0.cachedInputTokens }.reduce(0, +)
                         newQ.conversationMeta = ConversationDbMeta(
                             llmCalls: llmCalls,
                             totalOutputBytes: totalOutputBytes,
                             inputTokens: totalInTokens,
-                            outputTokens: totalOutTokens
+                            outputTokens: totalOutTokens,
+                            cachedInputTokens: totalCachedTokens
                         )
                         
                         let turnModels = turnGens.compactMap { $0.modelName }
@@ -391,6 +393,109 @@ public enum AgyStatsService {
         }.sorted { $0.count > $1.count }
     }
     
+    private struct ProtobufMessage {
+        var varints: [Int: [Int]] = [:]
+        var byteFields: [Int: [Data]] = [:]
+        
+        func firstVarint(for tag: Int) -> Int? {
+            return varints[tag]?.first
+        }
+        
+        func firstData(for tag: Int) -> Data? {
+            return byteFields[tag]?.first
+        }
+        
+        func string(for tag: Int) -> String? {
+            guard let d = firstData(for: tag) else { return nil }
+            return String(data: d, encoding: .utf8)
+        }
+        
+        func submessage(for tag: Int) -> ProtobufMessage? {
+            guard let d = firstData(for: tag) else { return nil }
+            return ProtobufMessage.parse(data: d)
+        }
+        
+        func submessages(for tag: Int) -> [ProtobufMessage] {
+            guard let list = byteFields[tag] else { return [] }
+            return list.compactMap { ProtobufMessage.parse(data: $0) }
+        }
+        
+        static func parse(data: Data) -> ProtobufMessage? {
+            var msg = ProtobufMessage()
+            var index = data.startIndex
+            
+            while index < data.endIndex {
+                var tag = 0
+                var shift = 0
+                var tagReadSuccess = false
+                while index < data.endIndex {
+                    let b = data[index]
+                    index += 1
+                    tag |= Int(b & 0x7F) << shift
+                    if (b & 0x80) == 0 {
+                        tagReadSuccess = true
+                        break
+                    }
+                    shift += 7
+                }
+                guard tagReadSuccess, tag > 0 else { break }
+                
+                let wireType = tag & 0x07
+                let fieldNumber = tag >> 3
+                
+                switch wireType {
+                case 0: // Varint
+                    var val = 0
+                    var valShift = 0
+                    var valReadSuccess = false
+                    while index < data.endIndex {
+                        let b = data[index]
+                        index += 1
+                        val |= Int(b & 0x7F) << valShift
+                        if (b & 0x80) == 0 {
+                            valReadSuccess = true
+                            break
+                        }
+                        valShift += 7
+                    }
+                    guard valReadSuccess else { break }
+                    msg.varints[fieldNumber, default: []].append(val)
+                    
+                case 1: // 64-bit
+                    guard index + 8 <= data.endIndex else { break }
+                    index += 8
+                    
+                case 2: // Length-delimited
+                    var length = 0
+                    var lenShift = 0
+                    var lenReadSuccess = false
+                    while index < data.endIndex {
+                        let b = data[index]
+                        index += 1
+                        length |= Int(b & 0x7F) << lenShift
+                        if (b & 0x80) == 0 {
+                            lenReadSuccess = true
+                            break
+                        }
+                        lenShift += 7
+                    }
+                    guard lenReadSuccess, index + length <= data.endIndex else { break }
+                    let sub = data[index..<(index + length)]
+                    index += length
+                    msg.byteFields[fieldNumber, default: []].append(sub)
+                    
+                case 5: // 32-bit
+                    guard index + 4 <= data.endIndex else { break }
+                    index += 4
+                    
+                default:
+                    return msg
+                }
+            }
+            return msg
+        }
+    }
+    
     private struct DbGeneration {
         let idx: Int
         let size: Int
@@ -398,6 +503,7 @@ public enum AgyStatsService {
         let modelName: String?
         let inputTokens: Int?
         let outputTokens: Int?
+        let cachedInputTokens: Int?
     }
     
     private struct DbConversationData {
@@ -406,7 +512,6 @@ public enum AgyStatsService {
     
     private static func loadDbConversationData(conversationId: String, cliDir: String) -> DbConversationData {
         let dbPath = (cliDir as NSString).appendingPathComponent("conversations/\(conversationId).db")
-        var generations: [DbGeneration] = []
         
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
@@ -416,28 +521,74 @@ public enum AgyStatsService {
         }
         defer { sqlite3_close(db) }
         
-        var statement: OpaquePointer?
-        let query = "SELECT idx, data, size FROM gen_metadata ORDER BY idx ASC"
+        // 1. Load step timestamps from steps table
+        var stepsTimestamps: [Int: Date] = [:]
+        var stepsStmt: OpaquePointer?
+        let stepsQuery = "SELECT idx, metadata FROM steps"
+        if sqlite3_prepare_v2(db, stepsQuery, -1, &stepsStmt, nil) == SQLITE_OK {
+            while sqlite3_step(stepsStmt) == SQLITE_ROW {
+                let stepIdx = Int(sqlite3_column_int(stepsStmt, 0))
+                if let blob = sqlite3_column_blob(stepsStmt, 1) {
+                    let blobSize = sqlite3_column_bytes(stepsStmt, 1)
+                    if blobSize > 0 {
+                        let data = Data(bytes: blob, count: Int(blobSize))
+                        if let msg = ProtobufMessage.parse(data: data),
+                           let sub = msg.submessage(for: 1),
+                           let seconds = sub.firstVarint(for: 1) {
+                            stepsTimestamps[stepIdx] = Date(timeIntervalSince1970: TimeInterval(seconds))
+                        }
+                    }
+                }
+            }
+        }
+        sqlite3_finalize(stepsStmt)
         
-        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
+        // 2. Load generation metadata
+        var generations: [DbGeneration] = []
+        var genStmt: OpaquePointer?
+        let genQuery = "SELECT idx, data, size FROM gen_metadata ORDER BY idx ASC"
+        
+        if sqlite3_prepare_v2(db, genQuery, -1, &genStmt, nil) == SQLITE_OK {
             var lastTimestamp: Date? = nil
-            while sqlite3_step(statement) == SQLITE_ROW {
-                let idx = Int(sqlite3_column_int(statement, 0))
-                let size = Int(sqlite3_column_int(statement, 2))
+            while sqlite3_step(genStmt) == SQLITE_ROW {
+                let idx = Int(sqlite3_column_int(genStmt, 0))
+                let size = Int(sqlite3_column_int(genStmt, 2))
                 var modelName: String? = nil
                 var timestamp: Date? = nil
                 var inputTokens: Int? = nil
                 var outputTokens: Int? = nil
+                var cachedTokens: Int? = nil
                 
-                if let blob = sqlite3_column_blob(statement, 1) {
-                    let blobSize = sqlite3_column_bytes(statement, 1)
+                if let blob = sqlite3_column_blob(genStmt, 1) {
+                    let blobSize = sqlite3_column_bytes(genStmt, 1)
                     if blobSize > 0 {
                         let data = Data(bytes: blob, count: Int(blobSize))
-                        let meta = extractMetadata(from: data)
-                        modelName = meta.modelName
-                        timestamp = meta.timestamp
-                        inputTokens = meta.inputTokens
-                        outputTokens = meta.outputTokens
+                        if let msg = ProtobufMessage.parse(data: data) {
+                            let f1 = msg.submessage(for: 1)
+                            
+                            // Model name
+                            if let rawModel = f1?.string(for: 19) ?? msg.string(for: 19) {
+                                modelName = cleanAndMapModelName(rawModel)
+                            }
+                            
+                            // Tokens from Field 1 -> Field 4
+                            if let f4 = f1?.submessage(for: 4) {
+                                inputTokens = f4.firstVarint(for: 2)
+                                outputTokens = f4.firstVarint(for: 3)
+                                cachedTokens = f4.firstVarint(for: 5)
+                            }
+                            
+                            // Step index from Field 1 -> Field 20
+                            let f20List = f1?.submessages(for: 20) ?? msg.submessages(for: 20)
+                            for kv in f20List {
+                                if kv.string(for: 1) == "last_step_index",
+                                   let v = kv.string(for: 2),
+                                   let sIdx = Int(v) {
+                                    timestamp = stepsTimestamps[sIdx]
+                                    break
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -453,134 +604,14 @@ public enum AgyStatsService {
                     timestamp: timestamp,
                     modelName: modelName,
                     inputTokens: inputTokens,
-                    outputTokens: outputTokens
+                    outputTokens: outputTokens,
+                    cachedInputTokens: cachedTokens
                 ))
             }
         }
-        sqlite3_finalize(statement)
+        sqlite3_finalize(genStmt)
         
         return DbConversationData(generations: generations)
-    }
-    
-    private static func parseProtobufFields(data: Data) -> [Int: Any] {
-        var fields: [Int: Any] = [:]
-        var index = data.startIndex
-        while index < data.endIndex {
-            var tag = 0
-            var shift = 0
-            var tagReadSuccess = false
-            while index < data.endIndex {
-                let b = data[index]
-                index += 1
-                tag |= Int(b & 0x7F) << shift
-                if (b & 0x80) == 0 {
-                    tagReadSuccess = true
-                    break
-                }
-                shift += 7
-            }
-            guard tagReadSuccess, tag > 0 else { break }
-            
-            let wireType = tag & 0x07
-            let fieldNumber = tag >> 3
-            
-            if wireType == 0 { // Varint
-                var val = 0
-                var valShift = 0
-                var valReadSuccess = false
-                while index < data.endIndex {
-                    let b = data[index]
-                    index += 1
-                    val |= Int(b & 0x7F) << valShift
-                    if (b & 0x80) == 0 {
-                        valReadSuccess = true
-                        break
-                    }
-                    valShift += 7
-                }
-                guard valReadSuccess else { break }
-                fields[fieldNumber] = val
-            } else if wireType == 1 { // 64-bit
-                guard index + 8 <= data.endIndex else { break }
-                let sub = data[index..<(index + 8)]
-                index += 8
-                fields[fieldNumber] = sub
-            } else if wireType == 2 { // Length-delimited
-                var length = 0
-                var lenShift = 0
-                var lenReadSuccess = false
-                while index < data.endIndex {
-                    let b = data[index]
-                    index += 1
-                    length |= Int(b & 0x7F) << lenShift
-                    if (b & 0x80) == 0 {
-                        lenReadSuccess = true
-                        break
-                    }
-                    lenShift += 7
-                }
-                guard lenReadSuccess, index + length <= data.endIndex else { break }
-                let sub = data[index..<(index + length)]
-                index += length
-                
-                if fieldNumber == 1 || fieldNumber == 8 || fieldNumber == 9 || fieldNumber == 4 {
-                    let subfields = parseProtobufFields(data: sub)
-                    fields[fieldNumber] = subfields
-                } else {
-                    fields[fieldNumber] = sub
-                }
-            } else if wireType == 5 { // 32-bit
-                guard index + 4 <= data.endIndex else { break }
-                let sub = data[index..<(index + 4)]
-                index += 4
-                fields[fieldNumber] = sub
-            } else {
-                break
-            }
-        }
-        return fields
-    }
-    
-    private static func extractMetadata(from data: Data) -> (modelName: String?, timestamp: Date?, inputTokens: Int?, outputTokens: Int?) {
-        let fields = parseProtobufFields(data: data)
-        var modelName: String? = nil
-        var timestamp: Date? = nil
-        var inputTokens: Int? = nil
-        var outputTokens: Int? = nil
-        
-        // Try getting model from nested Field 1
-        if let f1 = fields[1] as? [Int: Any] {
-            if let modelData = f1[19] as? Data,
-               let name = String(data: modelData, encoding: .utf8) {
-                modelName = cleanAndMapModelName(name)
-            }
-            
-            // Try getting timestamp from Field 1 -> Field 9 -> Field 4 -> Field 1
-            if let f9 = f1[9] as? [Int: Any],
-               let f4 = f9[4] as? [Int: Any],
-               let seconds = f4[1] as? Int {
-                timestamp = Date(timeIntervalSince1970: TimeInterval(seconds))
-            }
-            
-            // Try getting input/output tokens from Field 1 -> Field 4 -> Field 2 and Field 3
-            if let f4 = f1[4] as? [Int: Any] {
-                if let input = f4[2] as? Int {
-                    inputTokens = input
-                }
-                if let output = f4[3] as? Int {
-                    outputTokens = output
-                }
-            }
-        }
-        
-        // Fallback: Try getting model from top-level field 19 if present
-        if modelName == nil,
-           let modelData = fields[19] as? Data,
-           let name = String(data: modelData, encoding: .utf8) {
-            modelName = cleanAndMapModelName(name)
-        }
-        
-        return (modelName, timestamp, inputTokens, outputTokens)
     }
     
     private static func cleanAndMapModelName(_ name: String) -> String? {
