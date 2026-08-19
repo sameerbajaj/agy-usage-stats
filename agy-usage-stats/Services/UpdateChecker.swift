@@ -49,31 +49,36 @@ public enum UpdateChecker {
             }
         }
 
-        // 2. Check the rolling "latest" pre-release — compare published_at
-        //    against the most recent known baseline. That baseline is the
-        //    greater of:
-        //     a) CFBundleVersion (build timestamp stamped by CI), and
-        //     b) the published_at we saved after the last self-update.
-        //    Without (b) the app enters an infinite update loop because
-        //    published_at is always later than build timestamp (the release
-        //    is created *after* the build finishes in CI).
-        if let latest = releases.first(where: { $0.tagName == "latest" }),
-           let publishedAt = latest.publishedAt {
-            let baseline = max(buildTimestamp, lastInstalledRollingTimestamp)
-            let releaseVersion = version(from: latest.name)
-            if releaseVersion.map({ isNewer($0, than: currentVersion) }) == true
-                || (baseline > 0 && publishedAt > baseline + 60)
-            {
-                // Remote is at least 1 min newer — a real push happened
-                return UpdateInfo(
-                    version: releaseVersion ?? "latest",
-                    tagName: "latest",
-                    releaseURL: URL(string: latest.htmlURL) ?? releasesPage,
-                    downloadURL: preferredDMGURL(in: latest),
-                    releaseNotes: latest.body,
-                    isRolling: true,
-                    publishedAt: publishedAt
-                )
+        // 2. Check the rolling "latest" release
+        if let latest = releases.first(where: { $0.tagName == "latest" && !$0.draft }) {
+            let localVersion = normalise(currentVersion)
+            let releaseVersion = version(from: latest.name) ?? version(from: latest.body)
+            
+            if let remoteVersion = releaseVersion {
+                if isNewer(remoteVersion, than: localVersion) {
+                    return UpdateInfo(
+                        version: remoteVersion,
+                        tagName: "latest",
+                        releaseURL: URL(string: latest.htmlURL) ?? releasesPage,
+                        downloadURL: preferredDMGURL(in: latest),
+                        releaseNotes: latest.body,
+                        isRolling: true,
+                        publishedAt: latest.publishedAt
+                    )
+                }
+            } else if let publishedAt = latest.publishedAt {
+                let baseline = max(buildTimestamp, lastInstalledRollingTimestamp)
+                if baseline > 0 && publishedAt > baseline + 300 {
+                    return UpdateInfo(
+                        version: "latest",
+                        tagName: "latest",
+                        releaseURL: URL(string: latest.htmlURL) ?? releasesPage,
+                        downloadURL: preferredDMGURL(in: latest),
+                        releaseNotes: latest.body,
+                        isRolling: true,
+                        publishedAt: publishedAt
+                    )
+                }
             }
         }
 
