@@ -9,7 +9,7 @@ import SwiftUI
 import AppKit
 
 public enum PopoverTab: String, CaseIterable, Identifiable {
-    case stats = "Stats"
+    case usage = "Usage"
     case cost = "Cost"
     case workspaces = "Workspaces"
     case history = "History"
@@ -19,7 +19,7 @@ public enum PopoverTab: String, CaseIterable, Identifiable {
     
     public var icon: String {
         switch self {
-        case .stats: return "chart.bar.fill"
+        case .usage: return "chart.bar.fill"
         case .cost: return "dollarsign.circle.fill"
         case .workspaces: return "folder.fill"
         case .history: return "clock.arrow.circlepath"
@@ -30,7 +30,7 @@ public enum PopoverTab: String, CaseIterable, Identifiable {
 
 public struct MenuBarPopover: View {
     @Bindable public var viewModel: AgyStatsViewModel
-    @State private var selectedTab: PopoverTab = .stats
+    @State private var selectedTab: PopoverTab = .usage
     @Namespace private var namespace
     @Environment(\.colorScheme) var colorScheme
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
@@ -58,7 +58,7 @@ public struct MenuBarPopover: View {
             
             Group {
                 switch selectedTab {
-                case .stats:
+                case .usage:
                     StatsTabView(viewModel: viewModel)
                 case .cost:
                     CostTabView(viewModel: viewModel)
