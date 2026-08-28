@@ -56,6 +56,9 @@ public enum AgyStatsService {
                 return copy
             }
             
+            // Index conversation start times to resolve unlinked queries in history.jsonl
+            let convStartMap = loadConversationStartsIndex(conversationsDir: conversationsDir)
+            
             // Load DB metadata and exact model names from SQLite for all available queries
             var queriesWithMeta: [QueryEntry] = []
             var dbCache: [String: DbConversationData] = [:]
@@ -64,7 +67,10 @@ public enum AgyStatsService {
                 var newQ = q
                 let queryDefaultModel = q.timestamp >= aug2026 ? (settings.model ?? "Gemini 3.7 Flash (High)") : "Gemini 3.6 Flash (High)"
                 
-                if let conversationId = q.conversationId {
+                let resolvedConvId = q.conversationId ?? findConversationId(for: q.timestamp, in: convStartMap)
+                newQ.conversationId = resolvedConvId
+                
+                if let conversationId = resolvedConvId {
                     let convData: DbConversationData
                     if let cached = dbCache[conversationId] {
                         convData = cached
@@ -80,7 +86,8 @@ public enum AgyStatsService {
                     var end = Date.distantFuture
                     for i in (0..<index).reversed() {
                         let nextQ = queries[i]
-                        if nextQ.conversationId == conversationId {
+                        let nextConvId = nextQ.conversationId ?? findConversationId(for: nextQ.timestamp, in: convStartMap)
+                        if nextConvId == conversationId {
                             end = Date(timeIntervalSince1970: floor(nextQ.timestamp.timeIntervalSince1970))
                             break
                         }
@@ -508,6 +515,60 @@ public enum AgyStatsService {
     
     private struct DbConversationData {
         let generations: [DbGeneration]
+    }
+    
+    private static func loadConversationStartsIndex(conversationsDir: String) -> [Int: String] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: conversationsDir) else {
+            return [:]
+        }
+        
+        var indexMap: [Int: String] = [:]
+        let dbFiles = files.filter { $0.hasSuffix(".db") }
+        
+        for file in dbFiles {
+            let convId = (file as NSString).deletingPathExtension
+            let dbPath = (conversationsDir as NSString).appendingPathComponent(file)
+            
+            var db: OpaquePointer?
+            let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
+            guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
+                sqlite3_close(db)
+                continue
+            }
+            
+            var stmt: OpaquePointer?
+            let query = "SELECT metadata FROM steps ORDER BY idx ASC LIMIT 1"
+            if sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK {
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    if let blob = sqlite3_column_blob(stmt, 0) {
+                        let blobSize = sqlite3_column_bytes(stmt, 0)
+                        if blobSize > 0 {
+                            let data = Data(bytes: blob, count: Int(blobSize))
+                            if let msg = ProtobufMessage.parse(data: data),
+                               let sub = msg.submessage(for: 1),
+                               let seconds = sub.firstVarint(for: 1) {
+                                indexMap[seconds] = convId
+                            }
+                        }
+                    }
+                }
+            }
+            sqlite3_finalize(stmt)
+            sqlite3_close(db)
+        }
+        
+        return indexMap
+    }
+    
+    private static func findConversationId(for timestamp: Date, in startMap: [Int: String]) -> String? {
+        let sec = Int(floor(timestamp.timeIntervalSince1970))
+        for offset in [0, 1, -1, 2, -2, 3, -3] {
+            if let found = startMap[sec + offset] {
+                return found
+            }
+        }
+        return nil
     }
     
     private static func loadDbConversationData(conversationId: String, cliDir: String) -> DbConversationData {

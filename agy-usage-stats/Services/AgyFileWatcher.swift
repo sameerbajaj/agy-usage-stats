@@ -23,6 +23,12 @@ public final class AgyFileWatcher {
         return (expanded as NSString).appendingPathComponent("history.jsonl")
     }
     
+    public var conversationsDirPath: String {
+        let cliDir = cliDirOverride ?? AgyStatsService.getDefaultCliDir()
+        let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
+        return (expanded as NSString).appendingPathComponent("conversations")
+    }
+    
     public init() {}
     
     public func start() {
@@ -50,7 +56,21 @@ public final class AgyFileWatcher {
     }
     
     private func fileModificationDate() -> Date? {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: historyFilePath)
-        return attrs?[.modificationDate] as? Date
+        let fm = FileManager.default
+        let histAttrs = try? fm.attributesOfItem(atPath: historyFilePath)
+        var maxDate = histAttrs?[.modificationDate] as? Date
+        
+        if let files = try? fm.contentsOfDirectory(atPath: conversationsDirPath) {
+            for file in files where file.hasSuffix(".db") {
+                let path = (conversationsDirPath as NSString).appendingPathComponent(file)
+                if let attrs = try? fm.attributesOfItem(atPath: path),
+                   let date = attrs[.modificationDate] as? Date {
+                    if maxDate == nil || date > maxDate! {
+                        maxDate = date
+                    }
+                }
+            }
+        }
+        return maxDate
     }
 }

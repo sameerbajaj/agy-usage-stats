@@ -21,7 +21,7 @@ public struct QueryEntry: Identifiable, Codable, Hashable {
     public let display: String
     public let timestamp: Date
     public let workspace: String
-    public let conversationId: String?
+    public var conversationId: String?
     public let type: String?
     public var conversationMeta: ConversationDbMeta? = nil
     public var modelName: String? = nil
@@ -309,16 +309,15 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
 
     public func estimateTokensAndCost(for query: QueryEntry) -> (inputTokens: Int, outputTokens: Int, cost: Double) {
         let trimmed = query.display.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isLocalSlash = trimmed.hasPrefix("/") && 
-            !trimmed.hasPrefix("/plan") && 
-            !trimmed.hasPrefix("/learn") && 
-            !trimmed.hasPrefix("/grill-me") && 
-            !trimmed.hasPrefix("/goal") && 
-            (query.conversationMeta?.totalOutputBytes ?? 0) == 0 && 
+        let offlineCommands: Set<String> = ["/help", "/clear", "/exit", "/theme", "/status", "/resume", "/settings", "/version", "/usage", "/model", "/context"]
+        let commandName = trimmed.components(separatedBy: .whitespaces).first?.lowercased() ?? ""
+        let isOfflineCommand = offlineCommands.contains(commandName)
+        
+        let hasNoMeta = (query.conversationMeta?.totalOutputBytes ?? 0) == 0 &&
             (query.conversationMeta?.inputTokens ?? 0) == 0 &&
             (query.conversationMeta?.cachedInputTokens ?? 0) == 0
         
-        if isLocalSlash && query.conversationMeta?.llmCalls == 0 {
+        if isOfflineCommand && (query.conversationMeta?.llmCalls ?? 0) == 0 && hasNoMeta {
             return (0, 0, 0.0)
         }
         
