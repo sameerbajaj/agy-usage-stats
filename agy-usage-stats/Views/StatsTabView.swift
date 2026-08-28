@@ -218,9 +218,11 @@ struct ToolStatRow: View {
 struct StatsTabView: View {
     @Environment(\.colorScheme) var colorScheme
     let viewModel: AgyStatsViewModel
+    var onNavigateToCost: (() -> Void)? = nil
     
     @State private var quotaCardHovered: [String: Bool] = [:]
     @State private var toolsCardHovered = false
+    @State private var costCardHovered = false
     
     private var isDark: Bool { colorScheme == .dark }
     private var geminiColor: Color { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme).geminiAccent }
@@ -236,6 +238,11 @@ struct StatsTabView: View {
                 
                 // Metrics Strip
                 metricsStrip
+                
+                if viewModel.showCostSummary {
+                    // API Cost Summary
+                    costSummarySection
+                }
                 
                 // Remaining Quotas List
                 remainingQuotasList
@@ -300,6 +307,58 @@ struct StatsTabView: View {
                 .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity)
+    }
+    
+    private var costSummarySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "banknote")
+                        .font(.system(size: 9))
+                        .foregroundStyle(theme.costGreen)
+                    Text("api cost estimates")
+                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                if let onNavigateToCost {
+                    Button {
+                        onNavigateToCost()
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("details")
+                                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 7, weight: .bold))
+                        }
+                        .foregroundStyle(theme.linkBlue)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
+            
+            Button {
+                onNavigateToCost?()
+            } label: {
+                HStack(spacing: 0) {
+                    metricItem(title: "today", value: String(format: "$%.2f", viewModel.stats.todayCostEstimate), color: theme.costGreen)
+                    metricDivider
+                    metricItem(title: "week", value: String(format: "$%.2f", viewModel.stats.weeklyCostEstimate), color: theme.costGreen)
+                    metricDivider
+                    metricItem(title: "total", value: String(format: "$%.2f", viewModel.stats.totalCostEstimate), color: theme.costGreen)
+                }
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .themedCardStyle(theme: theme, isHovered: costCardHovered, accentColor: theme.costGreen)
+            .onHover { hovering in
+                costCardHovered = hovering
+            }
+        }
     }
     
     private var remainingQuotasList: some View {

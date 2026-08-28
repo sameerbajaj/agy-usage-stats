@@ -102,6 +102,12 @@ public final class AgyStatsViewModel {
         }
     }
     
+    public var showCostSummary: Bool {
+        didSet {
+            UserDefaults.standard.set(showCostSummary, forKey: "agy_showCostSummary")
+        }
+    }
+    
     public var selectedTheme: AppTheme {
         didSet {
             UserDefaults.standard.set(selectedTheme.rawValue, forKey: "agy_selectedTheme")
@@ -160,6 +166,11 @@ public final class AgyStatsViewModel {
         
         self.showWeeklyLimitAndReset = UserDefaults.standard.bool(forKey: "agy_showWeeklyLimitAndReset")
         self.showToolBreakdown = UserDefaults.standard.bool(forKey: "agy_showToolBreakdown")
+        if UserDefaults.standard.object(forKey: "agy_showCostSummary") != nil {
+            self.showCostSummary = UserDefaults.standard.bool(forKey: "agy_showCostSummary")
+        } else {
+            self.showCostSummary = true
+        }
         
         let savedTheme = UserDefaults.standard.string(forKey: "agy_selectedTheme")
         if let savedTheme, let theme = AppTheme(rawValue: savedTheme) {

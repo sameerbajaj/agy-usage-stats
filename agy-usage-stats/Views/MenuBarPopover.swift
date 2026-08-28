@@ -59,7 +59,11 @@ public struct MenuBarPopover: View {
             Group {
                 switch selectedTab {
                 case .usage:
-                    StatsTabView(viewModel: viewModel)
+                    StatsTabView(viewModel: viewModel, onNavigateToCost: {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                            selectedTab = .cost
+                        }
+                    })
                 case .cost:
                     CostTabView(viewModel: viewModel)
                 case .workspaces:

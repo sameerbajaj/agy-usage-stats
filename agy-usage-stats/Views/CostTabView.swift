@@ -406,7 +406,7 @@ struct CostTabView: View {
             
             Text(String(format: "$%.2f", cost))
                 .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.primary)
+                .foregroundStyle(theme.costGreen)
         }
         .frame(maxWidth: .infinity)
     }

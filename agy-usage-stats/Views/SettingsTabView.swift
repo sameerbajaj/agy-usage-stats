@@ -159,6 +159,19 @@ struct SettingsTabView: View {
                 Rectangle().fill(theme.divider).frame(height: 0.75)
                 
                 HStack {
+                    Text("Show Cost Summary")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(theme.textPrimary.opacity(0.85))
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showCostSummary)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+                
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+                
+                HStack {
                     Text("Show Weekly Limit & Reset")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(theme.textPrimary.opacity(0.85))
