@@ -56,12 +56,18 @@ public enum AgyStatsService {
                 return copy
             }
             
-            // Index conversation start times to resolve unlinked queries in history.jsonl
-            let convStartMap = loadConversationStartsIndex(conversationsDir: conversationsDir)
+            // Load all SQLite conversation databases (ground truth for all turns, subagents, and tokens)
+            let allDbConversations = loadAllDbConversations(conversationsDir: conversationsDir)
+            
+            var convStartMap: [Int: String] = [:]
+            for (cid, conv) in allDbConversations {
+                if let st = conv.startTime {
+                    convStartMap[Int(floor(st.timeIntervalSince1970))] = cid
+                }
+            }
             
             // Load DB metadata and exact model names from SQLite for all available queries
             var queriesWithMeta: [QueryEntry] = []
-            var dbCache: [String: DbConversationData] = [:]
             
             for (index, q) in queries.enumerated() {
                 var newQ = q
@@ -70,15 +76,7 @@ public enum AgyStatsService {
                 let resolvedConvId = q.conversationId ?? findConversationId(for: q.timestamp, in: convStartMap)
                 newQ.conversationId = resolvedConvId
                 
-                if let conversationId = resolvedConvId {
-                    let convData: DbConversationData
-                    if let cached = dbCache[conversationId] {
-                        convData = cached
-                    } else {
-                        convData = loadDbConversationData(conversationId: conversationId, cliDir: expandedDir)
-                        dbCache[conversationId] = convData
-                    }
-                    
+                if let conversationId = resolvedConvId, let convData = allDbConversations[conversationId] {
                     // Align queries with second-resolution timestamps in gen_metadata
                     let start = Date(timeIntervalSince1970: floor(q.timestamp.timeIntervalSince1970))
                     
@@ -93,11 +91,20 @@ public enum AgyStatsService {
                         }
                     }
                     
-                    // Find generations within this query's time window [start, end)
-                    let turnGens = convData.generations.filter { gen in
+                    // Primary conversation generations in this query's time window [start, end)
+                    let primaryGens = convData.generations.filter { gen in
                         guard let gTs = gen.timestamp else { return false }
                         return gTs >= start && gTs < end
                     }
+                    
+                    // Subagent conversations spawned during this query window
+                    let subagentGens = allDbConversations.values.filter { other in
+                        guard other.conversationId != conversationId,
+                              let otherStart = other.startTime else { return false }
+                        return otherStart >= start && otherStart < end
+                    }.flatMap { $0.generations }
+                    
+                    let turnGens = primaryGens + subagentGens
                     
                     if !turnGens.isEmpty {
                         let llmCalls = turnGens.count
@@ -210,30 +217,8 @@ public enum AgyStatsService {
             var dailyBuckets: [String: UsageTimeBucket] = [:]
             var monthlyBuckets: [String: UsageTimeBucket] = [:]
             
+            // 1. Initialize buckets and query counts from history queries
             for q in queriesWithMeta {
-                if let modelName = q.modelName {
-                    modelDist[modelName, default: 0] += 1
-                }
-                
-                // Find model cost info
-                let name = q.modelName ?? settings.model ?? ""
-                let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                let model = knownModels.first(where: {
-                    let mName = $0.name.lowercased()
-                    return cleaned.contains(mName) || mName.contains(cleaned)
-                }) ?? defaultGeminiModel
-                
-                let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
-                
-                totalCost += cost
-                if q.timestamp >= startOfToday {
-                    todayCost += cost
-                }
-                if q.timestamp >= sevenDaysAgo {
-                    weekCost += cost
-                }
-                
-                // Daily Bucket
                 let dayKey = dayKeyFormatter.string(from: q.timestamp)
                 let startOfDay = calendar.startOfDay(for: q.timestamp)
                 var dayBucket = dailyBuckets[dayKey] ?? UsageTimeBucket(
@@ -243,14 +228,11 @@ public enum AgyStatsService {
                     date: startOfDay
                 )
                 dayBucket.queryCount += 1
-                dayBucket.totalCost += cost
-                dayBucket.inputTokens += inTokens
-                dayBucket.outputTokens += outTokens
-                dayBucket.modelBreakdown[model.name, default: 0.0] += cost
-                dayBucket.modelQueryBreakdown[model.name, default: 0] += 1
+                if let mName = q.modelName {
+                    dayBucket.modelQueryBreakdown[mName, default: 0] += 1
+                }
                 dailyBuckets[dayKey] = dayBucket
                 
-                // Monthly Bucket
                 let monthKey = monthKeyFormatter.string(from: q.timestamp)
                 let components = calendar.dateComponents([.year, .month], from: q.timestamp)
                 let startOfMonth = calendar.date(from: components) ?? q.timestamp
@@ -261,16 +243,92 @@ public enum AgyStatsService {
                     date: startOfMonth
                 )
                 monthBucket.queryCount += 1
+                if let mName = q.modelName {
+                    monthBucket.modelQueryBreakdown[mName, default: 0] += 1
+                }
+                monthlyBuckets[monthKey] = monthBucket
+            }
+            
+            // 2. Aggregate all actual LLM generations from all SQLite databases (ground truth for parent + subagents)
+            let allGenerations = allDbConversations.values.flatMap { $0.generations }
+            
+            for gen in allGenerations {
+                let genDate = gen.timestamp ?? startOfToday
+                
+                let name = gen.modelName ?? settings.model ?? ""
+                let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let model = knownModels.first(where: {
+                    let mName = $0.name.lowercased()
+                    return cleaned.contains(mName) || mName.contains(cleaned)
+                }) ?? defaultGeminiModel
+                
+                let pTokens = gen.inputTokens ?? 0
+                let cTokens = gen.cachedInputTokens ?? 0
+                let oTokens = gen.outputTokens ?? 0
+                
+                let cost: Double
+                let inTokens: Int
+                let outTokens: Int
+                
+                if pTokens > 0 || cTokens > 0 || oTokens > 0 {
+                    let promptCost = (Double(pTokens) / 1_000_000.0) * model.inputPricePerMillion
+                    let cachedCost = (Double(cTokens) / 1_000_000.0) * model.cachedInputPricePerMillion
+                    let outputCost = (Double(oTokens) / 1_000_000.0) * model.outputPricePerMillion
+                    cost = promptCost + cachedCost + outputCost
+                    inTokens = pTokens + cTokens
+                    outTokens = oTokens
+                } else if gen.size > 0 {
+                    outTokens = max(80, gen.size / 4)
+                    inTokens = Int(model.tier.inputTokens * 0.35)
+                    cost = (Double(inTokens) / 1_000_000.0) * model.inputPricePerMillion + (Double(outTokens) / 1_000_000.0) * model.outputPricePerMillion
+                } else {
+                    continue
+                }
+                
+                totalCost += cost
+                if genDate >= startOfToday {
+                    todayCost += cost
+                }
+                if genDate >= sevenDaysAgo {
+                    weekCost += cost
+                }
+                
+                modelDist[model.name, default: 0] += 1
+                
+                let dayKey = dayKeyFormatter.string(from: genDate)
+                let startOfDay = calendar.startOfDay(for: genDate)
+                var dayBucket = dailyBuckets[dayKey] ?? UsageTimeBucket(
+                    periodKey: dayKey,
+                    label: dayLabelFormatter.string(from: genDate),
+                    shortLabel: dayShortLabelFormatter.string(from: genDate),
+                    date: startOfDay
+                )
+                dayBucket.totalCost += cost
+                dayBucket.inputTokens += inTokens
+                dayBucket.outputTokens += outTokens
+                dayBucket.modelBreakdown[model.name, default: 0.0] += cost
+                dailyBuckets[dayKey] = dayBucket
+                
+                let monthKey = monthKeyFormatter.string(from: genDate)
+                let components = calendar.dateComponents([.year, .month], from: genDate)
+                let startOfMonth = calendar.date(from: components) ?? genDate
+                var monthBucket = monthlyBuckets[monthKey] ?? UsageTimeBucket(
+                    periodKey: monthKey,
+                    label: monthLabelFormatter.string(from: genDate),
+                    shortLabel: monthShortLabelFormatter.string(from: genDate),
+                    date: startOfMonth
+                )
                 monthBucket.totalCost += cost
                 monthBucket.inputTokens += inTokens
                 monthBucket.outputTokens += outTokens
                 monthBucket.modelBreakdown[model.name, default: 0.0] += cost
-                monthBucket.modelQueryBreakdown[model.name, default: 0] += 1
                 monthlyBuckets[monthKey] = monthBucket
             }
             
-            // Fill in missing days from the earliest recorded query up to today so every calendar month has complete daily buckets
-            let earliestDate = queries.last?.timestamp ?? startOfToday
+            // Fill in missing days from the earliest recorded date up to today so every calendar month has complete daily buckets
+            let earliestQueryDate = queries.last?.timestamp ?? startOfToday
+            let earliestGenDate = allGenerations.compactMap({ $0.timestamp }).min() ?? startOfToday
+            let earliestDate = min(earliestQueryDate, earliestGenDate)
             let earliestMonthComponents = calendar.dateComponents([.year, .month], from: earliestDate)
             let startOfEarliestMonth = calendar.date(from: earliestMonthComponents) ?? startOfToday
             let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: startOfToday) ?? startOfToday
@@ -514,6 +572,8 @@ public enum AgyStatsService {
     }
     
     private struct DbConversationData {
+        let conversationId: String
+        let startTime: Date?
         let generations: [DbGeneration]
     }
     
@@ -578,14 +638,15 @@ public enum AgyStatsService {
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
         guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
             sqlite3_close(db)
-            return DbConversationData(generations: [])
+            return DbConversationData(conversationId: conversationId, startTime: nil, generations: [])
         }
         defer { sqlite3_close(db) }
         
         // 1. Load step timestamps from steps table
+        var startTime: Date? = nil
         var stepsTimestamps: [Int: Date] = [:]
         var stepsStmt: OpaquePointer?
-        let stepsQuery = "SELECT idx, metadata FROM steps"
+        let stepsQuery = "SELECT idx, metadata FROM steps ORDER BY idx ASC"
         if sqlite3_prepare_v2(db, stepsQuery, -1, &stepsStmt, nil) == SQLITE_OK {
             while sqlite3_step(stepsStmt) == SQLITE_ROW {
                 let stepIdx = Int(sqlite3_column_int(stepsStmt, 0))
@@ -596,7 +657,11 @@ public enum AgyStatsService {
                         if let msg = ProtobufMessage.parse(data: data),
                            let sub = msg.submessage(for: 1),
                            let seconds = sub.firstVarint(for: 1) {
-                            stepsTimestamps[stepIdx] = Date(timeIntervalSince1970: TimeInterval(seconds))
+                            let dt = Date(timeIntervalSince1970: TimeInterval(seconds))
+                            stepsTimestamps[stepIdx] = dt
+                            if startTime == nil {
+                                startTime = dt
+                            }
                         }
                     }
                 }
@@ -654,7 +719,7 @@ public enum AgyStatsService {
                 }
                 
                 if timestamp == nil {
-                    timestamp = lastTimestamp
+                    timestamp = lastTimestamp ?? startTime
                 } else {
                     lastTimestamp = timestamp
                 }
@@ -672,7 +737,25 @@ public enum AgyStatsService {
         }
         sqlite3_finalize(genStmt)
         
-        return DbConversationData(generations: generations)
+        return DbConversationData(conversationId: conversationId, startTime: startTime, generations: generations)
+    }
+    
+    private static func loadAllDbConversations(conversationsDir: String) -> [String: DbConversationData] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: conversationsDir) else {
+            return [:]
+        }
+        
+        var dict: [String: DbConversationData] = [:]
+        let dbFiles = files.filter { $0.hasSuffix(".db") }
+        let cliDir = (conversationsDir as NSString).deletingLastPathComponent
+        
+        for file in dbFiles {
+            let convId = (file as NSString).deletingPathExtension
+            let convData = loadDbConversationData(conversationId: convId, cliDir: cliDir)
+            dict[convId] = convData
+        }
+        return dict
     }
     
     private static func cleanAndMapModelName(_ name: String) -> String? {
