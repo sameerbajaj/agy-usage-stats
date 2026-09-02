@@ -477,11 +477,11 @@ struct CostTabView: View {
                 return Array(monthDays.suffix(14))
             }
         case .month:
-            let monthDays = getMonthBuckets(for: currentTargetMonthDate)
-            if monthDays.isEmpty && monthOffset == 0 {
+            if monthOffset == 0 {
                 return Array(viewModel.stats.dailyUsage.suffix(30))
+            } else {
+                return getMonthBuckets(for: currentTargetMonthDate)
             }
-            return monthDays
         case .monthly:
             return viewModel.stats.monthlyUsage
         }

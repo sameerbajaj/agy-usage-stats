@@ -217,7 +217,16 @@ public enum AgyStatsService {
             var dailyBuckets: [String: UsageTimeBucket] = [:]
             var monthlyBuckets: [String: UsageTimeBucket] = [:]
             
-            // 1. Initialize buckets and query counts from history queries
+            // 2. Aggregate all actual LLM generations from all SQLite databases (ground truth for parent + subagents)
+            let allGenerations = allDbConversations.values.flatMap { $0.generations }
+            var daysWithDbGens = Set<String>()
+            for gen in allGenerations {
+                if let gTs = gen.timestamp {
+                    daysWithDbGens.insert(dayKeyFormatter.string(from: gTs))
+                }
+            }
+            
+            // 1. Initialize buckets, query counts, and fallback estimates for older queries lacking SQLite DB files
             for q in queriesWithMeta {
                 let dayKey = dayKeyFormatter.string(from: q.timestamp)
                 let startOfDay = calendar.startOfDay(for: q.timestamp)
@@ -230,6 +239,24 @@ public enum AgyStatsService {
                 dayBucket.queryCount += 1
                 if let mName = q.modelName {
                     dayBucket.modelQueryBreakdown[mName, default: 0] += 1
+                }
+                
+                // Fallback for days with no SQLite DBs (e.g. May/June 2026): estimate tokens & cost from query
+                if !daysWithDbGens.contains(dayKey) {
+                    let name = q.modelName ?? settings.model ?? ""
+                    let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    let model = knownModels.first(where: {
+                        let mName = $0.name.lowercased()
+                        return cleaned.contains(mName) || mName.contains(cleaned)
+                    }) ?? defaultGeminiModel
+                    
+                    let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
+                    dayBucket.totalCost += cost
+                    dayBucket.inputTokens += inTokens
+                    dayBucket.outputTokens += outTokens
+                    dayBucket.modelBreakdown[model.name, default: 0.0] += cost
+                    totalCost += cost
+                    modelDist[model.name, default: 0] += 1
                 }
                 dailyBuckets[dayKey] = dayBucket
                 
@@ -246,11 +273,22 @@ public enum AgyStatsService {
                 if let mName = q.modelName {
                     monthBucket.modelQueryBreakdown[mName, default: 0] += 1
                 }
+                if !daysWithDbGens.contains(dayKey) {
+                    let name = q.modelName ?? settings.model ?? ""
+                    let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    let model = knownModels.first(where: {
+                        let mName = $0.name.lowercased()
+                        return cleaned.contains(mName) || mName.contains(cleaned)
+                    }) ?? defaultGeminiModel
+                    
+                    let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
+                    monthBucket.totalCost += cost
+                    monthBucket.inputTokens += inTokens
+                    monthBucket.outputTokens += outTokens
+                    monthBucket.modelBreakdown[model.name, default: 0.0] += cost
+                }
                 monthlyBuckets[monthKey] = monthBucket
             }
-            
-            // 2. Aggregate all actual LLM generations from all SQLite databases (ground truth for parent + subagents)
-            let allGenerations = allDbConversations.values.flatMap { $0.generations }
             
             for gen in allGenerations {
                 let genDate = gen.timestamp ?? startOfToday
@@ -359,7 +397,7 @@ public enum AgyStatsService {
                 lastQueryAt: lastQuery,
                 workspaces: workspaces,
                 modelDistribution: modelDist,
-                recentQueries: Array(queriesWithMeta.prefix(250)),
+                recentQueries: queriesWithMeta,
                 toolStats: toolStats,
                 totalToolCalls: totalToolCalls,
                 quotaInfo: quotaInfo,
