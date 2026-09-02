@@ -45,13 +45,21 @@ public enum AgyStatsService {
             var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
             print("AgyStatsService: Loaded history: queries count = \(loadedQueries.count), workspaces count = \(workspaces.count)")
             
-            // Date-aware fallback threshold: Gemini 3.7 Flash was released in August 2026
+            // Date-aware fallback thresholds: Gemini 3.7 Flash in August 2026, Gemini 3.8 Flash in September 2026
             let calendar = Calendar.current
             let aug2026 = calendar.date(from: DateComponents(year: 2026, month: 8, day: 1)) ?? Date.distantFuture
+            let sep2026 = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1)) ?? Date.distantFuture
             
             let queries = loadedQueries.map { q -> QueryEntry in
                 var copy = q
-                let fallback = q.timestamp >= aug2026 ? (settings.model ?? "Gemini 3.7 Flash (High)") : "Gemini 3.6 Flash (High)"
+                let fallback: String
+                if q.timestamp >= sep2026 {
+                    fallback = settings.model ?? "Gemini 3.8 Flash (High)"
+                } else if q.timestamp >= aug2026 {
+                    fallback = settings.model ?? "Gemini 3.7 Flash (High)"
+                } else {
+                    fallback = "Gemini 3.6 Flash (High)"
+                }
                 copy.modelName = fallback
                 return copy
             }
@@ -71,7 +79,14 @@ public enum AgyStatsService {
             
             for (index, q) in queries.enumerated() {
                 var newQ = q
-                let queryDefaultModel = q.timestamp >= aug2026 ? (settings.model ?? "Gemini 3.7 Flash (High)") : "Gemini 3.6 Flash (High)"
+                let queryDefaultModel: String
+                if q.timestamp >= sep2026 {
+                    queryDefaultModel = settings.model ?? "Gemini 3.8 Flash (High)"
+                } else if q.timestamp >= aug2026 {
+                    queryDefaultModel = "Gemini 3.7 Flash (High)"
+                } else {
+                    queryDefaultModel = "Gemini 3.6 Flash (High)"
+                }
                 
                 let resolvedConvId = q.conversationId ?? findConversationId(for: q.timestamp, in: convStartMap)
                 newQ.conversationId = resolvedConvId
@@ -805,6 +820,15 @@ public enum AgyStatsService {
             ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
             ("gpt-oss", "GPT-OSS-120B"),
             ("oss-120b", "GPT-OSS-120B"),
+            ("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"),
+            ("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)"),
+            ("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
+            ("gemini-3.8-flash-cyber", "Gemini 3.8 Flash Cyber"),
+            ("3.8-flash-cyber", "Gemini 3.8 Flash Cyber"),
+            ("gemini-3.8-flash", "Gemini 3.8 Flash (High)"),
+            ("gemini-3.8", "Gemini 3.8 Flash (High)"),
+            ("3.8-flash", "Gemini 3.8 Flash (High)"),
+            ("flash-3.8", "Gemini 3.8 Flash (High)"),
             ("gemini-3.7-flash-low", "Gemini 3.7 Flash (Low)"),
             ("gemini-3.7-flash-medium", "Gemini 3.7 Flash (Medium)"),
             ("gemini-3.7-flash-high", "Gemini 3.7 Flash (High)"),
@@ -850,6 +874,10 @@ public enum AgyStatsService {
         }
         
         let knownModelNames = [
+            "Gemini 3.8 Flash (Low)",
+            "Gemini 3.8 Flash (Medium)",
+            "Gemini 3.8 Flash (High)",
+            "Gemini 3.8 Flash Cyber",
             "Gemini 3.7 Flash (Low)",
             "Gemini 3.7 Flash (Medium)",
             "Gemini 3.7 Flash (High)",
