@@ -45,10 +45,10 @@ public enum AgyStatsService {
             var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
             print("AgyStatsService: Loaded history: queries count = \(loadedQueries.count), workspaces count = \(workspaces.count)")
             
-            // Date-aware fallback thresholds: Gemini 3.7 Flash in August 2026, Gemini 3.8 Flash in September 2026
+            // Date-aware fallback thresholds: Gemini 3.7 Flash on August 1, 2026; Gemini 3.8 Flash on September 2, 2026
             let calendar = Calendar.current
             let aug2026 = calendar.date(from: DateComponents(year: 2026, month: 8, day: 1)) ?? Date.distantFuture
-            let sep2026 = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1)) ?? Date.distantFuture
+            let sep2026 = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2)) ?? Date.distantFuture
             
             let queries = loadedQueries.map { q -> QueryEntry in
                 var copy = q
@@ -56,7 +56,7 @@ public enum AgyStatsService {
                 if q.timestamp >= sep2026 {
                     fallback = settings.model ?? "Gemini 3.8 Flash (High)"
                 } else if q.timestamp >= aug2026 {
-                    fallback = settings.model ?? "Gemini 3.7 Flash (High)"
+                    fallback = "Gemini 3.7 Flash (High)"
                 } else {
                     fallback = "Gemini 3.6 Flash (High)"
                 }
@@ -137,12 +137,7 @@ public enum AgyStatsService {
                         
                         let turnModels = turnGens.compactMap { $0.modelName }
                         if let model = turnModels.last {
-                            // Enforce date validity: Gemini 3.7 only existed starting Aug 2026
-                            if q.timestamp < aug2026 && model.contains("3.7") {
-                                newQ.modelName = "Gemini 3.6 Flash (High)"
-                            } else {
-                                newQ.modelName = model
-                            }
+                            newQ.modelName = enforceDateModelValidity(modelName: model, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
                         } else {
                             newQ.modelName = queryDefaultModel
                         }
@@ -155,17 +150,9 @@ public enum AgyStatsService {
                             return gTs < start
                         }
                         if let lastPriorModel = priorGens.compactMap({ $0.modelName }).last {
-                            if q.timestamp < aug2026 && lastPriorModel.contains("3.7") {
-                                newQ.modelName = "Gemini 3.6 Flash (High)"
-                            } else {
-                                newQ.modelName = lastPriorModel
-                            }
+                            newQ.modelName = enforceDateModelValidity(modelName: lastPriorModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
                         } else if let firstPostModel = convData.generations.compactMap({ $0.modelName }).first {
-                            if q.timestamp < aug2026 && firstPostModel.contains("3.7") {
-                                newQ.modelName = "Gemini 3.6 Flash (High)"
-                            } else {
-                                newQ.modelName = firstPostModel
-                            }
+                            newQ.modelName = enforceDateModelValidity(modelName: firstPostModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
                         } else {
                             newQ.modelName = queryDefaultModel
                         }
@@ -258,7 +245,7 @@ public enum AgyStatsService {
                 
                 // Fallback for days with no SQLite DBs (e.g. May/June 2026): estimate tokens & cost from query
                 if !daysWithDbGens.contains(dayKey) {
-                    let name = q.modelName ?? settings.model ?? ""
+                    let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                     let model = knownModels.first(where: {
                         let mName = $0.name.lowercased()
@@ -289,7 +276,7 @@ public enum AgyStatsService {
                     monthBucket.modelQueryBreakdown[mName, default: 0] += 1
                 }
                 if !daysWithDbGens.contains(dayKey) {
-                    let name = q.modelName ?? settings.model ?? ""
+                    let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                     let model = knownModels.first(where: {
                         let mName = $0.name.lowercased()
@@ -308,12 +295,22 @@ public enum AgyStatsService {
             for gen in allGenerations {
                 let genDate = gen.timestamp ?? startOfToday
                 
-                let name = gen.modelName ?? settings.model ?? ""
-                let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let defaultModelForDate: String
+                if genDate >= sep2026 {
+                    defaultModelForDate = settings.model ?? "Gemini 3.8 Flash (High)"
+                } else if genDate >= aug2026 {
+                    defaultModelForDate = "Gemini 3.7 Flash (High)"
+                } else {
+                    defaultModelForDate = "Gemini 3.6 Flash (High)"
+                }
+                
+                let rawName = gen.modelName ?? defaultModelForDate
+                let validName = enforceDateModelValidity(modelName: rawName, date: genDate, aug2026: aug2026, sep2026: sep2026)
+                let cleaned = validName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                 let model = knownModels.first(where: {
                     let mName = $0.name.lowercased()
                     return cleaned.contains(mName) || mName.contains(cleaned)
-                }) ?? defaultGeminiModel
+                }) ?? (genDate >= sep2026 ? defaultGeminiModel : (knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ?? defaultGeminiModel))
                 
                 let pTokens = gen.inputTokens ?? 0
                 let cTokens = gen.cachedInputTokens ?? 0
@@ -900,6 +897,19 @@ public enum AgyStatsService {
         }
         
         return nil
+    }
+    
+    private static func enforceDateModelValidity(modelName: String, date: Date, aug2026: Date, sep2026: Date) -> String {
+        if date < aug2026 {
+            if modelName.contains("3.7") || modelName.contains("3.8") {
+                return "Gemini 3.6 Flash (High)"
+            }
+        } else if date < sep2026 {
+            if modelName.contains("3.8") {
+                return "Gemini 3.7 Flash (High)"
+            }
+        }
+        return modelName
     }
     
     private static func queryToolStats(forDbPath dbPath: String) -> [String: Int] {
