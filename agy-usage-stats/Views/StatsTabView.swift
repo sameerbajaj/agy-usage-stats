@@ -321,6 +321,16 @@ struct StatsTabView: View {
                         .foregroundStyle(.secondary)
                 }
                 
+                if viewModel.stats.isGcpActive {
+                    Text("gcp direct: \(String(format: "$%.2f", viewModel.stats.gcpTotalCost))")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.blue)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Color.blue.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+                
                 Spacer()
                 
                 if let onNavigateToCost {
@@ -364,11 +374,15 @@ struct StatsTabView: View {
     private var remainingQuotasList: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("remaining quotas")
+                Text(viewModel.stats.isGcpActive ? "backend & quotas" : "remaining quotas")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if let email = viewModel.stats.quotaInfo?.email {
+                if viewModel.stats.isGcpActive, let project = viewModel.stats.gcpProject {
+                    Text("gcp: \(project)")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.blue)
+                } else if let email = viewModel.stats.quotaInfo?.email {
                     Text(email)
                         .font(.system(size: 8, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary.opacity(0.8))
@@ -406,6 +420,74 @@ struct StatsTabView: View {
                         }
                     }
                 }
+            } else if viewModel.stats.isGcpActive {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cloud.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color.blue)
+                        Text("google cloud api active")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.blue)
+                        Spacer()
+                        Text("direct billing")
+                            .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .foregroundStyle(Color.blue)
+                            .clipShape(Capsule())
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("project:")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(viewModel.stats.gcpProject ?? "unknown")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if let loc = viewModel.stats.gcpLocation, !loc.isEmpty {
+                                Text("region: \(loc)")
+                                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        
+                        Divider()
+                            .opacity(0.4)
+                            .padding(.vertical, 2)
+                        
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("gcp today spend")
+                                    .font(.system(size: 8, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Text(String(format: "$%.2f", viewModel.stats.gcpTodayCost))
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Color.blue)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text("gcp total spend")
+                                    .font(.system(size: 8, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Text(String(format: "$%.2f", viewModel.stats.gcpTotalCost))
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                    }
+                    
+                    Text("Direct pay-as-you-go Vertex AI calls billed to Google Cloud credits. Subscription quota limits bypassed.")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.secondary.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .themedCardStyle(theme: theme, accentColor: Color.blue)
             } else {
                 HStack {
                     Spacer()

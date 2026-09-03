@@ -20,7 +20,8 @@ struct HistoryTabView: View {
         } else {
             return viewModel.stats.recentQueries.filter {
                 $0.display.localizedCaseInsensitiveContains(viewModel.searchQuery) ||
-                $0.workspace.localizedCaseInsensitiveContains(viewModel.searchQuery)
+                $0.workspace.localizedCaseInsensitiveContains(viewModel.searchQuery) ||
+                $0.billingBadge.localizedCaseInsensitiveContains(viewModel.searchQuery)
             }
         }
     }
@@ -169,6 +170,22 @@ struct HistoryRow: View {
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(theme.linkBlue.opacity(0.08)))
+                    
+                    if query.isGcp {
+                        Text("gcp")
+                            .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.blue)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.blue.opacity(0.12)))
+                    } else {
+                        Text("quota")
+                            .font(.system(size: 7.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.primary.opacity(0.04)))
+                    }
                     
                     if let type = query.type {
                         Text(type.lowercased())

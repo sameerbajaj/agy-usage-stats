@@ -25,10 +25,16 @@ public struct QueryEntry: Identifiable, Codable, Hashable {
     public let type: String?
     public var conversationMeta: ConversationDbMeta? = nil
     public var modelName: String? = nil
+    public var isGcp: Bool = false
+    public var gcpProject: String? = nil
 
     public var cleanWorkspaceName: String {
         let url = URL(fileURLWithPath: workspace)
         return url.lastPathComponent.isEmpty ? workspace : url.lastPathComponent
+    }
+    
+    public var billingBadge: String {
+        isGcp ? "GCP" : "Quota"
     }
 }
 
@@ -172,6 +178,8 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     public var outputTokens: Int
     public var modelBreakdown: [String: Double]
     public var modelQueryBreakdown: [String: Int]
+    public var gcpCost: Double
+    public var quotaCost: Double
     
     public init(
         periodKey: String,
@@ -183,7 +191,9 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         inputTokens: Int = 0,
         outputTokens: Int = 0,
         modelBreakdown: [String: Double] = [:],
-        modelQueryBreakdown: [String: Int] = [:]
+        modelQueryBreakdown: [String: Int] = [:],
+        gcpCost: Double = 0.0,
+        quotaCost: Double = 0.0
     ) {
         self.periodKey = periodKey
         self.label = label
@@ -195,6 +205,8 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         self.outputTokens = outputTokens
         self.modelBreakdown = modelBreakdown
         self.modelQueryBreakdown = modelQueryBreakdown
+        self.gcpCost = gcpCost
+        self.quotaCost = quotaCost
     }
 }
 
@@ -215,6 +227,19 @@ public struct AgyUsageStats: Codable {
     public var dailyUsage: [UsageTimeBucket]
     public var monthlyUsage: [UsageTimeBucket]
     
+    // Auth & GCP tracking
+    public var gcpProject: String?
+    public var gcpLocation: String?
+    public var isGcpActive: Bool { gcpProject != nil && !(gcpProject?.isEmpty ?? true) }
+    
+    public var gcpTotalCost: Double
+    public var gcpTodayCost: Double
+    public var gcpWeeklyCost: Double
+    
+    public var quotaTotalCost: Double
+    public var quotaTodayCost: Double
+    public var quotaWeeklyCost: Double
+    
     public static let empty = AgyUsageStats(
         totalQueries: 0,
         queriesToday: 0,
@@ -230,21 +255,41 @@ public struct AgyUsageStats: Codable {
         weeklyCostEstimate: 0.0,
         todayCostEstimate: 0.0,
         dailyUsage: [],
-        monthlyUsage: []
+        monthlyUsage: [],
+        gcpProject: nil,
+        gcpLocation: nil,
+        gcpTotalCost: 0.0,
+        gcpTodayCost: 0.0,
+        gcpWeeklyCost: 0.0,
+        quotaTotalCost: 0.0,
+        quotaTodayCost: 0.0,
+        quotaWeeklyCost: 0.0
     )
 }
 
-public struct AgySettings: Codable {
+public struct GcpConfig: Codable, Equatable, Hashable {
+    public var project: String?
+    public var location: String?
+    
+    public init(project: String? = nil, location: String? = nil) {
+        self.project = project
+        self.location = location
+    }
+}
+
+public struct AgySettings: Codable, Equatable {
     public var colorScheme: String?
     public var enableTelemetry: Bool?
     public var model: String?
     public var trustedWorkspaces: [String]?
+    public var gcp: GcpConfig?
     
     public static let `default` = AgySettings(
         colorScheme: "dark",
         enableTelemetry: false,
         model: "Unknown",
-        trustedWorkspaces: []
+        trustedWorkspaces: [],
+        gcp: nil
     )
 }
 

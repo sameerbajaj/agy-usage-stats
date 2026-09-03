@@ -28,6 +28,7 @@ public enum AgyStatsService {
             let historyPath = (expandedDir as NSString).appendingPathComponent("history.jsonl")
             let settingsPath = (expandedDir as NSString).appendingPathComponent("settings.json")
             let conversationsDir = (expandedDir as NSString).appendingPathComponent("conversations")
+            let logDir = (expandedDir as NSString).appendingPathComponent("log")
             
             print("AgyStatsService: --- Loading Stats ---")
             print("AgyStatsService: cliDir = \(cliDir)")
@@ -36,10 +37,13 @@ public enum AgyStatsService {
             print("AgyStatsService: historyPath = \(historyPath)")
             print("AgyStatsService: settingsPath = \(settingsPath)")
             print("AgyStatsService: conversationsDir = \(conversationsDir)")
+            print("AgyStatsService: logDir = \(logDir)")
             
-            // Load Settings
+            // Load Settings & Auth Transitions
             let settings = loadSettings(at: settingsPath)
-            print("AgyStatsService: Loaded settings: model=\(settings.model ?? "nil")")
+            let currentIsGcp = settings.gcp?.project != nil && !(settings.gcp?.project?.isEmpty ?? true)
+            let authTransitions = loadAuthTransitions(logDir: logDir)
+            print("AgyStatsService: Loaded settings: model=\(settings.model ?? "nil"), gcp=\(settings.gcp?.project ?? "none"), transitions=\(authTransitions.count)")
             
             // Load History Lines
             var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
@@ -158,6 +162,11 @@ public enum AgyStatsService {
                         }
                     }
                 }
+                let isQGcp = isGcpAt(date: q.timestamp, transitions: authTransitions, currentIsGcp: currentIsGcp)
+                newQ.isGcp = isQGcp
+                if isQGcp {
+                    newQ.gcpProject = settings.gcp?.project
+                }
                 queriesWithMeta.append(newQ)
             }
             
@@ -197,6 +206,12 @@ public enum AgyStatsService {
             var todayCost = 0.0
             var weekCost = 0.0
             var totalCost = 0.0
+            var gcpTotalCost = 0.0
+            var gcpTodayCost = 0.0
+            var gcpWeekCost = 0.0
+            var quotaTotalCost = 0.0
+            var quotaTodayCost = 0.0
+            var quotaWeekCost = 0.0
             
             let dayKeyFormatter = DateFormatter()
             dayKeyFormatter.dateFormat = "yyyy-MM-dd"
@@ -253,11 +268,23 @@ public enum AgyStatsService {
                     }) ?? defaultGeminiModel
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
+                    let isQGcp = isGcpAt(date: q.timestamp, transitions: authTransitions, currentIsGcp: currentIsGcp)
                     dayBucket.totalCost += cost
                     dayBucket.inputTokens += inTokens
                     dayBucket.outputTokens += outTokens
                     dayBucket.modelBreakdown[model.name, default: 0.0] += cost
                     totalCost += cost
+                    if isQGcp {
+                        dayBucket.gcpCost += cost
+                        gcpTotalCost += cost
+                        if q.timestamp >= startOfToday { gcpTodayCost += cost }
+                        if q.timestamp >= sevenDaysAgo { gcpWeekCost += cost }
+                    } else {
+                        dayBucket.quotaCost += cost
+                        quotaTotalCost += cost
+                        if q.timestamp >= startOfToday { quotaTodayCost += cost }
+                        if q.timestamp >= sevenDaysAgo { quotaWeekCost += cost }
+                    }
                     modelDist[model.name, default: 0] += 1
                 }
                 dailyBuckets[dayKey] = dayBucket
@@ -284,10 +311,16 @@ public enum AgyStatsService {
                     }) ?? defaultGeminiModel
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
+                    let isQGcp = isGcpAt(date: q.timestamp, transitions: authTransitions, currentIsGcp: currentIsGcp)
                     monthBucket.totalCost += cost
                     monthBucket.inputTokens += inTokens
                     monthBucket.outputTokens += outTokens
                     monthBucket.modelBreakdown[model.name, default: 0.0] += cost
+                    if isQGcp {
+                        monthBucket.gcpCost += cost
+                    } else {
+                        monthBucket.quotaCost += cost
+                    }
                 }
                 monthlyBuckets[monthKey] = monthBucket
             }
@@ -335,12 +368,29 @@ public enum AgyStatsService {
                     continue
                 }
                 
+                let isGenGcp = isGcpAt(date: genDate, transitions: authTransitions, currentIsGcp: currentIsGcp)
                 totalCost += cost
+                if isGenGcp {
+                    gcpTotalCost += cost
+                } else {
+                    quotaTotalCost += cost
+                }
+                
                 if genDate >= startOfToday {
                     todayCost += cost
+                    if isGenGcp {
+                        gcpTodayCost += cost
+                    } else {
+                        quotaTodayCost += cost
+                    }
                 }
                 if genDate >= sevenDaysAgo {
                     weekCost += cost
+                    if isGenGcp {
+                        gcpWeekCost += cost
+                    } else {
+                        quotaWeekCost += cost
+                    }
                 }
                 
                 modelDist[model.name, default: 0] += 1
@@ -357,6 +407,11 @@ public enum AgyStatsService {
                 dayBucket.inputTokens += inTokens
                 dayBucket.outputTokens += outTokens
                 dayBucket.modelBreakdown[model.name, default: 0.0] += cost
+                if isGenGcp {
+                    dayBucket.gcpCost += cost
+                } else {
+                    dayBucket.quotaCost += cost
+                }
                 dailyBuckets[dayKey] = dayBucket
                 
                 let monthKey = monthKeyFormatter.string(from: genDate)
@@ -372,6 +427,11 @@ public enum AgyStatsService {
                 monthBucket.inputTokens += inTokens
                 monthBucket.outputTokens += outTokens
                 monthBucket.modelBreakdown[model.name, default: 0.0] += cost
+                if isGenGcp {
+                    monthBucket.gcpCost += cost
+                } else {
+                    monthBucket.quotaCost += cost
+                }
                 monthlyBuckets[monthKey] = monthBucket
             }
             
@@ -417,13 +477,76 @@ public enum AgyStatsService {
                 weeklyCostEstimate: weekCost,
                 todayCostEstimate: todayCost,
                 dailyUsage: sortedDaily,
-                monthlyUsage: sortedMonthly
+                monthlyUsage: sortedMonthly,
+                gcpProject: settings.gcp?.project,
+                gcpLocation: settings.gcp?.location,
+                gcpTotalCost: gcpTotalCost,
+                gcpTodayCost: gcpTodayCost,
+                gcpWeeklyCost: gcpWeekCost,
+                quotaTotalCost: quotaTotalCost,
+                quotaTodayCost: quotaTodayCost,
+                quotaWeeklyCost: quotaWeekCost
             )
             
             return (stats, settings)
         }.value
     }
     
+    public struct AuthTransition {
+        public let timestamp: Date
+        public let isGcp: Bool
+        
+        public init(timestamp: Date, isGcp: Bool) {
+            self.timestamp = timestamp
+            self.isGcp = isGcp
+        }
+    }
+    
+    private static func loadAuthTransitions(logDir: String) -> [AuthTransition] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: logDir) else {
+            return []
+        }
+        
+        let logFiles = files.filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }.sorted()
+        var transitions: [AuthTransition] = []
+        var lastMode: Bool? = nil
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        dateFormatter.timeZone = TimeZone.current
+        
+        for file in logFiles {
+            let stripped = file.replacingOccurrences(of: "cli-", with: "").replacingOccurrences(of: ".log", with: "")
+            guard let date = dateFormatter.date(from: stripped) else { continue }
+            
+            let fullPath = (logDir as NSString).appendingPathComponent(file)
+            guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: fullPath)) else { continue }
+            let data = handle.readData(ofLength: 65536)
+            try? handle.close()
+            
+            guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { continue }
+            let isGcp = text.contains("aiplatform") || text.contains("clawdbot") || text.contains("EnterProject") || text.contains("GCP setup completed")
+            
+            if lastMode != isGcp {
+                transitions.append(AuthTransition(timestamp: date, isGcp: isGcp))
+                lastMode = isGcp
+            }
+        }
+        
+        return transitions
+    }
+    
+    private static func isGcpAt(date: Date, transitions: [AuthTransition], currentIsGcp: Bool) -> Bool {
+        guard !transitions.isEmpty else { return currentIsGcp }
+        for t in transitions.reversed() {
+            if date >= t.timestamp {
+                return t.isGcp
+            }
+        }
+        return false
+    }
+
     private static func loadSettings(at path: String) -> AgySettings {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
             return .default

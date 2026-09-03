@@ -309,10 +309,26 @@ struct CostTabView: View {
                                             
                                             Text(String(format: "$%.3f", cost))
                                                 .font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit())
-                                                .foregroundStyle(theme.costGreen)
+                                                .foregroundStyle(query.isGcp ? Color.blue : theme.costGreen)
                                         }
                                         
                                         HStack(spacing: 4) {
+                                            if query.isGcp {
+                                                Text("gcp")
+                                                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                                                    .foregroundStyle(Color.blue)
+                                                    .padding(.horizontal, 4)
+                                                    .padding(.vertical, 1)
+                                                    .background(Capsule().fill(Color.blue.opacity(0.12)))
+                                            } else {
+                                                Text("quota")
+                                                    .font(.system(size: 7.5, weight: .medium, design: .rounded))
+                                                    .foregroundStyle(.secondary)
+                                                    .padding(.horizontal, 4)
+                                                    .padding(.vertical, 1)
+                                                    .background(Capsule().fill(Color.primary.opacity(0.04)))
+                                            }
+                                            
                                             Text(modelInfo.name.replacingOccurrences(of: " (current)", with: "").replacingOccurrences(of: " (Low)", with: "").replacingOccurrences(of: " (Medium)", with: "").replacingOccurrences(of: " (High)", with: "").replacingOccurrences(of: " (Thinking)", with: ""))
                                                 .font(.system(size: 8, weight: .bold, design: .rounded))
                                                 .foregroundStyle(modelColor)
@@ -376,15 +392,66 @@ struct CostTabView: View {
                         .foregroundStyle(.primary)
                 }
                 Spacer()
+                if viewModel.stats.isGcpActive, let project = viewModel.stats.gcpProject {
+                    HStack(spacing: 4) {
+                        Image(systemName: "cloud.fill")
+                            .font(.system(size: 8))
+                        Text("gcp: \(project)")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(Color.blue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(Capsule())
+                }
             }
             .padding(.horizontal, 4)
             
-            HStack(spacing: 0) {
-                costColumn(title: "today", cost: viewModel.stats.todayCostEstimate)
-                metricDivider
-                costColumn(title: "week", cost: viewModel.stats.weeklyCostEstimate)
-                metricDivider
-                costColumn(title: "total", cost: viewModel.stats.totalCostEstimate)
+            VStack(spacing: 6) {
+                HStack(spacing: 0) {
+                    costColumn(title: "today", cost: viewModel.stats.todayCostEstimate)
+                    metricDivider
+                    costColumn(title: "week", cost: viewModel.stats.weeklyCostEstimate)
+                    metricDivider
+                    costColumn(title: "total", cost: viewModel.stats.totalCostEstimate)
+                }
+                
+                if viewModel.stats.gcpTotalCost > 0 || viewModel.stats.isGcpActive {
+                    Divider()
+                        .opacity(0.4)
+                        .padding(.horizontal, 4)
+                    
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.blue)
+                                .frame(width: 5, height: 5)
+                            Text("gcp api direct:")
+                                .font(.system(size: 8.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "$%.2f", viewModel.stats.gcpTotalCost))
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.blue)
+                        }
+                        
+                        Spacer()
+                        
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(theme.costGreen)
+                                .frame(width: 5, height: 5)
+                            Text("subscription quota:")
+                                .font(.system(size: 8.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "$%.2f", viewModel.stats.quotaTotalCost))
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.costGreen)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 2)
+                }
             }
             .padding(.vertical, 8)
             .themedCardStyle(theme: theme)
