@@ -39,6 +39,8 @@ struct CostTabView: View {
     @State private var localSelectedModelId: String? = nil
     @State private var showPricingTemplates = false
     @State private var showQueryLogs = false
+    @State private var selectedAccount: String = "All"
+    @State private var splitByAccountType: Bool = false
     
     private var isDark: Bool { colorScheme == .dark }
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
@@ -54,7 +56,7 @@ struct CostTabView: View {
     
     private var todayModelAnalysis: [ModelAnalysis] {
         let todayQueries = viewModel.stats.recentQueries.filter { q in
-            Calendar.current.isDateInToday(q.timestamp)
+            Calendar.current.isDateInToday(q.timestamp) && (selectedAccount == "All" || q.accountDisplayName == selectedAccount)
         }
         
         var groups: [String: (count: Int, cost: Double, input: Int, output: Int)] = [:]
@@ -272,7 +274,7 @@ struct CostTabView: View {
                     
                     if showQueryLogs {
                         let todayQueries = viewModel.stats.recentQueries.filter { q in
-                            Calendar.current.isDateInToday(q.timestamp)
+                            Calendar.current.isDateInToday(q.timestamp) && (selectedAccount == "All" || q.accountDisplayName == selectedAccount)
                         }
                         
                         if todayQueries.isEmpty {
@@ -314,14 +316,14 @@ struct CostTabView: View {
                                         
                                         HStack(spacing: 4) {
                                             if query.isGcp {
-                                                Text("gcp")
+                                                Text(query.gcpProject ?? "gcp")
                                                     .font(.system(size: 7.5, weight: .bold, design: .monospaced))
                                                     .foregroundStyle(Color.blue)
                                                     .padding(.horizontal, 4)
                                                     .padding(.vertical, 1)
                                                     .background(Capsule().fill(Color.blue.opacity(0.12)))
                                             } else {
-                                                Text("quota")
+                                                Text(query.accountEmail ?? "quota")
                                                     .font(.system(size: 7.5, weight: .medium, design: .rounded))
                                                     .foregroundStyle(.secondary)
                                                     .padding(.horizontal, 4)
@@ -380,6 +382,27 @@ struct CostTabView: View {
     
     // MARK: - Cost Summary Card
     
+    private var displayedTodayCost: Double {
+        if selectedAccount == "All" {
+            return viewModel.stats.todayCostEstimate
+        }
+        return viewModel.stats.accountTodayTotals[selectedAccount] ?? 0.0
+    }
+    
+    private var displayedWeekCost: Double {
+        if selectedAccount == "All" {
+            return viewModel.stats.weeklyCostEstimate
+        }
+        return viewModel.stats.accountWeeklyTotals[selectedAccount] ?? 0.0
+    }
+    
+    private var displayedTotalCost: Double {
+        if selectedAccount == "All" {
+            return viewModel.stats.totalCostEstimate
+        }
+        return viewModel.stats.accountCostTotals[selectedAccount] ?? 0.0
+    }
+    
     private var costSummaryCard: some View {
         VStack(spacing: 8) {
             HStack {
@@ -392,32 +415,93 @@ struct CostTabView: View {
                         .foregroundStyle(.primary)
                 }
                 Spacer()
-                if viewModel.stats.isGcpActive, let project = viewModel.stats.gcpProject {
-                    HStack(spacing: 4) {
-                        Image(systemName: "cloud.fill")
-                            .font(.system(size: 8))
-                        Text("gcp: \(project)")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                
+                Menu {
+                    Button {
+                        selectedAccount = "All"
+                    } label: {
+                        HStack {
+                            Text("All Accounts & Backends")
+                            if selectedAccount == "All" { Image(systemName: "checkmark") }
+                        }
                     }
-                    .foregroundStyle(Color.blue)
+                    
+                    Divider()
+                    
+                    ForEach(viewModel.stats.availableAccounts, id: \.self) { acc in
+                        Button {
+                            selectedAccount = acc
+                        } label: {
+                            HStack {
+                                Text(acc)
+                                if selectedAccount == acc { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: selectedAccount.contains("GCP") || (selectedAccount == "All" && viewModel.stats.isGcpActive) ? "cloud.fill" : "person.crop.circle")
+                            .font(.system(size: 8))
+                        
+                        Text(selectedAccount == "All" ? (viewModel.stats.isGcpActive ? "all (gcp active)" : "all accounts") : selectedAccount)
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .lineLimit(1)
+                        
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 6.5, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .foregroundStyle(selectedAccount.contains("GCP") || (selectedAccount == "All" && viewModel.stats.isGcpActive) ? Color.blue : theme.geminiAccent)
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.blue.opacity(0.12))
+                    .padding(.vertical, 2.5)
+                    .background((selectedAccount.contains("GCP") || (selectedAccount == "All" && viewModel.stats.isGcpActive) ? Color.blue : theme.geminiAccent).opacity(0.12))
                     .clipShape(Capsule())
                 }
+                .menuStyle(.borderlessButton)
             }
             .padding(.horizontal, 4)
             
             VStack(spacing: 6) {
                 HStack(spacing: 0) {
-                    costColumn(title: "today", cost: viewModel.stats.todayCostEstimate)
+                    costColumn(title: "today", cost: displayedTodayCost)
                     metricDivider
-                    costColumn(title: "week", cost: viewModel.stats.weeklyCostEstimate)
+                    costColumn(title: "week", cost: displayedWeekCost)
                     metricDivider
-                    costColumn(title: "total", cost: viewModel.stats.totalCostEstimate)
+                    costColumn(title: "total", cost: displayedTotalCost)
                 }
                 
-                if viewModel.stats.gcpTotalCost > 0 || viewModel.stats.isGcpActive {
+                if selectedAccount != "All" {
+                    Divider()
+                        .opacity(0.4)
+                        .padding(.horizontal, 4)
+                    
+                    HStack {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(selectedAccount.contains("GCP") ? Color.blue : theme.costGreen)
+                                .frame(width: 5, height: 5)
+                            Text("filtered to account:")
+                                .font(.system(size: 8.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(selectedAccount)
+                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(selectedAccount.contains("GCP") ? Color.blue : theme.costGreen)
+                        }
+                        
+                        Spacer()
+                        
+                        Button {
+                            selectedAccount = "All"
+                        } label: {
+                            Text("Show All")
+                                .font(.system(size: 8, weight: .bold, design: .rounded))
+                                .foregroundStyle(theme.geminiAccent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 2)
+                } else if viewModel.stats.gcpTotalCost > 0 || viewModel.stats.isGcpActive {
                     Divider()
                         .opacity(0.4)
                         .padding(.horizontal, 4)
@@ -562,6 +646,21 @@ struct CostTabView: View {
     }
     
     private func value(for bucket: UsageTimeBucket) -> Double {
+        if selectedAccount != "All" {
+            switch metricType {
+            case .cost:
+                return bucket.accountCostBreakdown[selectedAccount] ?? 0.0
+            case .queries:
+                return Double(bucket.accountQueryBreakdown[selectedAccount] ?? 0)
+            case .tokens:
+                if bucket.totalCost > 0 {
+                    let ratio = (bucket.accountCostBreakdown[selectedAccount] ?? 0.0) / bucket.totalCost
+                    return Double(bucket.inputTokens + bucket.outputTokens) * ratio
+                }
+                return 0.0
+            }
+        }
+        
         switch metricType {
         case .cost:
             return bucket.totalCost
@@ -804,6 +903,29 @@ struct CostTabView: View {
             .background(Capsule().fill(theme.surfaceSecondary))
             
             Spacer()
+            
+            if metricType == .cost {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        splitByAccountType.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 3.5) {
+                        Image(systemName: splitByAccountType ? "square.3.layers.3d.down.right.fill" : "square.3.layers.3d.down.right")
+                            .font(.system(size: 7.5))
+                        Text(splitByAccountType ? "by account type" : "split by type")
+                            .font(.system(size: 8, weight: splitByAccountType ? .bold : .medium, design: .rounded))
+                    }
+                    .foregroundStyle(splitByAccountType ? Color.blue : Color.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(splitByAccountType ? Color.blue.opacity(0.12) : theme.surfaceSecondary)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
     
@@ -877,6 +999,59 @@ struct CostTabView: View {
                     }
                 }
             }
+            
+            if bucket.totalCost > 0 && (bucket.gcpCost > 0 || bucket.quotaCost > 0) {
+                HStack(spacing: 8) {
+                    if bucket.gcpCost > 0 {
+                        HStack(spacing: 3) {
+                            Circle().fill(Color.blue).frame(width: 4, height: 4)
+                            Text("gcp direct:")
+                                .font(.system(size: 7.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "$%.2f", bucket.gcpCost))
+                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.blue)
+                        }
+                    }
+                    
+                    if bucket.quotaCost > 0 {
+                        HStack(spacing: 3) {
+                            Circle().fill(theme.costGreen).frame(width: 4, height: 4)
+                            Text("quota:")
+                                .font(.system(size: 7.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "$%.2f", bucket.quotaCost))
+                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.costGreen)
+                        }
+                    }
+                    
+                    Spacer()
+                }
+            }
+            
+            if bucket.accountCostBreakdown.count > 1 {
+                HStack(spacing: 4) {
+                    ForEach(bucket.accountCostBreakdown.keys.sorted(), id: \.self) { acc in
+                        if let aCost = bucket.accountCostBreakdown[acc], aCost > 0 {
+                            let isGcpAcc = acc.contains("GCP") || acc.contains("clawdbot")
+                            let accColor = isGcpAcc ? Color.blue : theme.costGreen
+                            HStack(spacing: 2) {
+                                Text(acc)
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(accColor)
+                                    .lineLimit(1)
+                                Text(String(format: "$%.2f", aCost))
+                                    .font(.system(size: 7, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(accColor.opacity(0.08)))
+                        }
+                    }
+                }
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -924,19 +1099,58 @@ struct CostTabView: View {
                             
                             let barHeight = max(val > 0 ? 5.0 : 0.0, canvasGeo.size.height * heightRatio)
                             
-                            RoundedRectangle(cornerRadius: cornerRadius)
-                                .fill(
-                                    LinearGradient(
-                                        colors: barGradientColors(isHovered: isHovered),
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
+                            if splitByAccountType && metricType == .cost && val > 0 && selectedAccount == "All" {
+                                let totalB = max(0.0001, bucket.totalCost)
+                                let gcpRatio = CGFloat(bucket.gcpCost / totalB)
+                                let quotaRatio = CGFloat(bucket.quotaCost / totalB)
+                                let gcpHeight = barHeight * gcpRatio
+                                let quotaHeight = barHeight * quotaRatio
+                                
+                                VStack(spacing: 0) {
+                                    if gcpHeight > 0 {
+                                        Rectangle()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [Color.blue, Color.blue.opacity(0.8)],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                )
+                                            )
+                                            .frame(height: max(1.5, gcpHeight))
+                                    }
+                                    if quotaHeight > 0 {
+                                        Rectangle()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [theme.costGreen, theme.costGreen.opacity(0.75)],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                )
+                                            )
+                                            .frame(height: max(1.5, quotaHeight))
+                                    }
+                                }
                                 .frame(width: maxBarWidth == .infinity ? nil : maxBarWidth, height: barHeight)
+                                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: cornerRadius)
                                         .stroke(isHovered ? Color.white.opacity(0.4) : Color.clear, lineWidth: 1)
                                 )
+                            } else {
+                                RoundedRectangle(cornerRadius: cornerRadius)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: (selectedAccount.contains("GCP") || selectedAccount.contains("clawdbot") || (metricType == .cost && bucket.gcpCost > 0 && bucket.quotaCost == 0)) ? [Color.blue, Color.blue.opacity(0.7)] : barGradientColors(isHovered: isHovered),
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .frame(width: maxBarWidth == .infinity ? nil : maxBarWidth, height: barHeight)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: cornerRadius)
+                                            .stroke(isHovered ? Color.white.opacity(0.4) : Color.clear, lineWidth: 1)
+                                    )
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -1044,6 +1258,25 @@ struct CostTabView: View {
                 summaryItem(title: "Scope Total", value: formattedValue(totalSum))
             }
             .padding(.horizontal, 4)
+            
+            if splitByAccountType && metricType == .cost && selectedAccount == "All" {
+                Divider()
+                    .padding(.top, 4)
+                    .padding(.bottom, 2)
+                
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.blue).frame(width: 5, height: 5)
+                        Text("gcp direct").font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 4) {
+                        Circle().fill(theme.costGreen).frame(width: 5, height: 5)
+                        Text("subscription quota").font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+            }
         }
     }
     

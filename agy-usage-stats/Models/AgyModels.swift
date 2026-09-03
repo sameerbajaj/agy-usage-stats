@@ -27,6 +27,7 @@ public struct QueryEntry: Identifiable, Codable, Hashable {
     public var modelName: String? = nil
     public var isGcp: Bool = false
     public var gcpProject: String? = nil
+    public var accountEmail: String? = nil
 
     public var cleanWorkspaceName: String {
         let url = URL(fileURLWithPath: workspace)
@@ -35,6 +36,19 @@ public struct QueryEntry: Identifiable, Codable, Hashable {
     
     public var billingBadge: String {
         isGcp ? "GCP" : "Quota"
+    }
+    
+    public var accountDisplayName: String {
+        if isGcp {
+            if let proj = gcpProject, !proj.isEmpty {
+                return "GCP (\(proj))"
+            }
+            return "Google Cloud API"
+        }
+        if let email = accountEmail, !email.isEmpty {
+            return email
+        }
+        return "Account Quota"
     }
 }
 
@@ -180,6 +194,8 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     public var modelQueryBreakdown: [String: Int]
     public var gcpCost: Double
     public var quotaCost: Double
+    public var accountCostBreakdown: [String: Double]
+    public var accountQueryBreakdown: [String: Int]
     
     public init(
         periodKey: String,
@@ -193,7 +209,9 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         modelBreakdown: [String: Double] = [:],
         modelQueryBreakdown: [String: Int] = [:],
         gcpCost: Double = 0.0,
-        quotaCost: Double = 0.0
+        quotaCost: Double = 0.0,
+        accountCostBreakdown: [String: Double] = [:],
+        accountQueryBreakdown: [String: Int] = [:]
     ) {
         self.periodKey = periodKey
         self.label = label
@@ -207,6 +225,8 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         self.modelQueryBreakdown = modelQueryBreakdown
         self.gcpCost = gcpCost
         self.quotaCost = quotaCost
+        self.accountCostBreakdown = accountCostBreakdown
+        self.accountQueryBreakdown = accountQueryBreakdown
     }
 }
 
@@ -240,6 +260,12 @@ public struct AgyUsageStats: Codable {
     public var quotaTodayCost: Double
     public var quotaWeeklyCost: Double
     
+    // Multi-account tracking
+    public var availableAccounts: [String]
+    public var accountCostTotals: [String: Double]
+    public var accountTodayTotals: [String: Double]
+    public var accountWeeklyTotals: [String: Double]
+    
     public static let empty = AgyUsageStats(
         totalQueries: 0,
         queriesToday: 0,
@@ -263,7 +289,11 @@ public struct AgyUsageStats: Codable {
         gcpWeeklyCost: 0.0,
         quotaTotalCost: 0.0,
         quotaTodayCost: 0.0,
-        quotaWeeklyCost: 0.0
+        quotaWeeklyCost: 0.0,
+        availableAccounts: [],
+        accountCostTotals: [:],
+        accountTodayTotals: [:],
+        accountWeeklyTotals: [:]
     )
 }
 
