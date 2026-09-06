@@ -93,9 +93,7 @@ public struct MenuBarPopover: View {
     // MARK: - Header
     
     private var isConnected: Bool {
-        let expanded = viewModel.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
-        let path = (expanded as NSString).appendingPathComponent("history.jsonl")
-        return FileManager.default.fileExists(atPath: path)
+        viewModel.isConnected
     }
     
     private var header: some View {
@@ -254,10 +252,14 @@ public struct MenuBarPopover: View {
         .background(theme.surfacePrimary)
     }
     
-    private func formattedTime(_ date: Date) -> String {
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        return formatter
+    }()
+    
+    private func formattedTime(_ date: Date) -> String {
+        return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
     
     // MARK: - Update Banner View Helper

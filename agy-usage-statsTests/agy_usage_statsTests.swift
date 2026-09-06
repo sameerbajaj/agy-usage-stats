@@ -8,6 +8,7 @@
 import Testing
 @testable import agy_usage_stats
 
+@Suite(.serialized)
 struct agy_usage_statsTests {
 
     @Test func testFetchQuota() async throws {
@@ -33,6 +34,24 @@ struct agy_usage_statsTests {
         print("Stats Tool Calls: \(stats.totalToolCalls)")
         print("Stats Quota Info: \(stats.quotaInfo != nil ? "present" : "nil")")
         print("--- TEST END ---")
+    }
+
+    @Test func testLoadStatsCachingAndPerformance() async throws {
+        AgyStatsService.clearCaches()
+        
+        let startCold = ContinuousClock.now
+        let (coldStats, _) = await AgyStatsService.loadStats(cliDir: "~/.gemini/antigravity-cli")
+        let coldDuration = startCold.duration(to: .now)
+        print("--- Cold loadStats duration: \(coldDuration) ---")
+        
+        let startWarm = ContinuousClock.now
+        let (warmStats, _) = await AgyStatsService.loadStats(cliDir: "~/.gemini/antigravity-cli")
+        let warmDuration = startWarm.duration(to: .now)
+        print("--- Warm loadStats duration: \(warmDuration) ---")
+        
+        #expect(coldStats.totalQueries == warmStats.totalQueries)
+        #expect(coldStats.totalToolCalls == warmStats.totalToolCalls)
+        #expect(warmDuration < .milliseconds(500))
     }
 
 }

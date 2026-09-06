@@ -147,8 +147,8 @@ struct MenuBarLabel: View {
 // MARK: - Menu Bar Drawing
 
 /// Draw a custom upward floating arrow/chevron (defying gravity) above a ground line using CoreGraphics.
-/// The chevron levitates higher and displays energy lines under it as usage/queries increase.
-/// If showUsage is true, it draws a circular quota track/arc and percentage text for the selected model option.
+private var cachedAntigravityIcon: (key: String, image: NSImage)? = nil
+
 private func makeAntigravityImage(
     queriesToday: Int,
     litColor: Color,
@@ -161,6 +161,11 @@ private func makeAntigravityImage(
     geminiFillFraction: Double? = nil,
     claudeFillFraction: Double? = nil
 ) -> NSImage {
+    let cacheKey = "\(queriesToday)_\(litColor.description)_\(showUsage)_\(selectedModelForIcon.rawValue)_\(activeUsageFraction ?? -1)_\(geminiUsageFraction ?? -1)_\(claudeUsageFraction ?? -1)_\(activeFillFraction ?? -1)_\(geminiFillFraction ?? -1)_\(claudeFillFraction ?? -1)"
+    if let cached = cachedAntigravityIcon, cached.key == cacheKey {
+        return cached.image
+    }
+    
     let h: CGFloat = 14
     let litNS = NSColor(litColor)
     
@@ -325,6 +330,7 @@ private func makeAntigravityImage(
         return true
     }
     img.isTemplate = false
+    cachedAntigravityIcon = (cacheKey, img)
     return img
 }
 

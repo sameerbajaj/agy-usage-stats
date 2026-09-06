@@ -41,7 +41,7 @@ struct WorkspacesTabView: View {
                 Spacer()
             } else {
                 ScrollView {
-                    VStack(spacing: 6) {
+                    LazyVStack(spacing: 6) {
                         ForEach(viewModel.stats.workspaces) { ws in
                             WorkspaceRow(ws: ws, theme: theme) {
                                 revealInFinder(path: ws.path)
@@ -130,9 +130,13 @@ struct WorkspaceRow: View {
         }
     }
     
-    private func formattedTime(_ date: Date) -> String {
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        return formatter
+    }()
+    
+    private func formattedTime(_ date: Date) -> String {
+        return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }

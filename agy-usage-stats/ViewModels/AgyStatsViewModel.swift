@@ -55,6 +55,7 @@ public final class AgyStatsViewModel {
     public var cliDir: String {
         didSet {
             UserDefaults.standard.set(cliDir, forKey: "agy_cliDir")
+            AgyStatsService.clearCaches()
             restartWatcher()
             Task { await refresh() }
         }
@@ -118,6 +119,7 @@ public final class AgyStatsViewModel {
     public var stats: AgyUsageStats = .empty
     public var settings: AgySettings = .default
     public var isRefreshing = false
+    public var isConnected = false
     public var searchQuery = String()
     
     // Auto-update States
@@ -178,7 +180,18 @@ public final class AgyStatsViewModel {
         } else {
             self.selectedTheme = .midnight
         }
+        
+        let expanded = self.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
+        let path = (expanded as NSString).appendingPathComponent("history.jsonl")
+        self.isConnected = FileManager.default.fileExists(atPath: path)
     }
+    
+    private static let isoFormatter = ISO8601DateFormatter()
+    private static let relativeDateTimeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 
     private func getActiveGroup() -> AgyQuotaGroup? {
         guard let quota = stats.quotaInfo else { return nil }
@@ -273,8 +286,7 @@ public final class AgyStatsViewModel {
                 return 1.0
             }
             
-            let formatter = ISO8601DateFormatter()
-            guard let resetDate = formatter.date(from: resetTimeStr) else {
+            guard let resetDate = Self.isoFormatter.date(from: resetTimeStr) else {
                 return 1.0
             }
             
@@ -391,11 +403,8 @@ public final class AgyStatsViewModel {
             clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
             return clean
         }
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: resetDesc) {
-            let relFormatter = RelativeDateTimeFormatter()
-            relFormatter.unitsStyle = .short
-            return relFormatter.localizedString(for: date, relativeTo: Date())
+        if let date = Self.isoFormatter.date(from: resetDesc) {
+            return Self.relativeDateTimeFormatter.localizedString(for: date, relativeTo: Date())
         }
         if resetDesc.count > 15 {
             return String(resetDesc.prefix(12)) + "..."
@@ -403,7 +412,12 @@ public final class AgyStatsViewModel {
         return resetDesc
     }
     
+    private var isSetup = false
+    
     public func setup() {
+        guard !isSetup else { return }
+        isSetup = true
+        
         // Start watching for file changes
         watcher.cliDirOverride = cliDir
         watcher.onFileChanged = { [weak self] in
@@ -428,10 +442,20 @@ public final class AgyStatsViewModel {
         }
         
         let (loadedStats, loadedSettings) = await AgyStatsService.loadStats(cliDir: cliDir)
+        let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
+        let path = (expanded as NSString).appendingPathComponent("history.jsonl")
+        let connected = FileManager.default.fileExists(atPath: path)
         
         await MainActor.run {
-            self.stats = loadedStats
-            self.settings = loadedSettings
+            if self.stats != loadedStats {
+                self.stats = loadedStats
+            }
+            if self.settings != loadedSettings {
+                self.settings = loadedSettings
+            }
+            if self.isConnected != connected {
+                self.isConnected = connected
+            }
             self.isRefreshing = false
         }
     }

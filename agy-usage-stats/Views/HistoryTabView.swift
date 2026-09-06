@@ -90,7 +90,7 @@ struct HistoryTabView: View {
                 Spacer()
             } else {
                 ScrollView {
-                    VStack(spacing: 6) {
+                    LazyVStack(spacing: 6) {
                         ForEach(filteredQueries) { query in
                             HistoryRow(query: query, copiedQueryID: copiedQueryID, theme: theme) {
                                 copyToClipboard(text: query.display, id: query.id)
@@ -221,10 +221,14 @@ struct HistoryRow: View {
         }
     }
     
-    private func formattedTime(_ date: Date) -> String {
+    private static let historyDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short
-        return formatter.string(from: date)
+        return formatter
+    }()
+    
+    private func formattedTime(_ date: Date) -> String {
+        return Self.historyDateFormatter.string(from: date)
     }
 }

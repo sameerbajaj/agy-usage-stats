@@ -112,19 +112,119 @@ public actor AgyQuotaService {
         let name: String?
     }
     
-    public static func fetchQuota() async -> AgyQuotaInfo? {
-        return await Task.detached(priority: .userInitiated) {
-            let ports = detectAgyPorts()
-            for port in ports {
-                if let info = await fetchFromPort(port) {
+    private struct CachedQuota {
+        let info: AgyQuotaInfo?
+        let timestamp: Date
+    }
+    
+    private static var lastActivePort: Int? = nil
+    private static var cachedQuota: CachedQuota? = nil
+    private static let cacheTTL: TimeInterval = 30.0
+    private static let nilCacheTTL: TimeInterval = 15.0
+    private static let quotaLock = NSLock()
+    
+    private static let sharedLocalhostSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 0.5
+        config.timeoutIntervalForResource = 0.5
+        config.httpShouldUsePipelining = true
+        let delegate = LocalhostSessionDelegate()
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+    }()
+    
+    public static func clearCache(clearActivePort: Bool = false) {
+        quotaLock.lock()
+        cachedQuota = nil
+        if clearActivePort {
+            lastActivePort = nil
+        }
+        quotaLock.unlock()
+    }
+    
+    public static func fetchQuota(forceRefresh: Bool = false) async -> AgyQuotaInfo? {
+        if !forceRefresh {
+            quotaLock.lock()
+            if let cached = cachedQuota {
+                let ttl = cached.info != nil ? cacheTTL : nilCacheTTL
+                if Date().timeIntervalSince(cached.timestamp) < ttl {
+                    let info = cached.info
+                    quotaLock.unlock()
                     return info
                 }
             }
-            return nil
+            quotaLock.unlock()
+        }
+        
+        return await Task.detached(priority: .userInitiated) {
+            // Try last active port first if available
+            quotaLock.lock()
+            let knownPort = lastActivePort
+            quotaLock.unlock()
+            
+            if let port = knownPort {
+                if let info = await fetchFromPort(port) {
+                    quotaLock.lock()
+                    cachedQuota = CachedQuota(info: info, timestamp: Date())
+                    quotaLock.unlock()
+                    return info
+                }
+            }
+            
+            let detectedPorts = detectAgyPorts()
+            let portsToProbe = detectedPorts.filter { $0 != knownPort }
+            guard !portsToProbe.isEmpty else {
+                quotaLock.lock()
+                cachedQuota = CachedQuota(info: nil, timestamp: Date())
+                quotaLock.unlock()
+                return nil
+            }
+            
+            // Probe detected ports in parallel to prevent sequential timeout stacking
+            let found: (Int, AgyQuotaInfo)? = await withTaskGroup(of: (Int, AgyQuotaInfo?).self) { group in
+                for port in portsToProbe {
+                    group.addTask {
+                        let info = await fetchFromPort(port)
+                        return (port, info)
+                    }
+                }
+                for await (port, info) in group {
+                    if let info = info {
+                        group.cancelAll()
+                        return (port, info)
+                    }
+                }
+                return nil
+            }
+            
+            quotaLock.lock()
+            if let (port, info) = found {
+                lastActivePort = port
+                cachedQuota = CachedQuota(info: info, timestamp: Date())
+                quotaLock.unlock()
+                return info
+            } else {
+                cachedQuota = CachedQuota(info: nil, timestamp: Date())
+                quotaLock.unlock()
+                return nil
+            }
         }.value
     }
     
     private static func detectAgyPorts() -> [Int] {
+        let lsofPath = ["/usr/sbin/lsof", "/usr/bin/lsof"].first(where: {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }) ?? "/usr/sbin/lsof"
+        
+        // Fast path: Ask lsof directly for listening sockets owned by 'agy' process
+        if let directOutput = runCommand(executable: lsofPath, arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-c", "agy", "-a"]),
+           !directOutput.isEmpty {
+            let ports = parseListeningPorts(directOutput)
+            if !ports.isEmpty {
+                return ports
+            }
+        }
+        
+        // Fallback: Query via ps if -c agy didn't match
         guard let psOutput = runCommand(executable: "/bin/ps", arguments: ["-ax", "-o", "pid=,command="]) else {
             return []
         }
@@ -138,41 +238,50 @@ public actor AgyQuotaService {
             guard parts.count == 2, let pid = Int(parts[0]) else { continue }
             let command = String(parts[1]).lowercased()
             
-            // Check if it's agy CLI or language server
-            if command.contains("agy") || command.contains("language_server") || command.contains("language-server") {
+            // Check if it's agy CLI or language server (exclude tmux and stats app)
+            if (command.contains("agy") || command.contains("language_server") || command.contains("language-server")) &&
+               !command.contains("agy-usage-stats") && !command.contains("tmux") {
                 pids.append(pid)
             }
         }
         
-        let lsofPath = ["/usr/sbin/lsof", "/usr/bin/lsof"].first(where: {
-            FileManager.default.isExecutableFile(atPath: $0)
-        }) ?? "/usr/sbin/lsof"
+        guard !pids.isEmpty else { return [] }
+        pids.sort(by: >)
         
-        var ports: Set<Int> = []
-        for pid in pids {
-            guard let lsofOutput = runCommand(executable: lsofPath, arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", String(pid)]) else {
-                continue
-            }
-            let pList = parseListeningPorts(lsofOutput)
-            for port in pList {
-                ports.insert(port)
-            }
+        let pidArg = pids.prefix(25).map(String.init).joined(separator: ",")
+        guard let lsofOutput = runCommand(executable: lsofPath, arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", pidArg]) else {
+            return []
         }
         
-        return Array(ports).sorted()
+        return parseListeningPorts(lsofOutput)
     }
     
     private static func parseListeningPorts(_ output: String) -> [Int] {
+        // Line-based parsing: prioritize FD 10u lines (the Connect protocol HTTPS port on agy)
+        let lines = output.components(separatedBy: .newlines)
+        var primaryPorts: [Int] = []
+        var secondaryPorts: [Int] = []
+        var seen = Set<Int>()
+        
         guard let regex = try? NSRegularExpression(pattern: #":(\d+)\s+\(LISTEN\)"#) else { return [] }
-        let range = NSRange(output.startIndex..<output.endIndex, in: output)
-        var ports: Set<Int> = []
-        regex.enumerateMatches(in: output, options: [], range: range) { match, _, _ in
-            guard let match,
-                  let range = Range(match.range(at: 1), in: output),
-                  let value = Int(output[range]) else { return }
-            ports.insert(value)
+        
+        for line in lines {
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            guard let match = regex.firstMatch(in: line, options: [], range: range),
+                  let portRange = Range(match.range(at: 1), in: line),
+                  let port = Int(line[portRange]),
+                  !seen.contains(port) else { continue }
+            
+            seen.insert(port)
+            if line.contains("10u") {
+                primaryPorts.append(port)
+            } else {
+                secondaryPorts.append(port)
+            }
         }
-        return ports.sorted()
+        
+        // Return 10u ports first, followed by others
+        return primaryPorts + secondaryPorts
     }
     
     private static func runCommand(executable: String, arguments: [String]) -> String? {
@@ -196,11 +305,9 @@ public actor AgyQuotaService {
     }
     
     private static func fetchFromPort(_ port: Int) async -> AgyQuotaInfo? {
-        let urlSession = makeLocalhostSession()
-        defer { urlSession.invalidateAndCancel() }
-        
-        // 1. Fetch RetrieveUserQuotaSummary
-        guard let summaryUrl = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary") else {
+        // 1. Prepare RetrieveUserQuotaSummary
+        guard let summaryUrl = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"),
+              let statusUrl = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/GetUserStatus") else {
             return nil
         }
         
@@ -210,11 +317,6 @@ public actor AgyQuotaService {
         summaryRequest.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
         summaryRequest.httpBody = try? JSONSerialization.data(withJSONObject: ["forceRefresh": true], options: [])
         
-        // 2. Fetch GetUserStatus for profile details
-        guard let statusUrl = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/GetUserStatus") else {
-            return nil
-        }
-        
         var statusRequest = URLRequest(url: statusUrl)
         statusRequest.httpMethod = "POST"
         statusRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -222,7 +324,10 @@ public actor AgyQuotaService {
         statusRequest.httpBody = try? JSONSerialization.data(withJSONObject: [:], options: [])
         
         do {
-            let (summaryData, _) = try await urlSession.data(for: summaryRequest)
+            async let summaryTask = sharedLocalhostSession.data(for: summaryRequest)
+            async let statusTask = sharedLocalhostSession.data(for: statusRequest)
+            
+            let (summaryData, _) = try await summaryTask
             let decoder = JSONDecoder()
             let summaryResp = try decoder.decode(QuotaSummaryResponse.self, from: summaryData)
             
@@ -257,7 +362,7 @@ public actor AgyQuotaService {
             var email: String? = nil
             var plan: String? = nil
             
-            if let (statusData, _) = try? await urlSession.data(for: statusRequest),
+            if let (statusData, _) = try? await statusTask,
                let statusResp = try? decoder.decode(UserStatusResponse.self, from: statusData) {
                 email = statusResp.userStatus?.email
                 plan = statusResp.userStatus?.userTier?.name
@@ -267,14 +372,6 @@ public actor AgyQuotaService {
         } catch {
             return nil
         }
-    }
-    
-    private static func makeLocalhostSession() -> URLSession {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 2.0
-        config.timeoutIntervalForResource = 2.0
-        let delegate = LocalhostSessionDelegate()
-        return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
 }
 

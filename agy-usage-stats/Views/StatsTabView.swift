@@ -95,9 +95,11 @@ struct QuotaBucketRow: View {
         .padding(.vertical, 1)
     }
     
+    private static let isoFormatter = ISO8601DateFormatter()
+    
     private func resolveResetDescription() -> String? {
         if let resetTimeStr = bucket.resetTime,
-           let date = ISO8601DateFormatter().date(from: resetTimeStr) {
+           let date = Self.isoFormatter.date(from: resetTimeStr) {
             let now = Date()
             let diff = date.timeIntervalSince(now)
             if diff > 0 {

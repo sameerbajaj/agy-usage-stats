@@ -230,7 +230,7 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-public struct AgyUsageStats: Codable {
+public struct AgyUsageStats: Codable, Equatable {
     public var totalQueries: Int
     public var queriesToday: Int
     public var queriesThisWeek: Int

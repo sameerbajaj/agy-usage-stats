@@ -54,14 +54,23 @@ struct CostTabView: View {
         let outputTokens: Int
     }
     
-    private var todayModelAnalysis: [ModelAnalysis] {
-        let todayQueries = viewModel.stats.recentQueries.filter { q in
-            Calendar.current.isDateInToday(q.timestamp) && (selectedAccount == "All" || q.accountDisplayName == selectedAccount)
+    private var todayQueries: [QueryEntry] {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: Date())
+        var result: [QueryEntry] = []
+        for q in viewModel.stats.recentQueries {
+            if q.timestamp < startOfToday { break }
+            if selectedAccount == "All" || q.accountDisplayName == selectedAccount {
+                result.append(q)
+            }
         }
-        
+        return result
+    }
+    
+    private func computeModelAnalysis(for queries: [QueryEntry]) -> [ModelAnalysis] {
         var groups: [String: (count: Int, cost: Double, input: Int, output: Int)] = [:]
         
-        for q in todayQueries {
+        for q in queries {
             let modelInfo = getModelCostInfo(for: q)
             let (inTokens, outTokens, cost) = modelInfo.estimateTokensAndCost(for: q)
             
@@ -86,8 +95,7 @@ struct CostTabView: View {
         }.sorted { $0.totalCost > $1.totalCost }
     }
     
-    private var todayInsights: [String] {
-        let analysis = todayModelAnalysis
+    private func computeInsights(for analysis: [ModelAnalysis]) -> [String] {
         guard !analysis.isEmpty else {
             return ["No query activity recorded yet for today."]
         }
@@ -273,11 +281,9 @@ struct CostTabView: View {
                     .buttonStyle(.plain)
                     
                     if showQueryLogs {
-                        let todayQueries = viewModel.stats.recentQueries.filter { q in
-                            Calendar.current.isDateInToday(q.timestamp) && (selectedAccount == "All" || q.accountDisplayName == selectedAccount)
-                        }
+                        let queries = todayQueries
                         
-                        if todayQueries.isEmpty {
+                        if queries.isEmpty {
                             VStack(spacing: 6) {
                                 Image(systemName: "clock.badge.checkmark")
                                     .font(.system(size: 14))
@@ -290,8 +296,8 @@ struct CostTabView: View {
                             .padding(.vertical, 20)
                             .themedCardStyle(theme: theme)
                         } else {
-                            VStack(spacing: 4) {
-                                ForEach(todayQueries) { query in
+                            LazyVStack(spacing: 4) {
+                                ForEach(queries) { query in
                                     let modelInfo = getModelCostInfo(for: query)
                                     let (inTokens, outTokens, cost) = modelInfo.estimateTokensAndCost(for: query)
                                     let calls = query.conversationMeta?.llmCalls ?? 1
@@ -1305,7 +1311,9 @@ struct CostTabView: View {
     // MARK: - Today's Cost & Token Analysis Section
     
     private var todayAnalysisSection: some View {
-        let analysis = todayModelAnalysis
+        let queries = todayQueries
+        let analysis = computeModelAnalysis(for: queries)
+        let insights = computeInsights(for: analysis)
         let todayTotalCost = viewModel.stats.todayCostEstimate
         
         return VStack(alignment: .leading, spacing: 8) {
@@ -1402,7 +1410,7 @@ struct CostTabView: View {
                         }
                     }
                     
-                    if !todayInsights.isEmpty {
+                    if !insights.isEmpty {
                         VStack(alignment: .leading, spacing: 5) {
                             Divider()
                                 .padding(.vertical, 4)
@@ -1412,7 +1420,7 @@ struct CostTabView: View {
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, 4)
                             
-                            ForEach(todayInsights, id: \.self) { insight in
+                            ForEach(insights, id: \.self) { insight in
                                 HStack(alignment: .top, spacing: 5) {
                                     Image(systemName: "sparkles")
                                         .font(.system(size: 8))

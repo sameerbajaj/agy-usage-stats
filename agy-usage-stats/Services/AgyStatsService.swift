@@ -18,6 +18,175 @@ public enum AgyStatsService {
         let type: String?
     }
     
+    private struct DbGeneration: Sendable {
+        let idx: Int
+        let size: Int
+        let timestamp: Date?
+        let modelName: String?
+        let inputTokens: Int?
+        let outputTokens: Int?
+        let cachedInputTokens: Int?
+    }
+    
+    private struct DbConversationData: Sendable {
+        let conversationId: String
+        let startTime: Date?
+        let generations: [DbGeneration]
+    }
+    
+    // In-memory caches for fast warm refreshes
+    private struct ConversationCacheEntry: Sendable {
+        let modificationDate: Date
+        let fileSize: Int64
+        let conversationData: DbConversationData
+        let toolCounts: [String: Int]
+    }
+    
+    private struct HistoryCacheEntry {
+        let modificationDate: Date
+        let fileSize: Int64
+        let queries: [QueryEntry]
+        let workspaces: [WorkspaceStats]
+        let lastQuery: Date?
+    }
+    
+    private struct AuthCacheEntry {
+        let fileCount: Int
+        let newestName: String?
+        let newestModDate: Date?
+        let defaultProject: String?
+        let cachedAt: Date
+        let transitions: [AuthTransition]
+    }
+    
+    private struct LogFileEntry {
+        let modDate: Date
+        let size: Int64
+        let isGcp: Bool
+        let project: String?
+        let email: String?
+    }
+    
+    private struct PrecomputedAuthState {
+        let timestamp: Date
+        let state: AuthStateAtDate
+    }
+    
+    private static var conversationCache: [String: ConversationCacheEntry] = [:]
+    private static let conversationCacheLock = NSLock()
+    
+    private static var historyCache: HistoryCacheEntry? = nil
+    private static let historyCacheLock = NSLock()
+    
+    private static var authCache: AuthCacheEntry? = nil
+    private static let authCacheLock = NSLock()
+    
+    private static var logFileCache: [String: LogFileEntry] = [:]
+    private static let logFileCacheLock = NSLock()
+    
+    private struct StatsCacheEntry {
+        let settings: AgySettings
+        let startOfToday: Date
+        let historyModDate: Date
+        let historySize: Int64
+        let conversationsDirModDate: Date
+        let stats: AgyUsageStats
+    }
+    
+    private static var statsCache: StatsCacheEntry? = nil
+    private static let statsCacheLock = NSLock()
+    
+    public static func clearCaches() {
+        conversationCacheLock.lock()
+        conversationCache.removeAll()
+        conversationCacheLock.unlock()
+        
+        historyCacheLock.lock()
+        historyCache = nil
+        historyCacheLock.unlock()
+        
+        authCacheLock.lock()
+        authCache = nil
+        authCacheLock.unlock()
+        
+        logFileCacheLock.lock()
+        logFileCache.removeAll()
+        logFileCacheLock.unlock()
+        
+        statsCacheLock.lock()
+        statsCache = nil
+        statsCacheLock.unlock()
+        
+        AgyQuotaService.clearCache()
+    }
+    
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    
+    private static let dayLabelFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE, MMM d"
+        return f
+    }()
+    
+    private static let dayShortLabelFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+    
+    private static let monthKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM"
+        return f
+    }()
+    
+    private static let monthLabelFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMMM yyyy"
+        return f
+    }()
+    
+    private static let monthShortLabelFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM ''yy"
+        return f
+    }()
+    
+    private static let logDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd_HHmmss"
+        f.timeZone = TimeZone.current
+        return f
+    }()
+    
+    private static let toolBytePatterns: [(tool: String, pattern: [UInt8])] = [
+        "run_command", "replace_file_content", "view_file", "list_dir",
+        "grep_search", "search_web", "read_url_content", "read_browser_page",
+        "write_to_file", "ask_question", "ask_permission", "multi_replace_file_content",
+        "define_subagent", "invoke_subagent", "send_message", "manage_subagents",
+        "manage_task", "schedule"
+    ].map { tool in
+        (tool: tool, pattern: [18, UInt8(tool.count)] + Array(tool.utf8))
+    }
+    
+    private static func binarySearchLowerBound(_ array: [Double], target: Double) -> Int {
+        var low = 0
+        var high = array.count
+        while low < high {
+            let mid = (low + high) / 2
+            if array[mid] < target {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        return low
+    }
+    
     public static func getDefaultCliDir() -> String {
         return "\(NSHomeDirectory())/.gemini/antigravity-cli"
     }
@@ -30,27 +199,52 @@ public enum AgyStatsService {
             let conversationsDir = (expandedDir as NSString).appendingPathComponent("conversations")
             let logDir = (expandedDir as NSString).appendingPathComponent("log")
             
-            print("AgyStatsService: --- Loading Stats ---")
-            print("AgyStatsService: cliDir = \(cliDir)")
-            print("AgyStatsService: NSHomeDirectory = \(NSHomeDirectory())")
-            print("AgyStatsService: expandedDir = \(expandedDir)")
-            print("AgyStatsService: historyPath = \(historyPath)")
-            print("AgyStatsService: settingsPath = \(settingsPath)")
-            print("AgyStatsService: conversationsDir = \(conversationsDir)")
-            print("AgyStatsService: logDir = \(logDir)")
+            let fm = FileManager.default
+            let calendar = Calendar.current
+            let now = Date()
+            let startOfToday = calendar.startOfDay(for: now)
+            
+            let histAttrs = try? fm.attributesOfItem(atPath: historyPath)
+            let histMod = histAttrs?[.modificationDate] as? Date ?? Date.distantPast
+            let histSize = (histAttrs?[.size] as? NSNumber)?.int64Value ?? 0
+            
+            let convDirAttrs = try? fm.attributesOfItem(atPath: conversationsDir)
+            let convDirMod = convDirAttrs?[.modificationDate] as? Date ?? Date.distantPast
+            
+            let settings = loadSettings(at: settingsPath)
+            
+            // Fast cache check: if history.jsonl, conversations dir, and settings haven't changed today, return immediately
+            statsCacheLock.lock()
+            if let cached = statsCache,
+               cached.settings == settings,
+               cached.startOfToday == startOfToday,
+               cached.historyModDate == histMod,
+               cached.historySize == histSize,
+               cached.conversationsDirModDate == convDirMod {
+                var cachedStats = cached.stats
+                statsCacheLock.unlock()
+                
+                // Fetch fresh quota without blocking UI if already cached
+                if let quota = await AgyQuotaService.fetchQuota() {
+                    cachedStats.quotaInfo = quota
+                }
+                return (cachedStats, settings)
+            }
+            statsCacheLock.unlock()
+            
+            let tStart = ContinuousClock.now
+            // Kick off quota fetch in background concurrently
+            async let quotaTask = AgyQuotaService.fetchQuota()
             
             // Load Settings & Auth Transitions
-            let settings = loadSettings(at: settingsPath)
             let currentIsGcp = settings.gcp?.project != nil && !(settings.gcp?.project?.isEmpty ?? true)
             let authTransitions = loadAuthTransitions(logDir: logDir, defaultProject: settings.gcp?.project)
-            print("AgyStatsService: Loaded settings: model=\(settings.model ?? "nil"), gcp=\(settings.gcp?.project ?? "none"), transitions=\(authTransitions.count)")
             
+            let tHist = ContinuousClock.now
             // Load History Lines
-            var (loadedQueries, workspaces, lastQuery) = loadHistory(at: historyPath)
-            print("AgyStatsService: Loaded history: queries count = \(loadedQueries.count), workspaces count = \(workspaces.count)")
+            let (loadedQueries, workspaces, lastQuery, _) = loadHistory(at: historyPath)
             
             // Date-aware fallback thresholds: Gemini 3.7 Flash on August 1, 2026; Gemini 3.8 Flash on September 2, 2026
-            let calendar = Calendar.current
             let aug2026 = calendar.date(from: DateComponents(year: 2026, month: 8, day: 1)) ?? Date.distantFuture
             let sep2026 = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2)) ?? Date.distantFuture
             
@@ -68,8 +262,10 @@ public enum AgyStatsService {
                 return copy
             }
             
-            // Load all SQLite conversation databases (ground truth for all turns, subagents, and tokens)
-            let allDbConversations = loadAllDbConversations(conversationsDir: conversationsDir)
+            let tDb = ContinuousClock.now
+            // Load all SQLite conversation databases and tool stats in a single parallel pass
+            let (allDbConversations, toolStats, _) = await loadConversationsAndToolStats(conversationsDir: conversationsDir)
+            let totalToolCalls = toolStats.reduce(0) { $0 + $1.count }
             
             var convStartMap: [Int: String] = [:]
             for (cid, conv) in allDbConversations {
@@ -78,8 +274,90 @@ public enum AgyStatsService {
                 }
             }
             
+            // Pre-index subagent candidates by start time for binary search
+            let subagentCandidates = allDbConversations.values.compactMap { conv -> (id: String, start: Double, gens: [DbGeneration])? in
+                guard let st = conv.startTime else { return nil }
+                return (id: conv.conversationId, start: st.timeIntervalSince1970, gens: conv.generations)
+            }.sorted { $0.start < $1.start }
+            let subagentStarts = subagentCandidates.map { $0.start }
+            
+            // Pre-resolve conversation IDs for queries to eliminate redundant lookups
+            let resolvedConvIds: [String?] = queries.map { $0.conversationId ?? findConversationId(for: $0.timestamp, in: convStartMap) }
+            
+            // Map each conversation ID to its query timestamps in chronological (ascending) order
+            var queryStartsByConv: [String: [Date]] = [:]
+            for (i, cid) in resolvedConvIds.enumerated() {
+                if let cid = cid {
+                    let s = Date(timeIntervalSince1970: floor(queries[i].timestamp.timeIntervalSince1970))
+                    queryStartsByConv[cid, default: []].append(s)
+                }
+            }
+            for (cid, arr) in queryStartsByConv {
+                queryStartsByConv[cid] = arr.reversed()
+            }
+            
+            let tQueryStart = ContinuousClock.now
+            
+            let precomputedInitialAuthStates: [PrecomputedAuthState] = authTransitions.map { t in
+                let isGcp = t.isGcp
+                let project = isGcp ? (t.gcpProject ?? settings.gcp?.project ?? "clawdbot-485304") : nil
+                let accountDisplayName: String
+                if isGcp {
+                    if let p = project, !p.isEmpty {
+                        accountDisplayName = "GCP (\(p))"
+                    } else {
+                        accountDisplayName = "Google Cloud API"
+                    }
+                } else if let em = t.email, !em.isEmpty {
+                    accountDisplayName = em
+                } else {
+                    accountDisplayName = "Account Quota"
+                }
+                return PrecomputedAuthState(
+                    timestamp: t.timestamp,
+                    state: AuthStateAtDate(
+                        isGcp: isGcp,
+                        email: t.email,
+                        gcpProject: project,
+                        accountDisplayName: accountDisplayName
+                    )
+                )
+            }
+            let initialDefaultAuthState: AuthStateAtDate = {
+                let chosen = authTransitions.first
+                let isGcp = chosen?.isGcp ?? currentIsGcp
+                let project = isGcp ? (chosen?.gcpProject ?? settings.gcp?.project ?? "clawdbot-485304") : nil
+                let accountDisplayName: String
+                if isGcp {
+                    if let p = project, !p.isEmpty {
+                        accountDisplayName = "GCP (\(p))"
+                    } else {
+                        accountDisplayName = "Google Cloud API"
+                    }
+                } else if let em = chosen?.email, !em.isEmpty {
+                    accountDisplayName = em
+                } else {
+                    accountDisplayName = "Account Quota"
+                }
+                return AuthStateAtDate(
+                    isGcp: isGcp,
+                    email: chosen?.email,
+                    gcpProject: project,
+                    accountDisplayName: accountDisplayName
+                )
+            }()
+            func authForDateInitial(_ date: Date) -> AuthStateAtDate {
+                for item in precomputedInitialAuthStates.reversed() {
+                    if date >= item.timestamp {
+                        return item.state
+                    }
+                }
+                return initialDefaultAuthState
+            }
+            
             // Load DB metadata and exact model names from SQLite for all available queries
             var queriesWithMeta: [QueryEntry] = []
+            queriesWithMeta.reserveCapacity(queries.count)
             
             for (index, q) in queries.enumerated() {
                 var newQ = q
@@ -92,7 +370,7 @@ public enum AgyStatsService {
                     queryDefaultModel = "Gemini 3.6 Flash (High)"
                 }
                 
-                let resolvedConvId = q.conversationId ?? findConversationId(for: q.timestamp, in: convStartMap)
+                let resolvedConvId = resolvedConvIds[index]
                 newQ.conversationId = resolvedConvId
                 
                 if let conversationId = resolvedConvId, let convData = allDbConversations[conversationId] {
@@ -101,15 +379,9 @@ public enum AgyStatsService {
                     
                     // Find the next chronological query in the same conversation to establish the time window (max 30 mins)
                     var end = start.addingTimeInterval(1800)
-                    for i in (0..<index).reversed() {
-                        let nextQ = queries[i]
-                        let nextConvId = nextQ.conversationId ?? findConversationId(for: nextQ.timestamp, in: convStartMap)
-                        if nextConvId == conversationId {
-                            let nextStart = Date(timeIntervalSince1970: floor(nextQ.timestamp.timeIntervalSince1970))
-                            if nextStart > start {
-                                end = min(end, nextStart)
-                                break
-                            }
+                    if let convStarts = queryStartsByConv[conversationId] {
+                        if let nextStart = convStarts.first(where: { $0 > start }) {
+                            end = min(end, nextStart)
                         }
                     }
                     
@@ -119,31 +391,45 @@ public enum AgyStatsService {
                         return gTs >= start && gTs < end
                     }
                     
-                    // Subagent conversations spawned during this query window
-                    let subagentGens = allDbConversations.values.filter { other in
-                        guard other.conversationId != conversationId,
-                              let otherStart = other.startTime else { return false }
-                        return otherStart >= start && otherStart < end
-                    }.flatMap { $0.generations }
+                    // Subagent conversations spawned during this query window via binary search
+                    let startSec = start.timeIntervalSince1970
+                    let endSec = end.timeIntervalSince1970
+                    let lowIdx = binarySearchLowerBound(subagentStarts, target: startSec)
+                    let highIdx = binarySearchLowerBound(subagentStarts, target: endSec)
+                    
+                    var subagentGens: [DbGeneration] = []
+                    if lowIdx < highIdx {
+                        for k in lowIdx..<highIdx {
+                            let cand = subagentCandidates[k]
+                            if cand.id != conversationId {
+                                subagentGens.append(contentsOf: cand.gens)
+                            }
+                        }
+                    }
                     
                     let turnGens = primaryGens + subagentGens
                     
                     if !turnGens.isEmpty {
-                        let llmCalls = turnGens.count
-                        let totalOutputBytes = turnGens.reduce(0) { $0 + $1.size }
-                        let totalInTokens = turnGens.compactMap { $0.inputTokens }.reduce(0, +)
-                        let totalOutTokens = turnGens.compactMap { $0.outputTokens }.reduce(0, +)
-                        let totalCachedTokens = turnGens.compactMap { $0.cachedInputTokens }.reduce(0, +)
+                        var totalOutputBytes = 0
+                        var totalInTokens = 0
+                        var totalOutTokens = 0
+                        var totalCachedTokens = 0
+                        var lastTurnModel: String? = nil
+                        for g in turnGens {
+                            totalOutputBytes += g.size
+                            if let inp = g.inputTokens { totalInTokens += inp }
+                            if let out = g.outputTokens { totalOutTokens += out }
+                            if let c = g.cachedInputTokens { totalCachedTokens += c }
+                            if let m = g.modelName { lastTurnModel = m }
+                        }
                         newQ.conversationMeta = ConversationDbMeta(
-                            llmCalls: llmCalls,
+                            llmCalls: turnGens.count,
                             totalOutputBytes: totalOutputBytes,
                             inputTokens: totalInTokens,
                             outputTokens: totalOutTokens,
                             cachedInputTokens: totalCachedTokens
                         )
-                        
-                        let turnModels = turnGens.compactMap { $0.modelName }
-                        if let model = turnModels.last {
+                        if let model = lastTurnModel {
                             newQ.modelName = enforceDateModelValidity(modelName: model, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
                         } else {
                             newQ.modelName = queryDefaultModel
@@ -165,13 +451,7 @@ public enum AgyStatsService {
                         }
                     }
                 }
-                let authState = authAt(
-                    date: q.timestamp,
-                    transitions: authTransitions,
-                    currentIsGcp: currentIsGcp,
-                    currentEmail: nil,
-                    currentProject: settings.gcp?.project
-                )
+                let authState = authForDateInitial(q.timestamp)
                 newQ.isGcp = authState.isGcp
                 newQ.gcpProject = authState.gcpProject
                 newQ.accountEmail = authState.email
@@ -179,11 +459,8 @@ public enum AgyStatsService {
             }
             
             // Count queries today and this week
-            let now = Date()
             var queriesToday = 0
             var queriesThisWeek = 0
-            
-            let startOfToday = calendar.startOfDay(for: now)
             let sevenDaysAgo = calendar.date(byAdding: .day, value: -7, to: now) ?? now
             
             for q in queriesWithMeta {
@@ -192,23 +469,23 @@ public enum AgyStatsService {
                 }
                 if q.timestamp >= sevenDaysAgo {
                     queriesThisWeek += 1
+                } else {
+                    break
                 }
             }
             print("AgyStatsService: Queries today = \(queriesToday), this week = \(queriesThisWeek)")
             
-            // Load Tool Stats from SQLite Conversations DBs
-            let toolStats = await loadToolStats(conversationsDir: conversationsDir)
-            let totalToolCalls = toolStats.reduce(0) { $0 + $1.count }
-            print("AgyStatsService: Loaded tool stats: count = \(toolStats.count), total calls = \(totalToolCalls)")
-            
-            // Fetch Quota Info
-            let quotaInfo = await AgyQuotaService.fetchQuota()
+            let tQuota = ContinuousClock.now
+            // Await Quota Info (which ran concurrently in the background)
+            let quotaInfo = await quotaTask
+            print("TIME: quotaInfo await = \(tQuota.duration(to: .now))")
             if let quotaInfo = quotaInfo {
                 print("AgyStatsService: Fetched quota: plan = \(quotaInfo.plan ?? "nil"), email = \(quotaInfo.email ?? "nil"), groups count = \(quotaInfo.groups.count)")
             } else {
                 print("AgyStatsService: Fetched quota: NONE")
             }
             
+            let tBuckets = ContinuousClock.now
             // Model distribution, cost calculations, and daily/monthly time buckets
             var modelDist: [String: Int] = [:]
             var todayCost = 0.0
@@ -225,55 +502,198 @@ public enum AgyStatsService {
             var accountTodayTotals: [String: Double] = [:]
             var accountWeeklyTotals: [String: Double] = [:]
             
-            let dayKeyFormatter = DateFormatter()
-            dayKeyFormatter.dateFormat = "yyyy-MM-dd"
+            let dayKeyFormatter = Self.dayKeyFormatter
+            let dayLabelFormatter = Self.dayLabelFormatter
+            let dayShortLabelFormatter = Self.dayShortLabelFormatter
+            let monthKeyFormatter = Self.monthKeyFormatter
+            let monthLabelFormatter = Self.monthLabelFormatter
+            let monthShortLabelFormatter = Self.monthShortLabelFormatter
             
-            let dayLabelFormatter = DateFormatter()
-            dayLabelFormatter.dateFormat = "EEE, MMM d"
+            struct DateBucketInfo {
+                let dayKey: String
+                let dayLabel: String
+                let dayShortLabel: String
+                let startOfDay: Date
+                let monthKey: String
+                let monthLabel: String
+                let monthShortLabel: String
+                let startOfMonth: Date
+            }
             
-            let dayShortLabelFormatter = DateFormatter()
-            dayShortLabelFormatter.dateFormat = "MMM d"
+            var dateBucketCache: [Int: DateBucketInfo] = [:]
+            func getDateInfo(for date: Date) -> DateBucketInfo {
+                let hourKey = Int(floor(date.timeIntervalSince1970 / 3600.0))
+                if let cached = dateBucketCache[hourKey] {
+                    return cached
+                }
+                let dayKey = dayKeyFormatter.string(from: date)
+                let dayLabel = dayLabelFormatter.string(from: date)
+                let dayShortLabel = dayShortLabelFormatter.string(from: date)
+                let startOfDay = calendar.startOfDay(for: date)
+                let monthKey = monthKeyFormatter.string(from: date)
+                let monthLabel = monthLabelFormatter.string(from: date)
+                let monthShortLabel = monthShortLabelFormatter.string(from: date)
+                let monthComponents = calendar.dateComponents([.year, .month], from: date)
+                let startOfMonth = calendar.date(from: monthComponents) ?? date
+                let info = DateBucketInfo(
+                    dayKey: dayKey,
+                    dayLabel: dayLabel,
+                    dayShortLabel: dayShortLabel,
+                    startOfDay: startOfDay,
+                    monthKey: monthKey,
+                    monthLabel: monthLabel,
+                    monthShortLabel: monthShortLabel,
+                    startOfMonth: startOfMonth
+                )
+                dateBucketCache[hourKey] = info
+                return info
+            }
             
-            let monthKeyFormatter = DateFormatter()
-            monthKeyFormatter.dateFormat = "yyyy-MM"
+            let precomputedAuthStates: [PrecomputedAuthState] = authTransitions.map { t in
+                let isGcp = t.isGcp
+                let email = t.email ?? quotaInfo?.email
+                let project = isGcp ? (t.gcpProject ?? settings.gcp?.project ?? "clawdbot-485304") : nil
+                let accountDisplayName: String
+                if isGcp {
+                    if let p = project, !p.isEmpty {
+                        accountDisplayName = "GCP (\(p))"
+                    } else {
+                        accountDisplayName = "Google Cloud API"
+                    }
+                } else if let em = email, !em.isEmpty {
+                    accountDisplayName = em
+                } else {
+                    accountDisplayName = "Account Quota"
+                }
+                return PrecomputedAuthState(
+                    timestamp: t.timestamp,
+                    state: AuthStateAtDate(
+                        isGcp: isGcp,
+                        email: email,
+                        gcpProject: project,
+                        accountDisplayName: accountDisplayName
+                    )
+                )
+            }
             
-            let monthLabelFormatter = DateFormatter()
-            monthLabelFormatter.dateFormat = "MMMM yyyy"
+            let defaultAuthState: AuthStateAtDate = {
+                let chosen = authTransitions.first
+                let isGcp = chosen?.isGcp ?? currentIsGcp
+                let email = chosen?.email ?? quotaInfo?.email
+                let project = isGcp ? (chosen?.gcpProject ?? settings.gcp?.project ?? "clawdbot-485304") : nil
+                let accountDisplayName: String
+                if isGcp {
+                    if let p = project, !p.isEmpty {
+                        accountDisplayName = "GCP (\(p))"
+                    } else {
+                        accountDisplayName = "Google Cloud API"
+                    }
+                } else if let em = email, !em.isEmpty {
+                    accountDisplayName = em
+                } else {
+                    accountDisplayName = "Account Quota"
+                }
+                return AuthStateAtDate(
+                    isGcp: isGcp,
+                    email: email,
+                    gcpProject: project,
+                    accountDisplayName: accountDisplayName
+                )
+            }()
             
-            let monthShortLabelFormatter = DateFormatter()
-            monthShortLabelFormatter.dateFormat = "MMM ''yy"
+            func authForDate(_ date: Date) -> AuthStateAtDate {
+                for item in precomputedAuthStates.reversed() {
+                    if date >= item.timestamp {
+                        return item.state
+                    }
+                }
+                return defaultAuthState
+            }
             
-            var dailyBuckets: [String: UsageTimeBucket] = [:]
-            var monthlyBuckets: [String: UsageTimeBucket] = [:]
+            var modelCache: [String: ModelCostInfo] = [:]
+            func resolveModel(name: String, fallback: ModelCostInfo) -> ModelCostInfo {
+                if let cached = modelCache[name] {
+                    return cached
+                }
+                let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let model = knownModels.first(where: {
+                    let mName = $0.name.lowercased()
+                    return cleaned.contains(mName) || mName.contains(cleaned)
+                }) ?? fallback
+                modelCache[name] = model
+                return model
+            }
+            
+            final class MutableBucket {
+                let periodKey: String
+                let label: String
+                let shortLabel: String
+                let date: Date
+                var queryCount: Int = 0
+                var totalCost: Double = 0.0
+                var inputTokens: Int = 0
+                var outputTokens: Int = 0
+                var gcpCost: Double = 0.0
+                var quotaCost: Double = 0.0
+                var modelBreakdown: [String: Double] = [:]
+                var modelQueryBreakdown: [String: Int] = [:]
+                var accountCostBreakdown: [String: Double] = [:]
+                var accountQueryBreakdown: [String: Int] = [:]
+                
+                init(periodKey: String, label: String, shortLabel: String, date: Date) {
+                    self.periodKey = periodKey
+                    self.label = label
+                    self.shortLabel = shortLabel
+                    self.date = date
+                }
+                
+                func toUsageTimeBucket() -> UsageTimeBucket {
+                    UsageTimeBucket(
+                        periodKey: periodKey,
+                        label: label,
+                        shortLabel: shortLabel,
+                        date: date,
+                        queryCount: queryCount,
+                        totalCost: totalCost,
+                        inputTokens: inputTokens,
+                        outputTokens: outputTokens,
+                        modelBreakdown: modelBreakdown,
+                        modelQueryBreakdown: modelQueryBreakdown,
+                        gcpCost: gcpCost,
+                        quotaCost: quotaCost,
+                        accountCostBreakdown: accountCostBreakdown,
+                        accountQueryBreakdown: accountQueryBreakdown
+                    )
+                }
+            }
+            
+            var dailyBuckets: [String: MutableBucket] = [:]
+            var monthlyBuckets: [String: MutableBucket] = [:]
             
             // 2. Aggregate all actual LLM generations from all SQLite databases (ground truth for parent + subagents)
             let allGenerations = allDbConversations.values.flatMap { $0.generations }
             var daysWithDbGens = Set<String>()
             for gen in allGenerations {
                 if let gTs = gen.timestamp {
-                    daysWithDbGens.insert(dayKeyFormatter.string(from: gTs))
+                    daysWithDbGens.insert(getDateInfo(for: gTs).dayKey)
                 }
             }
             
             // 1. Initialize buckets, query counts, and fallback estimates for older queries lacking SQLite DB files
             for q in queriesWithMeta {
-                let authState = authAt(
-                    date: q.timestamp,
-                    transitions: authTransitions,
-                    currentIsGcp: currentIsGcp,
-                    currentEmail: quotaInfo?.email,
-                    currentProject: settings.gcp?.project
-                )
+                let authState = authForDate(q.timestamp)
                 let accName = authState.accountDisplayName
                 
-                let dayKey = dayKeyFormatter.string(from: q.timestamp)
-                let startOfDay = calendar.startOfDay(for: q.timestamp)
-                var dayBucket = dailyBuckets[dayKey] ?? UsageTimeBucket(
-                    periodKey: dayKey,
-                    label: dayLabelFormatter.string(from: q.timestamp),
-                    shortLabel: dayShortLabelFormatter.string(from: q.timestamp),
-                    date: startOfDay
-                )
+                let dInfo = getDateInfo(for: q.timestamp)
+                let dayKey = dInfo.dayKey
+                let dayBucket: MutableBucket
+                if let existing = dailyBuckets[dayKey] {
+                    dayBucket = existing
+                } else {
+                    let b = MutableBucket(periodKey: dayKey, label: dInfo.dayLabel, shortLabel: dInfo.dayShortLabel, date: dInfo.startOfDay)
+                    dailyBuckets[dayKey] = b
+                    dayBucket = b
+                }
                 dayBucket.queryCount += 1
                 dayBucket.accountQueryBreakdown[accName, default: 0] += 1
                 if let mName = q.modelName {
@@ -283,11 +703,7 @@ public enum AgyStatsService {
                 // Fallback for days with no SQLite DBs (e.g. May/June 2026): estimate tokens & cost from query
                 if !daysWithDbGens.contains(dayKey) {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
-                    let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                    let model = knownModels.first(where: {
-                        let mName = $0.name.lowercased()
-                        return cleaned.contains(mName) || mName.contains(cleaned)
-                    }) ?? defaultGeminiModel
+                    let model = resolveModel(name: name, fallback: defaultGeminiModel)
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
                     dayBucket.totalCost += cost
@@ -316,17 +732,16 @@ public enum AgyStatsService {
                     }
                     modelDist[model.name, default: 0] += 1
                 }
-                dailyBuckets[dayKey] = dayBucket
                 
-                let monthKey = monthKeyFormatter.string(from: q.timestamp)
-                let components = calendar.dateComponents([.year, .month], from: q.timestamp)
-                let startOfMonth = calendar.date(from: components) ?? q.timestamp
-                var monthBucket = monthlyBuckets[monthKey] ?? UsageTimeBucket(
-                    periodKey: monthKey,
-                    label: monthLabelFormatter.string(from: q.timestamp),
-                    shortLabel: monthShortLabelFormatter.string(from: q.timestamp),
-                    date: startOfMonth
-                )
+                let monthKey = dInfo.monthKey
+                let monthBucket: MutableBucket
+                if let existing = monthlyBuckets[monthKey] {
+                    monthBucket = existing
+                } else {
+                    let b = MutableBucket(periodKey: monthKey, label: dInfo.monthLabel, shortLabel: dInfo.monthShortLabel, date: dInfo.startOfMonth)
+                    monthlyBuckets[monthKey] = b
+                    monthBucket = b
+                }
                 monthBucket.queryCount += 1
                 monthBucket.accountQueryBreakdown[accName, default: 0] += 1
                 if let mName = q.modelName {
@@ -334,11 +749,7 @@ public enum AgyStatsService {
                 }
                 if !daysWithDbGens.contains(dayKey) {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
-                    let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                    let model = knownModels.first(where: {
-                        let mName = $0.name.lowercased()
-                        return cleaned.contains(mName) || mName.contains(cleaned)
-                    }) ?? defaultGeminiModel
+                    let model = resolveModel(name: name, fallback: defaultGeminiModel)
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
                     monthBucket.totalCost += cost
@@ -352,7 +763,6 @@ public enum AgyStatsService {
                         monthBucket.quotaCost += cost
                     }
                 }
-                monthlyBuckets[monthKey] = monthBucket
             }
             
             for gen in allGenerations {
@@ -369,11 +779,8 @@ public enum AgyStatsService {
                 
                 let rawName = gen.modelName ?? defaultModelForDate
                 let validName = enforceDateModelValidity(modelName: rawName, date: genDate, aug2026: aug2026, sep2026: sep2026)
-                let cleaned = validName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                let model = knownModels.first(where: {
-                    let mName = $0.name.lowercased()
-                    return cleaned.contains(mName) || mName.contains(cleaned)
-                }) ?? (genDate >= sep2026 ? defaultGeminiModel : (knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ?? defaultGeminiModel))
+                let fallbackModel = genDate >= sep2026 ? defaultGeminiModel : (knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ?? defaultGeminiModel)
+                let model = resolveModel(name: validName, fallback: fallbackModel)
                 
                 let pTokens = gen.inputTokens ?? 0
                 let cTokens = gen.cachedInputTokens ?? 0
@@ -398,13 +805,7 @@ public enum AgyStatsService {
                     continue
                 }
                 
-                let authState = authAt(
-                    date: genDate,
-                    transitions: authTransitions,
-                    currentIsGcp: currentIsGcp,
-                    currentEmail: quotaInfo?.email,
-                    currentProject: settings.gcp?.project
-                )
+                let authState = authForDate(genDate)
                 let accName = authState.accountDisplayName
                 
                 totalCost += cost
@@ -436,14 +837,16 @@ public enum AgyStatsService {
                 
                 modelDist[model.name, default: 0] += 1
                 
-                let dayKey = dayKeyFormatter.string(from: genDate)
-                let startOfDay = calendar.startOfDay(for: genDate)
-                var dayBucket = dailyBuckets[dayKey] ?? UsageTimeBucket(
-                    periodKey: dayKey,
-                    label: dayLabelFormatter.string(from: genDate),
-                    shortLabel: dayShortLabelFormatter.string(from: genDate),
-                    date: startOfDay
-                )
+                let dInfo = getDateInfo(for: genDate)
+                let dayKey = dInfo.dayKey
+                let dayBucket: MutableBucket
+                if let existing = dailyBuckets[dayKey] {
+                    dayBucket = existing
+                } else {
+                    let b = MutableBucket(periodKey: dayKey, label: dInfo.dayLabel, shortLabel: dInfo.dayShortLabel, date: dInfo.startOfDay)
+                    dailyBuckets[dayKey] = b
+                    dayBucket = b
+                }
                 dayBucket.totalCost += cost
                 dayBucket.inputTokens += inTokens
                 dayBucket.outputTokens += outTokens
@@ -454,17 +857,16 @@ public enum AgyStatsService {
                 } else {
                     dayBucket.quotaCost += cost
                 }
-                dailyBuckets[dayKey] = dayBucket
                 
-                let monthKey = monthKeyFormatter.string(from: genDate)
-                let components = calendar.dateComponents([.year, .month], from: genDate)
-                let startOfMonth = calendar.date(from: components) ?? genDate
-                var monthBucket = monthlyBuckets[monthKey] ?? UsageTimeBucket(
-                    periodKey: monthKey,
-                    label: monthLabelFormatter.string(from: genDate),
-                    shortLabel: monthShortLabelFormatter.string(from: genDate),
-                    date: startOfMonth
-                )
+                let monthKey = dInfo.monthKey
+                let monthBucket: MutableBucket
+                if let existing = monthlyBuckets[monthKey] {
+                    monthBucket = existing
+                } else {
+                    let b = MutableBucket(periodKey: monthKey, label: dInfo.monthLabel, shortLabel: dInfo.monthShortLabel, date: dInfo.startOfMonth)
+                    monthlyBuckets[monthKey] = b
+                    monthBucket = b
+                }
                 monthBucket.totalCost += cost
                 monthBucket.inputTokens += inTokens
                 monthBucket.outputTokens += outTokens
@@ -475,7 +877,6 @@ public enum AgyStatsService {
                 } else {
                     monthBucket.quotaCost += cost
                 }
-                monthlyBuckets[monthKey] = monthBucket
             }
             
             // Fill in missing days from the earliest recorded date up to today so every calendar month has complete daily buckets
@@ -489,12 +890,13 @@ public enum AgyStatsService {
             
             var dayCursor = fillStartDate
             while dayCursor <= startOfToday {
-                let key = dayKeyFormatter.string(from: dayCursor)
+                let dInfo = getDateInfo(for: dayCursor)
+                let key = dInfo.dayKey
                 if dailyBuckets[key] == nil {
-                    dailyBuckets[key] = UsageTimeBucket(
+                    dailyBuckets[key] = MutableBucket(
                         periodKey: key,
-                        label: dayLabelFormatter.string(from: dayCursor),
-                        shortLabel: dayShortLabelFormatter.string(from: dayCursor),
+                        label: dInfo.dayLabel,
+                        shortLabel: dInfo.dayShortLabel,
                         date: dayCursor
                     )
                 }
@@ -502,8 +904,8 @@ public enum AgyStatsService {
                 dayCursor = nextDay
             }
             
-            let sortedDaily = dailyBuckets.values.sorted { $0.date < $1.date }
-            let sortedMonthly = monthlyBuckets.values.sorted { $0.date < $1.date }
+            let sortedDaily = dailyBuckets.values.map { $0.toUsageTimeBucket() }.sorted { $0.date < $1.date }
+            let sortedMonthly = monthlyBuckets.values.map { $0.toUsageTimeBucket() }.sorted { $0.date < $1.date }
             
             let stats = AgyUsageStats(
                 totalQueries: queries.count,
@@ -535,6 +937,37 @@ public enum AgyStatsService {
                 accountWeeklyTotals: accountWeeklyTotals
             )
             
+            statsCacheLock.lock()
+            statsCache = StatsCacheEntry(
+                settings: settings,
+                startOfToday: startOfToday,
+                historyModDate: histMod,
+                historySize: histSize,
+                conversationsDirModDate: convDirMod,
+                stats: stats
+            )
+            statsCacheLock.unlock()
+            
+            let dAuth = tStart.duration(to: tHist)
+            let dHist = tHist.duration(to: tDb)
+            let dDb = tDb.duration(to: tQueryStart)
+            let dQuery = tQueryStart.duration(to: tQuota)
+            let dQuota = tQuota.duration(to: tBuckets)
+            let dBuckets = tBuckets.duration(to: .now)
+            let dTotal = tStart.duration(to: .now)
+            
+            let timingSummary = """
+            --- LOAD STATS RUN ---
+            Auth: \(dAuth)
+            History: \(dHist)
+            DB & Tools: \(dDb)
+            Query Matching: \(dQuery)
+            Quota Await: \(dQuota)
+            Buckets: \(dBuckets)
+            TOTAL: \(dTotal)
+            
+            """
+            print(timingSummary)
             return (stats, settings)
         }.value
     }
@@ -567,46 +1000,104 @@ public enum AgyStatsService {
         }
         
         let logFiles = files.filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }.sorted()
+        guard !logFiles.isEmpty else { return [] }
+        let newestFile = logFiles.last!
+        let newestPath = (logDir as NSString).appendingPathComponent(newestFile)
+        let newestMod = (try? fm.attributesOfItem(atPath: newestPath))?[.modificationDate] as? Date
+        
+        let now = Date()
+        authCacheLock.lock()
+        if let cached = authCache,
+           cached.defaultProject == defaultProject {
+            // Fast TTL check: if checked within last 30s, reuse transitions immediately
+            if now.timeIntervalSince(cached.cachedAt) < 30.0 {
+                let res = cached.transitions
+                authCacheLock.unlock()
+                return res
+            }
+            // If beyond 30s, check if file count, newest file, and newest mod date match
+            if cached.fileCount == logFiles.count,
+               cached.newestName == newestFile,
+               cached.newestModDate == newestMod {
+                authCache = AuthCacheEntry(
+                    fileCount: cached.fileCount,
+                    newestName: cached.newestName,
+                    newestModDate: cached.newestModDate,
+                    defaultProject: defaultProject,
+                    cachedAt: now,
+                    transitions: cached.transitions
+                )
+                let res = cached.transitions
+                authCacheLock.unlock()
+                return res
+            }
+        }
+        authCacheLock.unlock()
+        
         var transitions: [AuthTransition] = []
         var lastIsGcp: Bool? = nil
         var lastEmail: String? = nil
         var lastProject: String? = nil
         
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
-        dateFormatter.timeZone = TimeZone.current
-        
         let emailRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
         
         for file in logFiles {
             let stripped = file.replacingOccurrences(of: "cli-", with: "").replacingOccurrences(of: ".log", with: "")
-            guard let date = dateFormatter.date(from: stripped) else { continue }
+            guard let date = Self.logDateFormatter.date(from: stripped) else { continue }
             
             let fullPath = (logDir as NSString).appendingPathComponent(file)
-            guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: fullPath)) else { continue }
-            let data = handle.readData(ofLength: 65536)
-            try? handle.close()
+            let attrs = try? fm.attributesOfItem(atPath: fullPath)
+            let fileMod = attrs?[.modificationDate] as? Date ?? Date.distantPast
+            let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
             
-            guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { continue }
-            let isGcp = text.contains("aiplatform") || text.contains("clawdbot") || text.contains("EnterProject") || text.contains("GCP setup completed")
-            let project = isGcp ? (defaultProject ?? "clawdbot-485304") : nil
+            var isGcp: Bool
+            var project: String?
+            var email: String?
             
-            var email: String? = nil
-            if let regex = emailRegex {
-                let range = NSRange(text.startIndex..., in: text)
-                let matches = regex.matches(in: text, range: range)
-                for match in matches {
-                    if let r = Range(match.range, in: text) {
-                        let candidate = String(text[r])
-                        if candidate.contains("sameer") || candidate.contains("rowan") || candidate.contains("gmail") {
-                            email = candidate
-                            break
+            logFileCacheLock.lock()
+            if let cachedLog = logFileCache[file],
+               cachedLog.modDate == fileMod,
+               cachedLog.size == fileSize {
+                isGcp = cachedLog.isGcp
+                project = cachedLog.project
+                email = cachedLog.email
+                logFileCacheLock.unlock()
+            } else {
+                logFileCacheLock.unlock()
+                guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: fullPath)) else { continue }
+                let data = handle.readData(ofLength: 65536)
+                try? handle.close()
+                
+                guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { continue }
+                isGcp = text.contains("aiplatform") || text.contains("clawdbot") || text.contains("EnterProject") || text.contains("GCP setup completed")
+                project = isGcp ? (defaultProject ?? "clawdbot-485304") : nil
+                
+                if let regex = emailRegex {
+                    let range = NSRange(text.startIndex..., in: text)
+                    let matches = regex.matches(in: text, range: range)
+                    for match in matches {
+                        if let r = Range(match.range, in: text) {
+                            let candidate = String(text[r])
+                            if candidate.contains("sameer") || candidate.contains("rowan") || candidate.contains("gmail") {
+                                email = candidate
+                                break
+                            }
                         }
                     }
                 }
-            }
-            if email == nil {
-                email = lastEmail ?? "sameerbajaj24@gmail.com"
+                if email == nil {
+                    email = lastEmail ?? "sameerbajaj24@gmail.com"
+                }
+                
+                logFileCacheLock.lock()
+                logFileCache[file] = LogFileEntry(
+                    modDate: fileMod,
+                    size: fileSize,
+                    isGcp: isGcp,
+                    project: project,
+                    email: email
+                )
+                logFileCacheLock.unlock()
             }
             
             if lastIsGcp != isGcp || (email != nil && email != lastEmail) || project != lastProject {
@@ -616,6 +1107,17 @@ public enum AgyStatsService {
                 lastProject = project
             }
         }
+        
+        authCacheLock.lock()
+        authCache = AuthCacheEntry(
+            fileCount: logFiles.count,
+            newestName: newestFile,
+            newestModDate: newestMod,
+            defaultProject: defaultProject,
+            cachedAt: now,
+            transitions: transitions
+        )
+        authCacheLock.unlock()
         
         return transitions
     }
@@ -682,9 +1184,24 @@ public enum AgyStatsService {
         }
     }
     
-    private static func loadHistory(at path: String) -> ([QueryEntry], [WorkspaceStats], Date?) {
+    private static func loadHistory(at path: String) -> ([QueryEntry], [WorkspaceStats], Date?, Bool) {
+        let fm = FileManager.default
+        let attrs = try? fm.attributesOfItem(atPath: path)
+        let modDate = attrs?[.modificationDate] as? Date ?? Date.distantPast
+        let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        
+        historyCacheLock.lock()
+        if let cached = historyCache,
+           cached.modificationDate == modDate,
+           cached.fileSize == fileSize {
+            let res = (cached.queries, cached.workspaces, cached.lastQuery, true)
+            historyCacheLock.unlock()
+            return res
+        }
+        historyCacheLock.unlock()
+        
         guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
-            return ([], [], nil)
+            return ([], [], nil, false)
         }
         
         let lines = content.components(separatedBy: .newlines)
@@ -727,31 +1244,17 @@ public enum AgyStatsService {
             WorkspaceStats(path: path, queryCount: info.count, lastActiveAt: info.lastActive)
         }.sorted { $0.queryCount > $1.queryCount }
         
-        return (queries, workspaces, lastQuery)
-    }
-    
-    private static func loadToolStats(conversationsDir: String) async -> [ToolStat] {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: conversationsDir) else {
-            return []
-        }
+        historyCacheLock.lock()
+        historyCache = HistoryCacheEntry(
+            modificationDate: modDate,
+            fileSize: fileSize,
+            queries: queries,
+            workspaces: workspaces,
+            lastQuery: lastQuery
+        )
+        historyCacheLock.unlock()
         
-        let dbFiles = files.filter { $0.hasSuffix(".db") }
-        var aggregatedStats: [String: Int] = [:]
-        
-        // Process DB files concurrently in groups
-        for file in dbFiles {
-            let dbPath = (conversationsDir as NSString).appendingPathComponent(file)
-            let stats = queryToolStats(forDbPath: dbPath)
-            for (tool, count) in stats {
-                aggregatedStats[tool, default: 0] += count
-            }
-        }
-        
-        // Convert to ToolStat array sorted by count descending
-        return aggregatedStats.map { toolName, count in
-            ToolStat(toolName: toolName, count: count)
-        }.sorted { $0.count > $1.count }
+        return (queries, workspaces, lastQuery, false)
     }
     
     private struct ProtobufMessage {
@@ -857,66 +1360,6 @@ public enum AgyStatsService {
         }
     }
     
-    private struct DbGeneration {
-        let idx: Int
-        let size: Int
-        let timestamp: Date?
-        let modelName: String?
-        let inputTokens: Int?
-        let outputTokens: Int?
-        let cachedInputTokens: Int?
-    }
-    
-    private struct DbConversationData {
-        let conversationId: String
-        let startTime: Date?
-        let generations: [DbGeneration]
-    }
-    
-    private static func loadConversationStartsIndex(conversationsDir: String) -> [Int: String] {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: conversationsDir) else {
-            return [:]
-        }
-        
-        var indexMap: [Int: String] = [:]
-        let dbFiles = files.filter { $0.hasSuffix(".db") }
-        
-        for file in dbFiles {
-            let convId = (file as NSString).deletingPathExtension
-            let dbPath = (conversationsDir as NSString).appendingPathComponent(file)
-            
-            var db: OpaquePointer?
-            let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
-            guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
-                sqlite3_close(db)
-                continue
-            }
-            
-            var stmt: OpaquePointer?
-            let query = "SELECT metadata FROM steps ORDER BY idx ASC LIMIT 1"
-            if sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK {
-                if sqlite3_step(stmt) == SQLITE_ROW {
-                    if let blob = sqlite3_column_blob(stmt, 0) {
-                        let blobSize = sqlite3_column_bytes(stmt, 0)
-                        if blobSize > 0 {
-                            let data = Data(bytes: blob, count: Int(blobSize))
-                            if let msg = ProtobufMessage.parse(data: data),
-                               let sub = msg.submessage(for: 1),
-                               let seconds = sub.firstVarint(for: 1) {
-                                indexMap[seconds] = convId
-                            }
-                        }
-                    }
-                }
-            }
-            sqlite3_finalize(stmt)
-            sqlite3_close(db)
-        }
-        
-        return indexMap
-    }
-    
     private static func findConversationId(for timestamp: Date, in startMap: [Int: String]) -> String? {
         let sec = Int(floor(timestamp.timeIntervalSince1970))
         for offset in [0, 1, -1, 2, -2, 3, -3] {
@@ -927,25 +1370,44 @@ public enum AgyStatsService {
         return nil
     }
     
-    private static func loadDbConversationData(conversationId: String, cliDir: String) -> DbConversationData {
-        let dbPath = (cliDir as NSString).appendingPathComponent("conversations/\(conversationId).db")
+    private static func parseDbConversationAndToolStats(file: String, conversationsDir: String, fm: FileManager) -> (DbConversationData, [String: Int], Bool) {
+        let convId = (file as NSString).deletingPathExtension
+        let dbPath = (conversationsDir as NSString).appendingPathComponent(file)
+        
+        let attrs = try? fm.attributesOfItem(atPath: dbPath)
+        let modDate = attrs?[.modificationDate] as? Date ?? Date.distantPast
+        let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+        
+        conversationCacheLock.lock()
+        if let cached = conversationCache[file],
+           cached.modificationDate == modDate,
+           cached.fileSize == fileSize {
+            let res = (cached.conversationData, cached.toolCounts, true)
+            conversationCacheLock.unlock()
+            return res
+        }
+        conversationCacheLock.unlock()
         
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
         guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
             sqlite3_close(db)
-            return DbConversationData(conversationId: conversationId, startTime: nil, generations: [])
+            let emptyData = DbConversationData(conversationId: convId, startTime: nil, generations: [])
+            return (emptyData, [:], false)
         }
         defer { sqlite3_close(db) }
         
-        // 1. Load step timestamps from steps table
+        // 1. Single pass: Load step timestamps and count tool calls from steps table
         var startTime: Date? = nil
         var stepsTimestamps: [Int: Date] = [:]
+        var toolCounts: [String: Int] = [:]
         var stepsStmt: OpaquePointer?
-        let stepsQuery = "SELECT idx, metadata FROM steps ORDER BY idx ASC"
+        let stepsQuery = "SELECT idx, metadata, step_payload FROM steps ORDER BY idx ASC"
         if sqlite3_prepare_v2(db, stepsQuery, -1, &stepsStmt, nil) == SQLITE_OK {
             while sqlite3_step(stepsStmt) == SQLITE_ROW {
                 let stepIdx = Int(sqlite3_column_int(stepsStmt, 0))
+                
+                // Timestamp from metadata (col 1)
                 if let blob = sqlite3_column_blob(stepsStmt, 1) {
                     let blobSize = sqlite3_column_bytes(stepsStmt, 1)
                     if blobSize > 0 {
@@ -961,6 +1423,29 @@ public enum AgyStatsService {
                         }
                     }
                 }
+                
+                // Tool calls from metadata (col 1) and step_payload (col 2)
+                var matchedTool: String? = nil
+                for col in [Int32(1), Int32(2)] {
+                    guard let blobBytes = sqlite3_column_blob(stepsStmt, col) else { continue }
+                    let blobSize = sqlite3_column_bytes(stepsStmt, col)
+                    guard blobSize > 0 else { continue }
+                    let data = Data(bytes: blobBytes, count: Int(blobSize))
+                    if let str = String(data: data, encoding: .ascii) {
+                        for (tool, pattern) in toolBytePatterns {
+                            if str.contains(tool) {
+                                if searchPattern(pattern, in: data) {
+                                    matchedTool = tool
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    if matchedTool != nil { break }
+                }
+                if let tool = matchedTool {
+                    toolCounts[tool, default: 0] += 1
+                }
             }
         }
         sqlite3_finalize(stepsStmt)
@@ -969,7 +1454,6 @@ public enum AgyStatsService {
         var generations: [DbGeneration] = []
         var genStmt: OpaquePointer?
         let genQuery = "SELECT idx, data, size FROM gen_metadata ORDER BY idx ASC"
-        
         if sqlite3_prepare_v2(db, genQuery, -1, &genStmt, nil) == SQLITE_OK {
             var lastTimestamp: Date? = nil
             while sqlite3_step(genStmt) == SQLITE_ROW {
@@ -1033,25 +1517,60 @@ public enum AgyStatsService {
         }
         sqlite3_finalize(genStmt)
         
-        return DbConversationData(conversationId: conversationId, startTime: startTime, generations: generations)
+        let convData = DbConversationData(conversationId: convId, startTime: startTime, generations: generations)
+        
+        conversationCacheLock.lock()
+        conversationCache[file] = ConversationCacheEntry(
+            modificationDate: modDate,
+            fileSize: fileSize,
+            conversationData: convData,
+            toolCounts: toolCounts
+        )
+        conversationCacheLock.unlock()
+        
+        return (convData, toolCounts, false)
     }
     
-    private static func loadAllDbConversations(conversationsDir: String) -> [String: DbConversationData] {
+    private static func loadConversationsAndToolStats(conversationsDir: String) async -> ([String: DbConversationData], [ToolStat], Bool) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(atPath: conversationsDir) else {
-            return [:]
+            return ([:], [], false)
         }
         
-        var dict: [String: DbConversationData] = [:]
         let dbFiles = files.filter { $0.hasSuffix(".db") }
-        let cliDir = (conversationsDir as NSString).deletingLastPathComponent
+        guard !dbFiles.isEmpty else { return ([:], [], false) }
         
-        for file in dbFiles {
-            let convId = (file as NSString).deletingPathExtension
-            let convData = loadDbConversationData(conversationId: convId, cliDir: cliDir)
-            dict[convId] = convData
+        let results = await withTaskGroup(of: (DbConversationData, [String: Int], Bool).self) { group in
+            for file in dbFiles {
+                group.addTask {
+                    return parseDbConversationAndToolStats(file: file, conversationsDir: conversationsDir, fm: fm)
+                }
+            }
+            var collected: [(DbConversationData, [String: Int], Bool)] = []
+            collected.reserveCapacity(dbFiles.count)
+            for await res in group {
+                collected.append(res)
+            }
+            return collected
         }
-        return dict
+        
+        var anyMiss = false
+        var conversationsDict: [String: DbConversationData] = [:]
+        conversationsDict.reserveCapacity(results.count)
+        var aggregatedTools: [String: Int] = [:]
+        
+        for (convData, toolCounts, hit) in results {
+            if !hit { anyMiss = true }
+            conversationsDict[convData.conversationId] = convData
+            for (tool, count) in toolCounts {
+                aggregatedTools[tool, default: 0] += count
+            }
+        }
+        
+        let toolStats = aggregatedTools.map { ToolStat(toolName: $0.key, count: $0.value) }
+            .sorted { $0.count > $1.count }
+            
+        return (conversationsDict, toolStats, anyMiss)
     }
     
     private static func cleanAndMapModelName(_ name: String) -> String? {
@@ -1156,66 +1675,6 @@ public enum AgyStatsService {
             }
         }
         return modelName
-    }
-    
-    private static func queryToolStats(forDbPath dbPath: String) -> [String: Int] {
-        var db: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
-        guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
-            sqlite3_close(db)
-            return [:]
-        }
-        defer { sqlite3_close(db) }
-        
-        let query = "SELECT metadata, step_payload FROM steps"
-        var statement: OpaquePointer?
-        
-        var stats: [String: Int] = [:]
-        
-        let tools = [
-            "run_command", "replace_file_content", "view_file", "list_dir",
-            "grep_search", "search_web", "read_url_content", "read_browser_page",
-            "write_to_file", "ask_question", "ask_permission", "multi_replace_file_content",
-            "define_subagent", "invoke_subagent", "send_message", "manage_subagents",
-            "manage_task", "schedule"
-        ]
-        
-        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
-            while sqlite3_step(statement) == SQLITE_ROW {
-                var matchedTool: String? = nil
-                
-                // Check metadata (col 0) and step_payload (col 1)
-                for col in [Int32(0), Int32(1)] {
-                    guard let blobBytes = sqlite3_column_blob(statement, col) else { continue }
-                    let blobSize = sqlite3_column_bytes(statement, col)
-                    guard blobSize > 0 else { continue }
-                    
-                    let data = Data(bytes: blobBytes, count: Int(blobSize))
-                    
-                    // Fast check to see if any tool string matches ascii content
-                    if let str = String(data: data, encoding: .ascii) {
-                        for tool in tools {
-                            if str.contains(tool) {
-                                // Double check exact protobuf wire tag: tag 18 (0x12) followed by length byte
-                                let lenByte = UInt8(tool.count)
-                                let pattern: [UInt8] = [18, lenByte] + Array(tool.utf8)
-                                if searchPattern(pattern, in: data) {
-                                    matchedTool = tool
-                                    break
-                                }
-                            }
-                        }
-                    }
-                    if matchedTool != nil { break }
-                }
-                
-                if let tool = matchedTool {
-                    stats[tool, default: 0] += 1
-                }
-            }
-        }
-        sqlite3_finalize(statement)
-        return stats
     }
     
     private static func searchPattern(_ pattern: [UInt8], in data: Data) -> Bool {
