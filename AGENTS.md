@@ -19,6 +19,8 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - Prioritize FD `10u` Connect protocol ports to hit the target API immediately.
    - Use shared `URLSession` with 0.5s connection timeouts and parallel port probing.
    - Maintain `lastActivePort` across cache clears and cache responses for 30s (15s for nil).
+   - **CSRF Token Header**: AGY language servers mandate `x-codeium-csrf-token`. Resolved via `ANTIGRAVITY_CSRF_TOKEN` or `~/.gemini/antigravity-cli/csrf_token`.
+   - **GCP Direct Billing**: When running under GCP project mode, quota limits return empty groups `{"response":{}}`. The app gracefully surfaces active session metadata and displays `GCP` in the menu bar with blue indicators instead of falling back to blank or "no session".
 
 4. **SwiftUI View Performance**:
    - Always use `LazyVStack` inside `ScrollView` for lists with hundreds/thousands of entries (`HistoryTabView`, `WorkspacesTabView`).
