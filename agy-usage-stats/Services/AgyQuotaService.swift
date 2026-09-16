@@ -304,6 +304,29 @@ public actor AgyQuotaService {
         }
     }
     
+    private static func getCsrfToken() -> String? {
+        if let token = ProcessInfo.processInfo.environment["ANTIGRAVITY_CSRF_TOKEN"], !token.isEmpty {
+            return token.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let tokenFile = homeDir.appendingPathComponent(".gemini/antigravity-cli/csrf_token")
+        if let data = try? Data(contentsOf: tokenFile),
+           let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !token.isEmpty {
+            return token
+        }
+        
+        let altTokenFile = homeDir.appendingPathComponent(".gemini/config/csrf_token")
+        if let data = try? Data(contentsOf: altTokenFile),
+           let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !token.isEmpty {
+            return token
+        }
+        
+        return nil
+    }
+    
     private static func fetchFromPort(_ port: Int) async -> AgyQuotaInfo? {
         // 1. Prepare RetrieveUserQuotaSummary
         guard let summaryUrl = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"),
@@ -311,16 +334,24 @@ public actor AgyQuotaService {
             return nil
         }
         
+        let csrfToken = getCsrfToken()
+        
         var summaryRequest = URLRequest(url: summaryUrl)
         summaryRequest.httpMethod = "POST"
         summaryRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         summaryRequest.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+        if let token = csrfToken {
+            summaryRequest.setValue(token, forHTTPHeaderField: "x-codeium-csrf-token")
+        }
         summaryRequest.httpBody = try? JSONSerialization.data(withJSONObject: ["forceRefresh": true], options: [])
         
         var statusRequest = URLRequest(url: statusUrl)
         statusRequest.httpMethod = "POST"
         statusRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         statusRequest.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+        if let token = csrfToken {
+            statusRequest.setValue(token, forHTTPHeaderField: "x-codeium-csrf-token")
+        }
         statusRequest.httpBody = try? JSONSerialization.data(withJSONObject: [:], options: [])
         
         do {
@@ -357,8 +388,6 @@ public actor AgyQuotaService {
                 )
             }
             
-            guard !groups.isEmpty else { return nil }
-            
             var email: String? = nil
             var plan: String? = nil
             
@@ -366,6 +395,14 @@ public actor AgyQuotaService {
                let statusResp = try? decoder.decode(UserStatusResponse.self, from: statusData) {
                 email = statusResp.userStatus?.email
                 plan = statusResp.userStatus?.userTier?.name
+            }
+            
+            // If groups is empty, but status call succeeded (e.g. GCP direct project mode or pay-as-you-go)
+            if groups.isEmpty {
+                if email != nil || plan != nil {
+                    return AgyQuotaInfo(email: email, plan: plan, groups: [])
+                }
+                return nil
             }
             
             return AgyQuotaInfo(email: email, plan: plan, groups: groups)

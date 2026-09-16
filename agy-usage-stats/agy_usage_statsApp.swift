@@ -93,6 +93,9 @@ struct MenuBarLabel: View {
     }
 
     private var quotaText: String {
+        if viewModel.stats.isGcpActive {
+            return "gcp direct"
+        }
         guard viewModel.stats.quotaInfo != nil else {
             return "no session"
         }
@@ -118,6 +121,7 @@ struct MenuBarLabel: View {
                     queriesToday: viewModel.stats.queriesToday,
                     litColor: statusColor,
                     showUsage: viewModel.showModelUsageInIcon,
+                    isGcpActive: viewModel.stats.isGcpActive,
                     selectedModelForIcon: viewModel.selectedModelForIcon,
                     activeUsageFraction: viewModel.selectedModelUsageFraction,
                     geminiUsageFraction: viewModel.geminiUsageFraction,
@@ -153,6 +157,7 @@ private func makeAntigravityImage(
     queriesToday: Int,
     litColor: Color,
     showUsage: Bool = false,
+    isGcpActive: Bool = false,
     selectedModelForIcon: IconModelSelection = .active,
     activeUsageFraction: Double? = nil,
     geminiUsageFraction: Double? = nil,
@@ -161,7 +166,7 @@ private func makeAntigravityImage(
     geminiFillFraction: Double? = nil,
     claudeFillFraction: Double? = nil
 ) -> NSImage {
-    let cacheKey = "\(queriesToday)_\(litColor.description)_\(showUsage)_\(selectedModelForIcon.rawValue)_\(activeUsageFraction ?? -1)_\(geminiUsageFraction ?? -1)_\(claudeUsageFraction ?? -1)_\(activeFillFraction ?? -1)_\(geminiFillFraction ?? -1)_\(claudeFillFraction ?? -1)"
+    let cacheKey = "\(queriesToday)_\(litColor.description)_\(showUsage)_\(isGcpActive)_\(selectedModelForIcon.rawValue)_\(activeUsageFraction ?? -1)_\(geminiUsageFraction ?? -1)_\(claudeUsageFraction ?? -1)_\(activeFillFraction ?? -1)_\(geminiFillFraction ?? -1)_\(claudeFillFraction ?? -1)"
     if let cached = cachedAntigravityIcon, cached.key == cacheKey {
         return cached.image
     }
@@ -185,12 +190,27 @@ private func makeAntigravityImage(
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
                 textAttributes = [.font: font, .foregroundColor: litNS]
                 textSize = pctText.size(withAttributes: textAttributes)
+            } else if isGcpActive {
+                pctText = "GCP"
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
+                textAttributes = [.font: font, .foregroundColor: NSColor.systemBlue]
+                textSize = pctText.size(withAttributes: textAttributes)
+            } else if queriesToday > 0 {
+                pctText = "\(queriesToday)q"
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
+                textAttributes = [.font: font, .foregroundColor: litNS]
+                textSize = pctText.size(withAttributes: textAttributes)
             }
         case .gemini:
             if let fraction = geminiUsageFraction {
                 pctText = String(format: "G:%.0f%%", fraction * 100)
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
                 textAttributes = [.font: font, .foregroundColor: geminiColor]
+                textSize = pctText.size(withAttributes: textAttributes)
+            } else if isGcpActive {
+                pctText = "GCP"
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
+                textAttributes = [.font: font, .foregroundColor: NSColor.systemBlue]
                 textSize = pctText.size(withAttributes: textAttributes)
             }
         case .claude:
@@ -199,14 +219,26 @@ private func makeAntigravityImage(
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
                 textAttributes = [.font: font, .foregroundColor: claudeColor]
                 textSize = pctText.size(withAttributes: textAttributes)
+            } else if isGcpActive {
+                pctText = "GCP"
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
+                textAttributes = [.font: font, .foregroundColor: NSColor.systemBlue]
+                textSize = pctText.size(withAttributes: textAttributes)
             }
         case .both:
-            let gf = geminiUsageFraction ?? 1.0
-            let cf = claudeUsageFraction ?? 1.0
-            pctText = String(format: "G:%.0f%% C:%.0f%%", gf * 100, cf * 100)
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
-            textAttributes = [.font: font, .foregroundColor: NSColor.textColor]
-            textSize = pctText.size(withAttributes: textAttributes)
+            if isGcpActive {
+                pctText = "GCP"
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
+                textAttributes = [.font: font, .foregroundColor: NSColor.systemBlue]
+                textSize = pctText.size(withAttributes: textAttributes)
+            } else {
+                let gf = geminiUsageFraction ?? 1.0
+                let cf = claudeUsageFraction ?? 1.0
+                pctText = String(format: "G:%.0f%% C:%.0f%%", gf * 100, cf * 100)
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 9.0, weight: .bold)
+                textAttributes = [.font: font, .foregroundColor: NSColor.textColor]
+                textSize = pctText.size(withAttributes: textAttributes)
+            }
         }
     }
     
@@ -229,20 +261,32 @@ private func makeAntigravityImage(
             case .active:
                 if let fraction = activeFillFraction {
                     drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: fraction, strokeColor: litNS)
+                } else if isGcpActive {
+                    drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: 1.0, strokeColor: NSColor.systemBlue)
+                } else if queriesToday > 0 {
+                    drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: 1.0, strokeColor: litNS)
                 }
             case .gemini:
                 if let fraction = geminiFillFraction {
                     drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: fraction, strokeColor: geminiColor)
+                } else if isGcpActive {
+                    drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: 1.0, strokeColor: NSColor.systemBlue)
                 }
             case .claude:
                 if let fraction = claudeFillFraction {
                     drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: fraction, strokeColor: claudeColor)
+                } else if isGcpActive {
+                    drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: 1.0, strokeColor: NSColor.systemBlue)
                 }
             case .both:
-                let gf = geminiFillFraction ?? 1.0
-                let cf = claudeFillFraction ?? 1.0
-                drawGauge(center: NSPoint(x: 6.0, y: 7.0), radius: 4.2, fraction: gf, strokeColor: geminiColor, chevronSize: 2.0)
-                drawGauge(center: NSPoint(x: 16.0, y: 7.0), radius: 4.2, fraction: cf, strokeColor: claudeColor, chevronSize: 2.0)
+                if isGcpActive {
+                    drawGauge(center: NSPoint(x: 8.0, y: 7.0), radius: 5.2, fraction: 1.0, strokeColor: NSColor.systemBlue)
+                } else {
+                    let gf = geminiFillFraction ?? 1.0
+                    let cf = claudeFillFraction ?? 1.0
+                    drawGauge(center: NSPoint(x: 6.0, y: 7.0), radius: 4.2, fraction: gf, strokeColor: geminiColor, chevronSize: 2.0)
+                    drawGauge(center: NSPoint(x: 16.0, y: 7.0), radius: 4.2, fraction: cf, strokeColor: claudeColor, chevronSize: 2.0)
+                }
             }
             
             // Draw text
