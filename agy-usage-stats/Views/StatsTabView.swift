@@ -10,7 +10,7 @@ import SwiftUI
 // MARK: - Telemetry Badge
 struct TelemetryBadge: View {
     @State private var pulse = false
-    
+
     var body: some View {
         HStack(spacing: 3) {
             Circle()
@@ -19,7 +19,7 @@ struct TelemetryBadge: View {
                 .scaleEffect(pulse ? 1.3 : 1.0)
                 .opacity(pulse ? 0.5 : 1.0)
                 .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: pulse)
-            
+
             Text("telemetry")
                 .font(.system(size: 7.5, weight: .bold, design: .rounded))
                 .foregroundStyle(.green)
@@ -41,20 +41,20 @@ struct QuotaBucketRow: View {
     @Environment(\.colorScheme) var colorScheme
     let groupDisplayName: String
     let bucket: AgyQuotaBucket
-    
+
     private var isDark: Bool { colorScheme == .dark }
     private var geminiColor: Color { Color.gemini(isDark: isDark) }
     private var claudeColor: Color { Color.claude(isDark: isDark) }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline) {
                 Text(bucket.displayName)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.primary.opacity(0.85))
-                
+
                 Spacer()
-                
+
                 if let fraction = bucket.remainingFraction {
                     Text(String(format: "%.0f%%", fraction * 100))
                         .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -65,13 +65,13 @@ struct QuotaBucketRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            
+
             if let fraction = bucket.remainingFraction {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 1.5)
                             .fill(Color.primary.opacity(0.04))
-                        
+
                         RoundedRectangle(cornerRadius: 1.5)
                             .fill(
                                 LinearGradient(
@@ -85,7 +85,7 @@ struct QuotaBucketRow: View {
                 }
                 .frame(height: 3)
             }
-            
+
             if let cleaned = resolveResetDescription() {
                 Text(cleaned)
                     .font(.system(size: 9, weight: .medium))
@@ -94,9 +94,9 @@ struct QuotaBucketRow: View {
         }
         .padding(.vertical, 1)
     }
-    
+
     private static let isoFormatter = ISO8601DateFormatter()
-    
+
     private func resolveResetDescription() -> String? {
         if let resetTimeStr = bucket.resetTime,
            let date = Self.isoFormatter.date(from: resetTimeStr) {
@@ -106,7 +106,7 @@ struct QuotaBucketRow: View {
                 let days = Int(diff) / 86400
                 let hours = (Int(diff) % 86400) / 3600
                 let minutes = (Int(diff) % 3600) / 60
-                
+
                 let timeString: String
                 if days > 0 {
                     timeString = "refreshes in \(days) day\(days == 1 ? "" : "s"), \(hours) hour\(hours == 1 ? "" : "s")"
@@ -115,17 +115,17 @@ struct QuotaBucketRow: View {
                 } else {
                     timeString = "refreshes in \(minutes) minute\(minutes == 1 ? "" : "s")"
                 }
-                
+
                 if let desc = bucket.resetDescription {
                     let sentences = desc.components(separatedBy: ".")
                         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }
-                    
+
                     let extraSentences = sentences.filter { sentence in
                         let lower = sentence.lowercased()
                         return !lower.contains("refresh") && !lower.contains("reset") && !lower.contains("limit")
                     }
-                    
+
                     if !extraSentences.isEmpty {
                         let joinedExtra = extraSentences.joined(separator: ". ")
                         return timeString + ". " + joinedExtra.lowercased()
@@ -134,7 +134,7 @@ struct QuotaBucketRow: View {
                 return timeString
             }
         }
-        
+
         guard let desc = bucket.resetDescription else { return nil }
         let lower = desc.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ". "))
         for key in ["fully refresh in ", "refreshes in ", "refresh in "] {
@@ -145,7 +145,7 @@ struct QuotaBucketRow: View {
         }
         return lower
     }
-    
+
     private func quotaTextColor(for group: String, fraction: Double) -> Color {
         if fraction <= 0.2 {
             return Color(red: 1.0, green: 0.35, blue: 0.35)
@@ -153,7 +153,7 @@ struct QuotaBucketRow: View {
         let isGemini = group.lowercased().contains("gemini")
         return isGemini ? geminiColor : claudeColor
     }
-    
+
     private func quotaGradientColors(for group: String, fraction: Double) -> [Color] {
         if fraction <= 0.2 {
             return [Color(red: 1.0, green: 0.3, blue: 0.3), Color(red: 1.0, green: 0.45, blue: 0.45)]
@@ -172,7 +172,7 @@ struct ToolStatRow: View {
     let tool: ToolStat
     let maxCount: Double
     @State private var isHovered = false
-    
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: tool.iconName)
@@ -181,7 +181,7 @@ struct ToolStatRow: View {
                 .frame(width: 16, height: 16)
                 .background(tool.categoryColor.opacity(0.08))
                 .cornerRadius(4)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(tool.displayName)
@@ -192,13 +192,13 @@ struct ToolStatRow: View {
                         .font(.system(size: 9, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                
+
                 GeometryReader { geo in
                     let pct = maxCount > 0 ? Double(tool.count) / maxCount : 0
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 1)
                             .fill(Color.primary.opacity(0.04))
-                        
+
                         RoundedRectangle(cornerRadius: 1)
                             .fill(tool.categoryColor.opacity(0.8))
                             .frame(width: geo.size.width * CGFloat(pct))
@@ -221,34 +221,34 @@ struct StatsTabView: View {
     @Environment(\.colorScheme) var colorScheme
     let viewModel: AgyStatsViewModel
     var onNavigateToCost: (() -> Void)? = nil
-    
+
     @State private var quotaCardHovered: [String: Bool] = [:]
     @State private var toolsCardHovered = false
     @State private var costCardHovered = false
-    
+
     private var isDark: Bool { colorScheme == .dark }
     private var geminiColor: Color { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme).geminiAccent }
     private var claudeColor: Color { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme).claudeAccent }
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
-    
+
     var body: some View {
         ScrollView {
             VStack(spacing: 10) {
                 // Active Model Row
                 activeModelRow
                     .padding(.top, 2)
-                
+
                 // Metrics Strip
                 metricsStrip
-                
+
                 if viewModel.showCostSummary {
                     // API Cost Summary
                     costSummarySection
                 }
-                
+
                 // Remaining Quotas List
                 remainingQuotasList
-                
+
                 if viewModel.showToolBreakdown {
                     // Tool Execution Breakdown
                     toolExecutionBreakdown
@@ -259,14 +259,14 @@ struct StatsTabView: View {
         }
         .background(theme.surfacePrimary)
     }
-    
+
     private var activeModelRow: some View {
         HStack {
             HStack(spacing: 5) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 9))
                     .foregroundStyle(geminiColor)
-                Text(viewModel.settings.model ?? (viewModel.stats.quotaInfo?.plan ?? "Gemini 3.7 Flash"))
+                Text(viewModel.activeModelDisplayName)
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary.opacity(0.85))
             }
@@ -277,7 +277,7 @@ struct StatsTabView: View {
         }
         .padding(.horizontal, 2)
     }
-    
+
     private var metricsStrip: some View {
         HStack(spacing: 0) {
             metricItem(title: "today", value: "\(viewModel.stats.queriesToday)", color: geminiColor)
@@ -291,14 +291,14 @@ struct StatsTabView: View {
         .padding(.vertical, 8)
         .themedCardStyle(theme: theme)
     }
-    
+
     private var metricDivider: some View {
         Rectangle()
             .fill(theme.divider)
             .frame(width: 0.75)
             .frame(maxHeight: 18)
     }
-    
+
     private func metricItem(title: String, value: String, color: Color) -> some View {
         VStack(spacing: 2) {
             Text(title)
@@ -310,7 +310,7 @@ struct StatsTabView: View {
         }
         .frame(maxWidth: .infinity)
     }
-    
+
     private var costSummarySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -322,7 +322,7 @@ struct StatsTabView: View {
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
-                
+
                 if viewModel.stats.isGcpActive {
                     Text("gcp direct: \(String(format: "$%.2f", viewModel.stats.gcpTotalCost))")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
@@ -332,9 +332,9 @@ struct StatsTabView: View {
                         .background(Color.blue.opacity(0.12))
                         .clipShape(Capsule())
                 }
-                
+
                 Spacer()
-                
+
                 if let onNavigateToCost {
                     Button {
                         onNavigateToCost()
@@ -351,7 +351,7 @@ struct StatsTabView: View {
                 }
             }
             .padding(.horizontal, 4)
-            
+
             Button {
                 onNavigateToCost?()
             } label: {
@@ -372,15 +372,27 @@ struct StatsTabView: View {
             }
         }
     }
-    
+
     private var remainingQuotasList: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let hasSubscriptionQuotas = viewModel.stats.quotaInfo.map { !$0.groups.isEmpty } ?? false
+
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(viewModel.stats.isGcpActive ? "backend & quotas" : "remaining quotas")
+                Text(hasSubscriptionQuotas ? "remaining subscription quotas" : (viewModel.stats.isGcpActive ? "backend & quotas" : "remaining quotas"))
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if viewModel.stats.isGcpActive, let project = viewModel.stats.gcpProject {
+                if hasSubscriptionQuotas {
+                    if let email = viewModel.stats.quotaInfo?.email {
+                        Text(email)
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary.opacity(0.8))
+                    } else if let plan = viewModel.stats.quotaInfo?.plan {
+                        Text(plan)
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary.opacity(0.8))
+                    }
+                } else if viewModel.stats.isGcpActive, let project = viewModel.stats.gcpProject {
                     Text("gcp: \(project)")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .foregroundStyle(Color.blue)
@@ -391,23 +403,23 @@ struct StatsTabView: View {
                 }
             }
             .padding(.horizontal, 4)
-            
+
             if let quota = viewModel.stats.quotaInfo, !quota.groups.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(quota.groups) { group in
                         let isHovered = quotaCardHovered[group.displayName] ?? false
                         let isGemini = group.displayName.lowercased().contains("gemini")
                         let cardAccent = isGemini ? geminiColor : claudeColor
-                        
+
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(group.displayName.lowercased())
                                     .font(.system(size: 11, weight: .bold, design: .rounded))
                                     .foregroundStyle(cardAccent)
-                                
+
                                 Spacer()
                             }
-                            
+
                             VStack(spacing: 4) {
                                 ForEach(group.sortedBuckets) { bucket in
                                     QuotaBucketRow(groupDisplayName: group.displayName, bucket: bucket)
@@ -440,7 +452,7 @@ struct StatsTabView: View {
                             .foregroundStyle(Color.blue)
                             .clipShape(Capsule())
                     }
-                    
+
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("project:")
@@ -456,11 +468,11 @@ struct StatsTabView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        
+
                         Divider()
                             .opacity(0.4)
                             .padding(.vertical, 2)
-                        
+
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("gcp today spend")
@@ -481,7 +493,7 @@ struct StatsTabView: View {
                             }
                         }
                     }
-                    
+
                     Text("Direct pay-as-you-go Vertex AI calls billed to Google Cloud credits. Subscription quota limits bypassed.")
                         .font(.system(size: 8))
                         .foregroundStyle(.secondary.opacity(0.8))
@@ -497,11 +509,11 @@ struct StatsTabView: View {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 14))
                             .foregroundStyle(Color.yellow.opacity(0.6))
-                        
+
                         Text("no active quota session")
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary.opacity(0.85))
-                        
+
                         Text("run agy cli to activate quota info")
                             .font(.system(size: 8.5))
                             .foregroundStyle(.secondary)
@@ -514,14 +526,14 @@ struct StatsTabView: View {
             }
         }
     }
-    
+
     private var toolExecutionBreakdown: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("tool executions")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
-            
+
             if viewModel.stats.toolStats.isEmpty {
                 HStack {
                     Spacer()

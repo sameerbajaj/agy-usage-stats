@@ -22,6 +22,7 @@ public enum MenuBarDisplayMode: String, Codable, CaseIterable, Identifiable {
 
 public enum IconModelSelection: String, Codable, CaseIterable, Identifiable {
     case active = "Active Model"
+    case mostDepleted = "Most Depleted"
     case gemini = "Gemini Only"
     case claude = "Claude Only"
     case both = "Both (G & C)"
@@ -193,39 +194,40 @@ public final class AgyStatsViewModel {
         return formatter
     }()
 
-    private func getActiveGroup() -> AgyQuotaGroup? {
-        guard let quota = stats.quotaInfo else { return nil }
-        guard let modelName = settings.model?.lowercased() else {
-            return quota.groups.first
+    public func getGroup(matchingModelName rawNameOpt: String?) -> AgyQuotaGroup? {
+        guard let quota = stats.quotaInfo, let rawName = rawNameOpt?.lowercased(), !rawName.isEmpty else {
+            return nil
         }
         
-        // Match group names
+        // Direct group name match
         for group in quota.groups {
             let groupName = group.displayName.lowercased()
-            if modelName.contains(groupName) || groupName.contains(modelName) {
+            if rawName.contains(groupName) || groupName.contains(rawName) {
                 return group
             }
         }
         
-        // Match bucket names
+        // Bucket name match
         for group in quota.groups {
             for bucket in group.buckets {
                 let bucketName = bucket.displayName.lowercased()
-                if modelName.contains(bucketName) || bucketName.contains(modelName) {
+                if rawName.contains(bucketName) || bucketName.contains(rawName) {
                     return group
                 }
             }
         }
         
-        // Fallback checks for Gemini/Claude/GPT keywords
-        if modelName.contains("gemini") {
+        // Keyword checks for Gemini
+        if rawName.contains("gemini") {
             for group in quota.groups {
                 if group.displayName.lowercased().contains("gemini") {
                     return group
                 }
             }
         }
-        if modelName.contains("claude") || modelName.contains("gpt") || modelName.contains("sonnet") {
+        
+        // Keyword checks for Claude / Sonnet / GPT
+        if rawName.contains("claude") || rawName.contains("gpt") || rawName.contains("sonnet") || rawName.contains("opus") {
             for group in quota.groups {
                 let name = group.displayName.lowercased()
                 if name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic") {
@@ -234,7 +236,92 @@ public final class AgyStatsViewModel {
             }
         }
         
+        return nil
+    }
+
+    public func getMostDepletedGroup() -> AgyQuotaGroup? {
+        guard let quota = stats.quotaInfo, !quota.groups.isEmpty else { return nil }
+        return quota.groups.min { a, b in
+            let aFrac = getBucket(forGroup: a, target: iconQuotaLimitTarget)?.remainingFraction ?? 1.0
+            let bFrac = getBucket(forGroup: b, target: iconQuotaLimitTarget)?.remainingFraction ?? 1.0
+            return aFrac < bFrac
+        }
+    }
+
+    public func getActiveGroup() -> AgyQuotaGroup? {
+        guard let quota = stats.quotaInfo, !quota.groups.isEmpty else { return nil }
+
+        if selectedModelForIcon == .mostDepleted {
+            return getMostDepletedGroup()
+        }
+
+        // 1. Inspect recent query activity across all active terminals and sessions.
+        // Queries from the last 2 hours (or the most recent 15 queries) tell us what is actively running.
+        let recentCutoff = Date().addingTimeInterval(-2 * 3600)
+        let activeQueries = stats.recentQueries.filter { $0.timestamp >= recentCutoff }
+        let queriesToInspect = activeQueries.isEmpty ? Array(stats.recentQueries.prefix(15)) : activeQueries
+
+        var activeGroups: [AgyQuotaGroup] = []
+        for q in queriesToInspect {
+            if let group = getGroup(matchingModelName: q.modelName) {
+                if !activeGroups.contains(where: { $0.displayName == group.displayName }) {
+                    activeGroups.append(group)
+                }
+            }
+        }
+
+        if activeGroups.count > 1 {
+            // When multiple models are actively being queried across different terminals,
+            // dynamically switch to the model that is actively getting depleted (lowest remaining quota fraction).
+            if let depleted = activeGroups.min(by: { a, b in
+                let aFrac = getBucket(forGroup: a, target: iconQuotaLimitTarget)?.remainingFraction ?? 1.0
+                let bFrac = getBucket(forGroup: b, target: iconQuotaLimitTarget)?.remainingFraction ?? 1.0
+                return aFrac < bFrac
+            }) {
+                return depleted
+            }
+        } else if let singleActive = activeGroups.first {
+            return singleActive
+        }
+
+        // 2. Fallback: If no recent query activity, check if any quota group is noticeably depleted (< 90% remaining).
+        let depletedGroups = quota.groups.compactMap { group -> (group: AgyQuotaGroup, fraction: Double)? in
+            guard let frac = getBucket(forGroup: group, target: iconQuotaLimitTarget)?.remainingFraction else { return nil }
+            return (group, frac)
+        }
+        if let mostDepleted = depletedGroups.min(by: { $0.fraction < $1.fraction }), mostDepleted.fraction < 0.90 {
+            return mostDepleted.group
+        }
+
+        // 3. Fallback: Configured model in settings.json
+        if let modelName = settings.model, let group = getGroup(matchingModelName: modelName) {
+            return group
+        }
+
+        // 4. Default: First available group
         return quota.groups.first
+    }
+
+    public var activeModelDisplayName: String {
+        guard let group = getActiveGroup() else {
+            return settings.model ?? (stats.quotaInfo?.plan ?? "Gemini 3.8 Flash")
+        }
+
+        let groupName = group.displayName.lowercased()
+        let matchingQuery = stats.recentQueries.first { q in
+            guard let m = q.modelName?.lowercased() else { return false }
+            return (m.contains("gemini") && groupName.contains("gemini")) ||
+                   ((m.contains("claude") || m.contains("sonnet") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt")))
+        }
+        if let specificName = matchingQuery?.modelName {
+            return specificName
+        }
+
+        if let settingsModel = settings.model, let match = getGroup(matchingModelName: settingsModel), match.displayName == group.displayName {
+            return settingsModel
+        }
+
+        return group.displayName
     }
 
     private func getGeminiGroup() -> AgyQuotaGroup? {

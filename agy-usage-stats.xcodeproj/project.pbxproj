@@ -707,7 +707,7 @@
 					<string>@executable_path/../Frameworks</string>
 				</array>
 				<key>MARKETING_VERSION</key>
-				<string>1.0</string>
+				<string>1.0.57</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
 				<string>luminoslabs.agy-usage-stats</string>
 				<key>PRODUCT_NAME</key>
@@ -768,7 +768,7 @@
 					<string>@executable_path/../Frameworks</string>
 				</array>
 				<key>MARKETING_VERSION</key>
-				<string>1.0</string>
+				<string>1.0.57</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
 				<string>luminoslabs.agy-usage-stats</string>
 				<key>PRODUCT_NAME</key>
@@ -824,7 +824,7 @@
 				<key>MACOSX_DEPLOYMENT_TARGET</key>
 				<string>15.7</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0</string>
+				<string>1.0.57</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
 				<string>luminoslabs.agy-usage-statsTests</string>
 				<key>PRODUCT_NAME</key>
@@ -864,7 +864,7 @@
 				<key>MACOSX_DEPLOYMENT_TARGET</key>
 				<string>15.7</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0</string>
+				<string>1.0.57</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
 				<string>luminoslabs.agy-usage-statsTests</string>
 				<key>PRODUCT_NAME</key>
@@ -914,7 +914,7 @@
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>YES</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0</string>
+				<string>1.0.57</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
 				<string>luminoslabs.agy-usage-statsUITests</string>
 				<key>PRODUCT_NAME</key>
@@ -950,7 +950,7 @@
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>YES</string>
 				<key>MARKETING_VERSION</key>
-				<string>1.0</string>
+				<string>1.0.57</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
 				<string>luminoslabs.agy-usage-statsUITests</string>
 				<key>PRODUCT_NAME</key>
