@@ -217,20 +217,21 @@ public final class AgyStatsViewModel {
             }
         }
         
-        // Keyword checks for Gemini
-        if rawName.contains("gemini") {
+        // Keyword checks for Gemini / Argon
+        if rawName.contains("gemini") || rawName.contains("argon") {
             for group in quota.groups {
-                if group.displayName.lowercased().contains("gemini") {
+                let name = group.displayName.lowercased()
+                if name.contains("gemini") || name.contains("argon") {
                     return group
                 }
             }
         }
         
-        // Keyword checks for Claude / Sonnet / GPT
+        // Keyword checks for Claude / Sonnet / Opus / GPT
         if rawName.contains("claude") || rawName.contains("gpt") || rawName.contains("sonnet") || rawName.contains("opus") {
             for group in quota.groups {
                 let name = group.displayName.lowercased()
-                if name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic") {
+                if name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic") || name.contains("sonnet") || name.contains("opus") {
                     return group
                 }
             }
@@ -310,8 +311,8 @@ public final class AgyStatsViewModel {
         let groupName = group.displayName.lowercased()
         let matchingQuery = stats.recentQueries.first { q in
             guard let m = q.modelName?.lowercased() else { return false }
-            return (m.contains("gemini") && groupName.contains("gemini")) ||
-                   ((m.contains("claude") || m.contains("sonnet") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt")))
+            return ((m.contains("gemini") || m.contains("argon")) && (groupName.contains("gemini") || groupName.contains("argon"))) ||
+                   ((m.contains("claude") || m.contains("sonnet") || m.contains("opus") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt") || groupName.contains("openai") || groupName.contains("anthropic") || groupName.contains("sonnet") || groupName.contains("opus")))
         }
         if let specificName = matchingQuery?.modelName {
             return specificName
@@ -326,14 +327,17 @@ public final class AgyStatsViewModel {
 
     private func getGeminiGroup() -> AgyQuotaGroup? {
         guard let quota = stats.quotaInfo else { return nil }
-        return quota.groups.first { $0.displayName.lowercased().contains("gemini") }
+        return quota.groups.first {
+            let name = $0.displayName.lowercased()
+            return name.contains("gemini") || name.contains("argon")
+        }
     }
 
     private func getClaudeGroup() -> AgyQuotaGroup? {
         guard let quota = stats.quotaInfo else { return nil }
         return quota.groups.first { group in
             let name = group.displayName.lowercased()
-            return name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic")
+            return name.contains("claude") || name.contains("gpt") || name.contains("openai") || name.contains("anthropic") || name.contains("sonnet") || name.contains("opus")
         }
     }
 

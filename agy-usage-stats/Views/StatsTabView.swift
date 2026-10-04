@@ -150,7 +150,7 @@ struct QuotaBucketRow: View {
         if fraction <= 0.2 {
             return Color(red: 1.0, green: 0.35, blue: 0.35)
         }
-        let isGemini = group.lowercased().contains("gemini")
+        let isGemini = group.lowercased().contains("gemini") || group.lowercased().contains("argon")
         return isGemini ? geminiColor : claudeColor
     }
 
@@ -158,7 +158,7 @@ struct QuotaBucketRow: View {
         if fraction <= 0.2 {
             return [Color(red: 1.0, green: 0.3, blue: 0.3), Color(red: 1.0, green: 0.45, blue: 0.45)]
         }
-        let isGemini = group.lowercased().contains("gemini")
+        let isGemini = group.lowercased().contains("gemini") || group.lowercased().contains("argon")
         if isGemini {
             return [geminiColor, Color(red: 0.28, green: 0.68, blue: 1.0)]
         } else {
@@ -408,7 +408,7 @@ struct StatsTabView: View {
                 VStack(spacing: 6) {
                     ForEach(quota.groups) { group in
                         let isHovered = quotaCardHovered[group.displayName] ?? false
-                        let isGemini = group.displayName.lowercased().contains("gemini")
+                        let isGemini = group.displayName.lowercased().contains("gemini") || group.displayName.lowercased().contains("argon")
                         let cardAccent = isGemini ? geminiColor : claudeColor
 
                         VStack(alignment: .leading, spacing: 4) {

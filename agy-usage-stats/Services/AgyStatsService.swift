@@ -1573,15 +1573,84 @@ public enum AgyStatsService {
         return (conversationsDict, toolStats, anyMiss)
     }
     
-    private static func cleanAndMapModelName(_ name: String) -> String? {
+    static func cleanAndMapModelName(_ name: String) -> String? {
         let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
         let mappings: [(pattern: String, modelName: String)] = [
-            ("opus", "Claude Opus 4.6 (Thinking)"),
-            ("sonnet", "Claude Sonnet 4.6 (Thinking)"),
+            // Gemini 4 / Argon (Frontier)
+            ("gemini-4-argon-low", "Gemini 4 Argon (Low)"),
+            ("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"),
+            ("gemini-4-argon-high", "Gemini 4 Argon (High)"),
+            ("gemini-4-argon", "Gemini 4 Argon (High)"),
+            ("gemini-argon-low", "Gemini 4 Argon (Low)"),
+            ("gemini-argon-medium", "Gemini 4 Argon (Medium)"),
+            ("gemini-argon-high", "Gemini 4 Argon (High)"),
+            ("gemini-argon", "Gemini 4 Argon (High)"),
+            ("argon-low", "Gemini 4 Argon (Low)"),
+            ("argon-medium", "Gemini 4 Argon (Medium)"),
+            ("argon-high", "Gemini 4 Argon (High)"),
+            ("argon", "Gemini 4 Argon (High)"),
+            ("gemini-4", "Gemini 4 Argon (High)"),
+
+            // Claude 5.5 Series (Sonnet & Opus)
+            ("claude-opus-5-5-low", "Claude Opus 5.5 (Low)"),
+            ("claude-opus-5.5-low", "Claude Opus 5.5 (Low)"),
+            ("opus-5-5-low", "Claude Opus 5.5 (Low)"),
+            ("opus-5.5-low", "Claude Opus 5.5 (Low)"),
+            ("claude-opus-5-5-medium", "Claude Opus 5.5 (Medium)"),
+            ("claude-opus-5.5-medium", "Claude Opus 5.5 (Medium)"),
+            ("opus-5-5-medium", "Claude Opus 5.5 (Medium)"),
+            ("opus-5.5-medium", "Claude Opus 5.5 (Medium)"),
+            ("claude-opus-5-5-high", "Claude Opus 5.5 (High)"),
+            ("claude-opus-5.5-high", "Claude Opus 5.5 (High)"),
+            ("opus-5-5-high", "Claude Opus 5.5 (High)"),
+            ("opus-5.5-high", "Claude Opus 5.5 (High)"),
+            ("claude-opus-5-5", "Claude Opus 5.5 (High)"),
+            ("claude-opus-5.5", "Claude Opus 5.5 (High)"),
+            ("opus-5.5", "Claude Opus 5.5 (High)"),
+            ("opus-5-5", "Claude Opus 5.5 (High)"),
+            ("opus-5", "Claude Opus 5.5 (High)"),
+
+            ("claude-sonnet-5-5-low", "Claude Sonnet 5.5 (Low)"),
+            ("claude-sonnet-5.5-low", "Claude Sonnet 5.5 (Low)"),
+            ("sonnet-5-5-low", "Claude Sonnet 5.5 (Low)"),
+            ("sonnet-5.5-low", "Claude Sonnet 5.5 (Low)"),
+            ("claude-sonnet-5-5-medium", "Claude Sonnet 5.5 (Medium)"),
+            ("claude-sonnet-5.5-medium", "Claude Sonnet 5.5 (Medium)"),
+            ("sonnet-5-5-medium", "Claude Sonnet 5.5 (Medium)"),
+            ("sonnet-5.5-medium", "Claude Sonnet 5.5 (Medium)"),
+            ("claude-sonnet-5-5-high", "Claude Sonnet 5.5 (High)"),
+            ("claude-sonnet-5.5-high", "Claude Sonnet 5.5 (High)"),
+            ("sonnet-5-5-high", "Claude Sonnet 5.5 (High)"),
+            ("sonnet-5.5-high", "Claude Sonnet 5.5 (High)"),
+            ("claude-sonnet-5-5", "Claude Sonnet 5.5 (High)"),
+            ("claude-sonnet-5.5", "Claude Sonnet 5.5 (High)"),
+            ("sonnet-5.5", "Claude Sonnet 5.5 (High)"),
+            ("sonnet-5-5", "Claude Sonnet 5.5 (High)"),
+            ("sonnet-5", "Claude Sonnet 5.5 (High)"),
+
+            // Legacy Claude 4.6 (Historical)
             ("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
-            ("gpt-oss", "GPT-OSS-120B"),
-            ("oss-120b", "GPT-OSS-120B"),
+            ("claude-sonnet-4.6", "Claude Sonnet 4.6 (Thinking)"),
+            ("sonnet-4-6", "Claude Sonnet 4.6 (Thinking)"),
+            ("sonnet-4.6", "Claude Sonnet 4.6 (Thinking)"),
+            ("sonnet-4", "Claude Sonnet 4.6 (Thinking)"),
+            ("claude-opus-4-6", "Claude Opus 4.6 (Thinking)"),
+            ("claude-opus-4.6", "Claude Opus 4.6 (Thinking)"),
+            ("opus-4-6", "Claude Opus 4.6 (Thinking)"),
+            ("opus-4.6", "Claude Opus 4.6 (Thinking)"),
+            ("opus-4", "Claude Opus 4.6 (Thinking)"),
+
+            // Generic fallbacks
+            ("opus", "Claude Opus 5.5 (High)"),
+            ("sonnet", "Claude Sonnet 5.5 (High)"),
+
+            // Open Source
+            ("gpt-oss-120b", "GPT-OSS 120B (Medium)"),
+            ("gpt-oss", "GPT-OSS 120B (Medium)"),
+            ("oss-120b", "GPT-OSS 120B (Medium)"),
+
+            // Gemini 3.8 Series
             ("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"),
             ("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)"),
             ("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
@@ -1591,6 +1660,8 @@ public enum AgyStatsService {
             ("gemini-3.8", "Gemini 3.8 Flash (High)"),
             ("3.8-flash", "Gemini 3.8 Flash (High)"),
             ("flash-3.8", "Gemini 3.8 Flash (High)"),
+
+            // Gemini 3.7 Series
             ("gemini-3.7-flash-low", "Gemini 3.7 Flash (Low)"),
             ("gemini-3.7-flash-medium", "Gemini 3.7 Flash (Medium)"),
             ("gemini-3.7-flash-high", "Gemini 3.7 Flash (High)"),
@@ -1598,6 +1669,8 @@ public enum AgyStatsService {
             ("gemini-3.7", "Gemini 3.7 Flash (High)"),
             ("3.7-flash", "Gemini 3.7 Flash (High)"),
             ("flash-3.7", "Gemini 3.7 Flash (High)"),
+
+            // Gemini 3.6 Series
             ("gemini-3.6-flash-low", "Gemini 3.6 Flash (Low)"),
             ("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)"),
             ("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)"),
@@ -1608,6 +1681,8 @@ public enum AgyStatsService {
             ("gemini-3.6", "Gemini 3.6 Flash (High)"),
             ("3.6-flash", "Gemini 3.6 Flash (High)"),
             ("flash-3.6", "Gemini 3.6 Flash (High)"),
+
+            // Gemini 3.1 Pro Series
             ("gemini-3-pro-low", "Gemini 3.1 Pro (Low)"),
             ("pro-low", "Gemini 3.1 Pro (Low)"),
             ("gemini-3-pro-high", "Gemini 3.1 Pro (High)"),
@@ -1616,6 +1691,8 @@ public enum AgyStatsService {
             ("gemini-3.1-pro", "Gemini 3.1 Pro (High)"),
             ("gemini-3.1", "Gemini 3.1 Pro (High)"),
             ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
+
+            // Shorthands
             ("flash-extra-low", "Gemini 3.7 Flash (Low)"),
             ("flash-low", "Gemini 3.7 Flash (Low)"),
             ("flash-medium", "Gemini 3.7 Flash (Medium)"),
@@ -1636,6 +1713,15 @@ public enum AgyStatsService {
         }
         
         let knownModelNames = [
+            "Gemini 4 Argon (Low)",
+            "Gemini 4 Argon (Medium)",
+            "Gemini 4 Argon (High)",
+            "Claude Sonnet 5.5 (Low)",
+            "Claude Sonnet 5.5 (Medium)",
+            "Claude Sonnet 5.5 (High)",
+            "Claude Opus 5.5 (Low)",
+            "Claude Opus 5.5 (Medium)",
+            "Claude Opus 5.5 (High)",
             "Gemini 3.8 Flash (Low)",
             "Gemini 3.8 Flash (Medium)",
             "Gemini 3.8 Flash (High)",
@@ -1653,6 +1739,7 @@ public enum AgyStatsService {
             "Gemini 3.1 Pro (High)",
             "Claude Sonnet 4.6 (Thinking)",
             "Claude Opus 4.6 (Thinking)",
+            "GPT-OSS 120B (Medium)",
             "GPT-OSS-120B"
         ]
         for knownName in knownModelNames {
@@ -1664,14 +1751,20 @@ public enum AgyStatsService {
         return nil
     }
     
-    private static func enforceDateModelValidity(modelName: String, date: Date, aug2026: Date, sep2026: Date) -> String {
+    static func enforceDateModelValidity(modelName: String, date: Date, aug2026: Date, sep2026: Date) -> String {
         if date < aug2026 {
-            if modelName.contains("3.7") || modelName.contains("3.8") {
+            if modelName.contains("3.7") || modelName.contains("3.8") || modelName.contains("Argon") {
                 return "Gemini 3.6 Flash (High)"
             }
+            if modelName.contains("5.5") {
+                return modelName.contains("Opus") ? "Claude Opus 4.6 (Thinking)" : "Claude Sonnet 4.6 (Thinking)"
+            }
         } else if date < sep2026 {
-            if modelName.contains("3.8") {
+            if modelName.contains("3.8") || modelName.contains("Argon") {
                 return "Gemini 3.7 Flash (High)"
+            }
+            if modelName.contains("5.5") {
+                return modelName.contains("Opus") ? "Claude Opus 4.6 (Thinking)" : "Claude Sonnet 4.6 (Thinking)"
             }
         }
         return modelName

@@ -301,7 +301,7 @@ struct CostTabView: View {
                                     let modelInfo = getModelCostInfo(for: query)
                                     let (inTokens, outTokens, cost) = modelInfo.estimateTokensAndCost(for: query)
                                     let calls = query.conversationMeta?.llmCalls ?? 1
-                                    let isGemini = modelInfo.name.lowercased().contains("gemini")
+                                    let isGemini = modelInfo.name.lowercased().contains("gemini") || modelInfo.name.lowercased().contains("argon")
                                     let modelColor = isGemini ? theme.geminiAccent : theme.claudeAccent
                                     
                                     VStack(alignment: .leading, spacing: 6) {
@@ -982,7 +982,7 @@ struct CostTabView: View {
                 HStack(spacing: 4) {
                     ForEach(bucket.modelBreakdown.keys.sorted(), id: \.self) { mName in
                         if let mCost = bucket.modelBreakdown[mName], mCost > 0 {
-                            let isGemini = mName.lowercased().contains("gemini")
+                            let isGemini = mName.lowercased().contains("gemini") || mName.lowercased().contains("argon")
                             let mColor = isGemini ? theme.geminiAccent : theme.claudeAccent
                             let shortName = mName.replacingOccurrences(of: " (current)", with: "")
                                 .replacingOccurrences(of: " (Low)", with: "")
@@ -1346,7 +1346,7 @@ struct CostTabView: View {
                 } else {
                     VStack(spacing: 8) {
                         ForEach(analysis) { model in
-                            let isGemini = model.modelName.lowercased().contains("gemini")
+                            let isGemini = model.modelName.lowercased().contains("gemini") || model.modelName.lowercased().contains("argon")
                             let modelColor = isGemini ? theme.geminiAccent : theme.claudeAccent
                             
                             VStack(alignment: .leading, spacing: 4) {

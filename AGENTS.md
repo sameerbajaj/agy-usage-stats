@@ -35,6 +35,13 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - Cache dynamic CoreGraphics drawing results (`NSImage`) by key for menu bar icons.
    - Precompute and memoize expensive aggregations in views (e.g., `CostTabView`).
 
+6. **Model Catalog & Frontier Pricing Engine**:
+   - **Gemini 4 Argon**: Introductory pricing at $2.00 / MTok input, $10.00 / MTok output, and $0.10 / MTok cached input (95% discount). Tiers mapped across `Low`, `Medium`, and `High`. Pattern mapping in [`AgyStatsService.cleanAndMapModelName`](file:///Users/sameerbajaj/PARA/Projects/dev/agy-usage-stats/agy-usage-stats/Services/AgyStatsService.swift) matches `argon`, `gemini-4-argon`, and `gemini-argon`.
+   - **Claude Sonnet 5.5**: $2.00 / MTok input, $10.00 / MTok output, and $0.20 / MTok cached input across `Low`, `Medium`, and `High` effort tiers.
+   - **Claude Opus 5.5**: $4.00 / MTok input, $20.00 / MTok output, and $0.20 / MTok cached input across `Low`, `Medium`, and `High` effort tiers.
+   - **Historical Backwards Compatibility**: Retains `Claude Sonnet 4.6 (Thinking)` and `Claude Opus 4.6 (Thinking)` for earlier sessions; date validity enforcement cleanly falls back pre-Sep 2026 runs.
+   - **Quota Group & UI Synergy**: [`AgyStatsViewModel`](file:///Users/sameerbajaj/PARA/Projects/dev/agy-usage-stats/agy-usage-stats/ViewModels/AgyStatsViewModel.swift) seamlessly binds `argon` queries to Gemini quota groups and `sonnet`/`opus` to Claude & GPT quota groups.
+
 ## Testing Guidelines
 
 - Run unit tests with:

@@ -496,4 +496,132 @@ struct agy_usage_statsTests {
         #expect(presentation.text == "22%")
         #expect(presentation.gaugeStyle == .single(fraction: 0.22, strokeColor: litNS))
     }
+
+    // MARK: - Gemini 4 Argon & Claude 5.5 Tests
+
+    @Test func testArgonAndClaude55CatalogAndPricing() {
+        // Gemini 4 Argon
+        let argonHigh = knownModels.first { $0.name == "Gemini 4 Argon (High)" }
+        #expect(argonHigh != nil)
+        #expect(argonHigh?.inputPricePerMillion == 2.00)
+        #expect(argonHigh?.outputPricePerMillion == 10.00)
+        #expect(argonHigh?.cachedInputPricePerMillion == 0.10)
+
+        let argonLow = knownModels.first { $0.name == "Gemini 4 Argon (Low)" }
+        #expect(argonLow != nil)
+        #expect(argonLow?.inputPricePerMillion == 2.00)
+        #expect(argonLow?.outputPricePerMillion == 10.00)
+
+        // Claude Sonnet 5.5
+        let sonnet55High = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }
+        #expect(sonnet55High != nil)
+        #expect(sonnet55High?.inputPricePerMillion == 2.00)
+        #expect(sonnet55High?.outputPricePerMillion == 10.00)
+        #expect(sonnet55High?.cachedInputPricePerMillion == 0.20)
+
+        // Claude Opus 5.5
+        let opus55High = knownModels.first { $0.name == "Claude Opus 5.5 (High)" }
+        #expect(opus55High != nil)
+        #expect(opus55High?.inputPricePerMillion == 4.00)
+        #expect(opus55High?.outputPricePerMillion == 20.00)
+        #expect(opus55High?.cachedInputPricePerMillion == 0.20)
+    }
+
+    @Test func testArgonAndClaudeCostCalculation() {
+        let meta = ConversationDbMeta(
+            llmCalls: 1,
+            totalOutputBytes: 40000,
+            inputTokens: 100_000,
+            outputTokens: 10_000,
+            cachedInputTokens: 50_000
+        )
+        let query = QueryEntry(
+            display: "Build complex feature",
+            timestamp: Date(),
+            workspace: "/Users/test/workspace",
+            conversationId: "test-conv",
+            type: nil,
+            conversationMeta: meta,
+            modelName: nil
+        )
+
+        // Argon: 100k * $2/M ($0.20) + 50k * $0.10/M ($0.005) + 10k * $10/M ($0.10) = $0.305
+        let argon = knownModels.first { $0.name == "Gemini 4 Argon (High)" }!
+        let argonResult = argon.estimateTokensAndCost(for: query)
+        #expect(argonResult.inputTokens == 150_000)
+        #expect(argonResult.outputTokens == 10_000)
+        #expect(abs(argonResult.cost - 0.305) < 0.0001)
+
+        // Sonnet 5.5: 100k * $2/M ($0.20) + 50k * $0.20/M ($0.010) + 10k * $10/M ($0.10) = $0.310
+        let sonnet55 = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }!
+        let sonnetResult = sonnet55.estimateTokensAndCost(for: query)
+        #expect(abs(sonnetResult.cost - 0.310) < 0.0001)
+
+        // Opus 5.5: 100k * $4/M ($0.40) + 50k * $0.20/M ($0.010) + 10k * $20/M ($0.20) = $0.610
+        let opus55 = knownModels.first { $0.name == "Claude Opus 5.5 (High)" }!
+        let opusResult = opus55.estimateTokensAndCost(for: query)
+        #expect(abs(opusResult.cost - 0.610) < 0.0001)
+    }
+
+    @Test func testModelNamePatternMappings() {
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-argon") == "Gemini 4 Argon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-argon-low") == "Gemini 4 Argon (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("argon-high") == "Gemini 4 Argon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("argon") == "Gemini 4 Argon (High)")
+
+        #expect(AgyStatsService.cleanAndMapModelName("claude-sonnet-5-5-high") == "Claude Sonnet 5.5 (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("claude-sonnet-5.5-medium") == "Claude Sonnet 5.5 (Medium)")
+        #expect(AgyStatsService.cleanAndMapModelName("sonnet-5.5-low") == "Claude Sonnet 5.5 (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("sonnet") == "Claude Sonnet 5.5 (High)")
+
+        #expect(AgyStatsService.cleanAndMapModelName("claude-opus-5-5-high") == "Claude Opus 5.5 (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("opus-5-5-low") == "Claude Opus 5.5 (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("opus") == "Claude Opus 5.5 (High)")
+
+        #expect(AgyStatsService.cleanAndMapModelName("claude-sonnet-4-6") == "Claude Sonnet 4.6 (Thinking)")
+        #expect(AgyStatsService.cleanAndMapModelName("claude-opus-4-6") == "Claude Opus 4.6 (Thinking)")
+    }
+
+    @Test func testArgonAndClaude55QuotaGroupMatching() {
+        let vm = AgyStatsViewModel()
+        let geminiBucket = AgyQuotaBucket(
+            bucketId: "gemini-weekly",
+            displayName: "Weekly Limit",
+            remainingFraction: 0.80,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+        let claudeBucket = AgyQuotaBucket(
+            bucketId: "claude-weekly",
+            displayName: "Weekly Limit",
+            remainingFraction: 0.60,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+
+        let geminiGroup = AgyQuotaGroup(displayName: "Gemini Models", description: nil, buckets: [geminiBucket])
+        let claudeGroup = AgyQuotaGroup(displayName: "Claude and GPT models", description: nil, buckets: [claudeBucket])
+
+        vm.stats.quotaInfo = AgyQuotaInfo(
+            email: "test@example.com",
+            plan: "Google AI Pro",
+            groups: [geminiGroup, claudeGroup]
+        )
+
+        // Argon matches Gemini quota group
+        let argonGroup = vm.getGroup(matchingModelName: "Gemini 4 Argon (High)")
+        #expect(argonGroup?.displayName == "Gemini Models")
+
+        let argonShortGroup = vm.getGroup(matchingModelName: "argon-high")
+        #expect(argonShortGroup?.displayName == "Gemini Models")
+
+        // Claude 5.5 matches Claude quota group
+        let sonnet55Group = vm.getGroup(matchingModelName: "Claude Sonnet 5.5 (High)")
+        #expect(sonnet55Group?.displayName == "Claude and GPT models")
+
+        let opus55Group = vm.getGroup(matchingModelName: "Claude Opus 5.5 (High)")
+        #expect(opus55Group?.displayName == "Claude and GPT models")
+    }
 }

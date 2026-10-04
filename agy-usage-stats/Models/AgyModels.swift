@@ -432,27 +432,54 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
 }
 
 public let knownModels = [
+    // Frontier / Gemini 4
+    ModelCostInfo(name: "Gemini 4 Argon (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.10, tier: .low),
+    ModelCostInfo(name: "Gemini 4 Argon (Medium)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.10, tier: .medium),
+    ModelCostInfo(name: "Gemini 4 Argon (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.10, tier: .high),
+
+    // Claude 5.5 Series
+    ModelCostInfo(name: "Claude Sonnet 5.5 (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.20, tier: .low),
+    ModelCostInfo(name: "Claude Sonnet 5.5 (Medium)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.20, tier: .medium),
+    ModelCostInfo(name: "Claude Sonnet 5.5 (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.20, tier: .high),
+    ModelCostInfo(name: "Claude Opus 5.5 (Low)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .low),
+    ModelCostInfo(name: "Claude Opus 5.5 (Medium)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .medium),
+    ModelCostInfo(name: "Claude Opus 5.5 (High)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .high),
+
+    // Gemini 3.8 Series
     ModelCostInfo(name: "Gemini 3.8 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .low),
     ModelCostInfo(name: "Gemini 3.8 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .medium),
     ModelCostInfo(name: "Gemini 3.8 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
     ModelCostInfo(name: "Gemini 3.8 Flash Cyber", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
+
+    // Gemini 3.7 Series
     ModelCostInfo(name: "Gemini 3.7 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .low),
     ModelCostInfo(name: "Gemini 3.7 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .medium),
     ModelCostInfo(name: "Gemini 3.7 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
+
+    // Gemini 3.6 Series
     ModelCostInfo(name: "Gemini 3.6 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .low),
     ModelCostInfo(name: "Gemini 3.6 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .medium),
     ModelCostInfo(name: "Gemini 3.6 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .high),
+
+    // Gemini 3.5 & 3.1 Series
     ModelCostInfo(name: "Gemini 3.5 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.15, tier: .low),
     ModelCostInfo(name: "Gemini 3.5 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.15, tier: .medium),
     ModelCostInfo(name: "Gemini 3.5 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.15, tier: .high),
     ModelCostInfo(name: "Gemini 3.1 Pro (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.20, tier: .low),
     ModelCostInfo(name: "Gemini 3.1 Pro (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.20, tier: .high),
+
+    // Legacy Claude 4.6 (Historical)
     ModelCostInfo(name: "Claude Sonnet 4.6 (Thinking)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, cachedInputPricePerMillion: 0.30, tier: .thinking),
     ModelCostInfo(name: "Claude Opus 4.6 (Thinking)", inputPricePerMillion: 5.00, outputPricePerMillion: 25.00, cachedInputPricePerMillion: 0.50, tier: .thinking),
+
+    // Open Source
+    ModelCostInfo(name: "GPT-OSS 120B (Medium)", inputPricePerMillion: 0.15, outputPricePerMillion: 0.60, cachedInputPricePerMillion: 0.015, tier: .medium),
     ModelCostInfo(name: "GPT-OSS-120B", inputPricePerMillion: 0.15, outputPricePerMillion: 0.60, cachedInputPricePerMillion: 0.015, tier: .medium)
 ]
 
 public var defaultGeminiModel: ModelCostInfo {
-    knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ?? knownModels[0]
+    knownModels.first(where: { $0.name == "Gemini 3.8 Flash (High)" }) ??
+    knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ??
+    knownModels[0]
 }
 
