@@ -623,5 +623,31 @@ struct agy_usage_statsTests {
 
         let opus55Group = vm.getGroup(matchingModelName: "Claude Opus 5.5 (High)")
         #expect(opus55Group?.displayName == "Claude and GPT models")
+
+        // When dedicated Argon quota group is present (e.g. Pro plan with separate Argon quota)
+        let argonBucket = AgyQuotaBucket(
+            bucketId: "gemini-argon-wtu-weekly",
+            displayName: "Gemini 4 Argon Weekly Limit",
+            remainingFraction: 1.0,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+        let dedicatedArgonGroup = AgyQuotaGroup(
+            displayName: "Gemini 4 Argon",
+            description: "For paid Pro plans, Argon quota is separate.",
+            buckets: [argonBucket]
+        )
+        vm.stats.quotaInfo = AgyQuotaInfo(
+            email: "test@example.com",
+            plan: "Google AI Pro",
+            groups: [geminiGroup, claudeGroup, dedicatedArgonGroup]
+        )
+
+        let dedicatedMatch = vm.getGroup(matchingModelName: "Gemini 4 Argon (High)")
+        #expect(dedicatedMatch?.displayName == "Gemini 4 Argon")
+
+        let dedicatedShortMatch = vm.getGroup(matchingModelName: "argon-high")
+        #expect(dedicatedShortMatch?.displayName == "Gemini 4 Argon")
     }
 }

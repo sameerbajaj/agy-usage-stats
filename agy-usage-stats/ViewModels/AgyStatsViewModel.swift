@@ -217,7 +217,14 @@ public final class AgyStatsViewModel {
             }
         }
         
-        // Keyword checks for Gemini / Argon
+        // Keyword checks for Argon (prioritize dedicated Argon group if present, otherwise fall back to Gemini group)
+        if rawName.contains("argon") {
+            if let argonGroup = quota.groups.first(where: { $0.displayName.lowercased().contains("argon") }) {
+                return argonGroup
+            }
+        }
+        
+        // Keyword checks for Gemini / Argon fallback
         if rawName.contains("gemini") || rawName.contains("argon") {
             for group in quota.groups {
                 let name = group.displayName.lowercased()
