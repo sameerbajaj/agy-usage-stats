@@ -42,6 +42,12 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - **Historical Backwards Compatibility**: Retains `Claude Sonnet 4.6 (Thinking)` and `Claude Opus 4.6 (Thinking)` for earlier sessions; date validity enforcement cleanly falls back pre-Sep 2026 runs.
    - **Quota Group & UI Synergy**: [`AgyStatsViewModel`](file:///Users/sameerbajaj/PARA/Projects/dev/agy-usage-stats/agy-usage-stats/ViewModels/AgyStatsViewModel.swift) seamlessly binds `argon` queries to Gemini quota groups and `sonnet`/`opus` to Claude & GPT quota groups.
 
+7. **UI Information Architecture & Visual Design Invariants**:
+   - **Terminal-Native Alignment**: Always mirror the exact model categorization and structure from the official Antigravity CLI `/usage` terminal modal (`GEMINI MODELS`, `CLAUDE AND GPT MODELS`, `GEMINI 4 ARGON`).
+   - **Readability Over Gimmicks**: Avoid cramped micro-charts, SVG donuts, or dense bar scrubbers in popovers. Use spacious, high-contrast progress bars, exact percentage indicators (`83.14%`), and human-friendly reset countdowns (`Refreshes in 5 days, 23 hours`).
+   - **Clean 2-Tab Architecture**: Structure the popover strictly around 2 primary tabs: `Usage & Cost` (single unified sheet with quotas + cost by model) and `Settings`.
+   - **Cost Breakdown by Model**: Keep cost breakdowns simple, bold, and organized by model with direct proportion bars, bold price, and token counts, supporting `Today | Last 7 Days | Last 30 Days`.
+
 ## Testing Guidelines
 
 - Run unit tests with:
