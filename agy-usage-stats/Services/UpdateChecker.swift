@@ -21,6 +21,15 @@ public enum UpdateChecker {
 
     // Returns an UpdateInfo if a newer version (or newer rolling build) is available.
     public static func check() async -> UpdateInfo? {
+        #if DEBUG
+        // In local debug builds, do not prompt the developer to overwrite their working copy with remote releases!
+        return nil
+        #endif
+
+        if Bundle.main.bundlePath.contains("DerivedData") {
+            return nil
+        }
+
         let apiURL = URL(string: "https://api.github.com/repos/\(githubRepo)/releases")!
         var req = URLRequest(url: apiURL)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")

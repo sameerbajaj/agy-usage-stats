@@ -15,11 +15,12 @@ public struct OverviewTabView: View {
         case today = "Today"
         case week = "Last 7 Days"
         case month = "Last 30 Days"
+        case all = "All Costs"
         
         public var id: String { rawValue }
     }
     
-    @State private var selectedTimeframe: CostTimeframe = .week
+    @State private var selectedTimeframe: CostTimeframe = .today
     
     private var isDark: Bool { colorScheme == .dark }
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
@@ -41,19 +42,31 @@ public struct OverviewTabView: View {
             return Array(viewModel.stats.dailyUsage.suffix(7))
         case .month:
             return Array(viewModel.stats.dailyUsage.suffix(30))
+        case .all:
+            return viewModel.stats.dailyUsage
         }
     }
     
     private var totalCost: Double {
-        activeBuckets.aggregatedTotalCost
+        if selectedTimeframe == .all && viewModel.stats.totalCostEstimate > activeBuckets.aggregatedTotalCost {
+            return viewModel.stats.totalCostEstimate
+        }
+        return activeBuckets.aggregatedTotalCost
     }
     
     private var totalTokens: Int {
-        activeBuckets.aggregatedInputTokens + activeBuckets.aggregatedOutputTokens
+        let tokens = activeBuckets.aggregatedInputTokens + activeBuckets.aggregatedOutputTokens
+        if selectedTimeframe == .all && tokens == 0 && viewModel.stats.totalQueries > 0 {
+            return viewModel.stats.totalQueries * 85_000
+        }
+        return tokens
     }
     
     private var totalQueries: Int {
-        activeBuckets.aggregatedQueryCount
+        if selectedTimeframe == .all {
+            return max(viewModel.stats.totalQueries, activeBuckets.aggregatedQueryCount)
+        }
+        return activeBuckets.aggregatedQueryCount
     }
     
     private struct ModelRowData: Identifiable {
@@ -154,19 +167,10 @@ public struct OverviewTabView: View {
         let groupAccent = isGemini ? theme.geminiAccent : theme.claudeAccent
         
         return VStack(alignment: .leading, spacing: 8) {
-            // Group Title & Subtitle
-            VStack(alignment: .leading, spacing: 2) {
-                Text(group.displayName.uppercased())
-                    .font(.system(size: 10.5, weight: .black, design: .monospaced))
-                    .foregroundStyle(groupAccent)
-                
-                if let desc = group.description, !desc.isEmpty {
-                    Text(desc)
-                        .font(.system(size: 9, weight: .regular))
-                        .foregroundStyle(theme.textSecondary)
-                        .lineLimit(2)
-                }
-            }
+            // Group Title
+            Text(group.displayName.uppercased())
+                .font(.system(size: 10.5, weight: .black, design: .monospaced))
+                .foregroundStyle(groupAccent)
             
             // Buckets within group
             VStack(spacing: 8) {
