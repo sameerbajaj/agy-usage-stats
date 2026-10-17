@@ -705,4 +705,66 @@ struct agy_usage_statsTests {
         #expect(tabs.count == 2)
         #expect(tabs == [.usage, .settings])
     }
+
+    @Test func testExhaustedWeeklyQuotaOverridesDisabledFiveHourBucket() {
+        let vm = AgyStatsViewModel()
+        vm.selectedModelForIcon = .claude
+        vm.iconQuotaLimitTarget = .fiveHour
+
+        // Simulates real Anthropic quota returned by Antigravity:
+        // Weekly is 0% (hit weekly limit), and 5-hour is 5.8% with disabled: true
+        let disabledFiveHourBucket = AgyQuotaBucket(
+            bucketId: "3p-5h",
+            displayName: "5-Hour Limit",
+            remainingFraction: 0.0584544,
+            resetDescription: "You have hit your weekly limit, the 5-hour limit does not currently apply",
+            disabled: true,
+            resetTime: nil
+        )
+        let exhaustedWeeklyBucket = AgyQuotaBucket(
+            bucketId: "3p-weekly",
+            displayName: "Weekly Limit",
+            remainingFraction: 0.0,
+            resetDescription: "Resets Saturday at 12:43 PM",
+            disabled: false,
+            resetTime: nil
+        )
+
+        let claudeGroup = AgyQuotaGroup(
+            displayName: "Claude and GPT models",
+            description: nil,
+            buckets: [disabledFiveHourBucket, exhaustedWeeklyBucket]
+        )
+
+        vm.stats.quotaInfo = AgyQuotaInfo(
+            email: "sameerbajaj24@gmail.com",
+            plan: "Google AI Ultra",
+            groups: [claudeGroup]
+        )
+
+        // Menu bar utilization must be 0% (exhausted), NOT 6% from the disabled bucket!
+        #expect(vm.selectedModelUsageFraction == 0.0)
+        #expect(vm.claudeUsageFraction == 0.0)
+    }
+
+    @Test func testOfflineCommandsNeverAccrueCost() {
+        let model = knownModels.first { $0.name == "Claude Opus 5.5 (Medium)" }!
+        let rewindQuery = QueryEntry(
+            display: "/rewind",
+            timestamp: Date(),
+            workspace: "/test"
+        )
+        let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: rewindQuery)
+        #expect(inTokens == 0)
+        #expect(outTokens == 0)
+        #expect(cost == 0.0)
+
+        let modelQuery = QueryEntry(
+            display: "/model",
+            timestamp: Date(),
+            workspace: "/test"
+        )
+        let (_, _, modelCost) = model.estimateTokensAndCost(for: modelQuery)
+        #expect(modelCost == 0.0)
+    }
 }

@@ -292,21 +292,12 @@ public final class AgyStatsViewModel {
             return singleActive
         }
 
-        // 2. Fallback: If no recent query activity, check if any quota group is noticeably depleted (< 90% remaining).
-        let depletedGroups = quota.groups.compactMap { group -> (group: AgyQuotaGroup, fraction: Double)? in
-            guard let frac = getBucket(forGroup: group, target: iconQuotaLimitTarget)?.remainingFraction else { return nil }
-            return (group, frac)
-        }
-        if let mostDepleted = depletedGroups.min(by: { $0.fraction < $1.fraction }), mostDepleted.fraction < 0.90 {
-            return mostDepleted.group
-        }
-
-        // 3. Fallback: Configured model in settings.json
+        // 2. Configured model in settings.json
         if let modelName = settings.model, let group = getGroup(matchingModelName: modelName) {
             return group
         }
 
-        // 4. Default: First available group
+        // 3. Fallback: First available group
         return quota.groups.first
     }
 
@@ -350,21 +341,32 @@ public final class AgyStatsViewModel {
 
     private func getBucket(forGroup group: AgyQuotaGroup?, target: IconQuotaLimitTarget) -> AgyQuotaBucket? {
         guard let group = group else { return nil }
+
+        // If any bucket in the group is at 0.0 remaining (e.g. weekly limit exhausted),
+        // the effective remaining quota for this entire model group is 0.0!
+        if let exhaustedBucket = group.buckets.first(where: { ($0.remainingFraction ?? 1.0) <= 0.0 }) {
+            return exhaustedBucket
+        }
+
+        // Filter out disabled buckets (e.g. 5-hour limit when weekly limit is reached)
+        let activeBuckets = group.buckets.filter { $0.disabled != true }
+        let candidates = activeBuckets.isEmpty ? group.buckets : activeBuckets
+
         switch target {
         case .weekly:
-            return group.buckets.first { bucket in
+            return candidates.first { bucket in
                 let name = bucket.displayName.lowercased()
                 let id = bucket.bucketId.lowercased()
                 return name.contains("week") || id.contains("week")
-            } ?? group.buckets.first
+            } ?? candidates.first
         case .fiveHour:
-            return group.buckets.first { bucket in
+            return candidates.first { bucket in
                 let name = bucket.displayName.lowercased()
                 let id = bucket.bucketId.lowercased()
                 return name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five")
-            } ?? group.buckets.first
+            } ?? candidates.first
         case .minimum:
-            return group.buckets.min(by: { ($0.remainingFraction ?? 1.0) < ($1.remainingFraction ?? 1.0) })
+            return candidates.min(by: { ($0.remainingFraction ?? 1.0) < ($1.remainingFraction ?? 1.0) })
         }
     }
 
@@ -414,7 +416,19 @@ public final class AgyStatsViewModel {
 
     // The usage remaining fractions (always 0.0 to 1.0) for the models
     public var selectedModelUsageFraction: Double? {
-        let group = getActiveGroup()
+        let group: AgyQuotaGroup?
+        switch selectedModelForIcon {
+        case .active:
+            group = getActiveGroup()
+        case .mostDepleted:
+            group = getMostDepletedGroup()
+        case .gemini:
+            group = getGeminiGroup()
+        case .claude:
+            group = getClaudeGroup()
+        case .both:
+            group = getActiveGroup()
+        }
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
         return getUsageFraction(for: bucket)
     }
@@ -433,7 +447,19 @@ public final class AgyStatsViewModel {
 
     // The circle fill fractions for the models (respects the circle fill metric setting)
     public var selectedModelCircleFillFraction: Double? {
-        let group = getActiveGroup()
+        let group: AgyQuotaGroup?
+        switch selectedModelForIcon {
+        case .active:
+            group = getActiveGroup()
+        case .mostDepleted:
+            group = getMostDepletedGroup()
+        case .gemini:
+            group = getGeminiGroup()
+        case .claude:
+            group = getClaudeGroup()
+        case .both:
+            group = getActiveGroup()
+        }
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
         return getCircleFillFraction(for: bucket)
     }

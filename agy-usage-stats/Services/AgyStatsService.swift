@@ -84,6 +84,35 @@ public enum AgyStatsService {
     private static var logFileCache: [String: LogFileEntry] = [:]
     private static let logFileCacheLock = NSLock()
     
+    public struct ModelTransition: Sendable {
+        public let timestamp: Date
+        public let modelName: String
+        
+        public init(timestamp: Date, modelName: String) {
+            self.timestamp = timestamp
+            self.modelName = modelName
+        }
+    }
+    
+    private struct ModelLogFileEntry {
+        let modDate: Date
+        let size: Int64
+        let transitions: [ModelTransition]
+    }
+    
+    private struct ModelTransitionCacheEntry {
+        let fileCount: Int
+        let newestName: String
+        let newestModDate: Date?
+        let cachedAt: Date
+        let transitions: [ModelTransition]
+    }
+    
+    private static var modelTransitionCache: ModelTransitionCacheEntry? = nil
+    private static let modelTransitionCacheLock = NSLock()
+    private static var modelLogFileCache: [String: ModelLogFileEntry] = [:]
+    private static let modelLogFileCacheLock = NSLock()
+    
     private struct StatsCacheEntry {
         let settings: AgySettings
         let startOfToday: Date
@@ -112,6 +141,14 @@ public enum AgyStatsService {
         logFileCacheLock.lock()
         logFileCache.removeAll()
         logFileCacheLock.unlock()
+
+        modelTransitionCacheLock.lock()
+        modelTransitionCache = nil
+        modelTransitionCacheLock.unlock()
+
+        modelLogFileCacheLock.lock()
+        modelLogFileCache.removeAll()
+        modelLogFileCacheLock.unlock()
         
         statsCacheLock.lock()
         statsCache = nil
@@ -239,6 +276,7 @@ public enum AgyStatsService {
             // Load Settings & Auth Transitions
             let currentIsGcp = settings.gcp?.project != nil && !(settings.gcp?.project?.isEmpty ?? true)
             let authTransitions = loadAuthTransitions(logDir: logDir, defaultProject: settings.gcp?.project)
+            let modelTransitions = loadModelTransitions(logDir: logDir)
             
             let tHist = ContinuousClock.now
             // Load History Lines
@@ -437,18 +475,26 @@ public enum AgyStatsService {
                     } else {
                         newQ.conversationMeta = ConversationDbMeta(llmCalls: 0, totalOutputBytes: 0)
                         
-                        // Fallback: Use the latest model used prior to this query
-                        let priorGens = convData.generations.filter { gen in
-                            guard let gTs = gen.timestamp else { return false }
-                            return gTs < start
-                        }
-                        if let lastPriorModel = priorGens.compactMap({ $0.modelName }).last {
-                            newQ.modelName = enforceDateModelValidity(modelName: lastPriorModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
-                        } else if let firstPostModel = convData.generations.compactMap({ $0.modelName }).first {
-                            newQ.modelName = enforceDateModelValidity(modelName: firstPostModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
+                        if let overrideModel = findModelOverride(at: q.timestamp, in: modelTransitions, calendar: calendar) {
+                            newQ.modelName = enforceDateModelValidity(modelName: overrideModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
                         } else {
-                            newQ.modelName = queryDefaultModel
+                            // Fallback: Use the latest model used prior to this query
+                            let priorGens = convData.generations.filter { gen in
+                                guard let gTs = gen.timestamp else { return false }
+                                return gTs < start
+                            }
+                            if let lastPriorModel = priorGens.compactMap({ $0.modelName }).last {
+                                newQ.modelName = enforceDateModelValidity(modelName: lastPriorModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
+                            } else if let firstPostModel = convData.generations.compactMap({ $0.modelName }).first {
+                                newQ.modelName = enforceDateModelValidity(modelName: firstPostModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
+                            } else {
+                                newQ.modelName = queryDefaultModel
+                            }
                         }
+                    }
+                } else {
+                    if let overrideModel = findModelOverride(at: q.timestamp, in: modelTransitions, calendar: calendar) {
+                        newQ.modelName = enforceDateModelValidity(modelName: overrideModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
                     }
                 }
                 let authState = authForDateInitial(q.timestamp)
@@ -700,37 +746,42 @@ public enum AgyStatsService {
                     dayBucket.modelQueryBreakdown[mName, default: 0] += 1
                 }
                 
-                // Fallback for days with no SQLite DBs (e.g. May/June 2026): estimate tokens & cost from query
-                if !daysWithDbGens.contains(dayKey) {
+                // Fallback for days with no SQLite DBs (e.g. May/June 2026) or rewound/orphaned queries lacking DB generations
+                let hasDbGensForQuery = (q.conversationMeta?.llmCalls ?? 0) > 0 || (q.conversationMeta?.totalOutputBytes ?? 0) > 0
+                if !daysWithDbGens.contains(dayKey) || !hasDbGensForQuery {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let model = resolveModel(name: name, fallback: defaultGeminiModel)
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
-                    dayBucket.totalCost += cost
-                    dayBucket.inputTokens += inTokens
-                    dayBucket.outputTokens += outTokens
-                    dayBucket.modelBreakdown[model.name, default: 0.0] += cost
-                    dayBucket.accountCostBreakdown[accName, default: 0.0] += cost
-                    totalCost += cost
-                    accountCostTotals[accName, default: 0.0] += cost
-                    if authState.isGcp {
-                        dayBucket.gcpCost += cost
-                        gcpTotalCost += cost
-                        if q.timestamp >= startOfToday { gcpTodayCost += cost }
-                        if q.timestamp >= sevenDaysAgo { gcpWeekCost += cost }
-                    } else {
-                        dayBucket.quotaCost += cost
-                        quotaTotalCost += cost
-                        if q.timestamp >= startOfToday { quotaTodayCost += cost }
-                        if q.timestamp >= sevenDaysAgo { quotaWeekCost += cost }
+                    if cost > 0 {
+                        dayBucket.totalCost += cost
+                        dayBucket.inputTokens += inTokens
+                        dayBucket.outputTokens += outTokens
+                        dayBucket.modelBreakdown[model.name, default: 0.0] += cost
+                        dayBucket.accountCostBreakdown[accName, default: 0.0] += cost
+                        totalCost += cost
+                        accountCostTotals[accName, default: 0.0] += cost
+                        if authState.isGcp {
+                            dayBucket.gcpCost += cost
+                            gcpTotalCost += cost
+                            if q.timestamp >= startOfToday { gcpTodayCost += cost }
+                            if q.timestamp >= sevenDaysAgo { gcpWeekCost += cost }
+                        } else {
+                            dayBucket.quotaCost += cost
+                            quotaTotalCost += cost
+                            if q.timestamp >= startOfToday { quotaTodayCost += cost }
+                            if q.timestamp >= sevenDaysAgo { quotaWeekCost += cost }
+                        }
+                        if q.timestamp >= startOfToday {
+                            todayCost += cost
+                            accountTodayTotals[accName, default: 0.0] += cost
+                        }
+                        if q.timestamp >= sevenDaysAgo {
+                            weekCost += cost
+                            accountWeeklyTotals[accName, default: 0.0] += cost
+                        }
+                        modelDist[model.name, default: 0] += 1
                     }
-                    if q.timestamp >= startOfToday {
-                        accountTodayTotals[accName, default: 0.0] += cost
-                    }
-                    if q.timestamp >= sevenDaysAgo {
-                        accountWeeklyTotals[accName, default: 0.0] += cost
-                    }
-                    modelDist[model.name, default: 0] += 1
                 }
                 
                 let monthKey = dInfo.monthKey
@@ -747,20 +798,22 @@ public enum AgyStatsService {
                 if let mName = q.modelName {
                     monthBucket.modelQueryBreakdown[mName, default: 0] += 1
                 }
-                if !daysWithDbGens.contains(dayKey) {
+                if !daysWithDbGens.contains(dayKey) || !hasDbGensForQuery {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let model = resolveModel(name: name, fallback: defaultGeminiModel)
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
-                    monthBucket.totalCost += cost
-                    monthBucket.inputTokens += inTokens
-                    monthBucket.outputTokens += outTokens
-                    monthBucket.modelBreakdown[model.name, default: 0.0] += cost
-                    monthBucket.accountCostBreakdown[accName, default: 0.0] += cost
-                    if authState.isGcp {
-                        monthBucket.gcpCost += cost
-                    } else {
-                        monthBucket.quotaCost += cost
+                    if cost > 0 {
+                        monthBucket.totalCost += cost
+                        monthBucket.inputTokens += inTokens
+                        monthBucket.outputTokens += outTokens
+                        monthBucket.modelBreakdown[model.name, default: 0.0] += cost
+                        monthBucket.accountCostBreakdown[accName, default: 0.0] += cost
+                        if authState.isGcp {
+                            monthBucket.gcpCost += cost
+                        } else {
+                            monthBucket.quotaCost += cost
+                        }
                     }
                 }
             }
@@ -1120,6 +1173,148 @@ public enum AgyStatsService {
         authCacheLock.unlock()
         
         return transitions
+    }
+    
+    private static func loadModelTransitions(logDir: String) -> [ModelTransition] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: logDir) else {
+            return []
+        }
+        
+        let logFiles = files.filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }.sorted()
+        guard !logFiles.isEmpty else { return [] }
+        let newestFile = logFiles.last!
+        let newestPath = (logDir as NSString).appendingPathComponent(newestFile)
+        let newestMod = (try? fm.attributesOfItem(atPath: newestPath))?[.modificationDate] as? Date
+        
+        let now = Date()
+        modelTransitionCacheLock.lock()
+        if let cached = modelTransitionCache {
+            if now.timeIntervalSince(cached.cachedAt) < 30.0 {
+                let res = cached.transitions
+                modelTransitionCacheLock.unlock()
+                return res
+            }
+            if cached.fileCount == logFiles.count,
+               cached.newestName == newestFile,
+               cached.newestModDate == newestMod {
+                modelTransitionCache = ModelTransitionCacheEntry(
+                    fileCount: cached.fileCount,
+                    newestName: cached.newestName,
+                    newestModDate: cached.newestModDate,
+                    cachedAt: now,
+                    transitions: cached.transitions
+                )
+                let res = cached.transitions
+                modelTransitionCacheLock.unlock()
+                return res
+            }
+        }
+        modelTransitionCacheLock.unlock()
+        
+        var allTransitions: [ModelTransition] = []
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        
+        for file in logFiles {
+            let year: Int
+            if file.hasPrefix("cli-") && file.count >= 12 {
+                let startIdx = file.index(file.startIndex, offsetBy: 4)
+                let endIdx = file.index(startIdx, offsetBy: 4)
+                let yearStr = String(file[startIdx..<endIdx])
+                year = Int(yearStr) ?? 2026
+            } else {
+                year = 2026
+            }
+            
+            let fullPath = (logDir as NSString).appendingPathComponent(file)
+            let attrs = try? fm.attributesOfItem(atPath: fullPath)
+            let fileMod = attrs?[.modificationDate] as? Date ?? Date.distantPast
+            let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+            
+            var fileTransitions: [ModelTransition] = []
+            
+            modelLogFileCacheLock.lock()
+            if let cachedLog = modelLogFileCache[file],
+               cachedLog.modDate == fileMod,
+               cachedLog.size == fileSize {
+                fileTransitions = cachedLog.transitions
+                modelLogFileCacheLock.unlock()
+            } else {
+                modelLogFileCacheLock.unlock()
+                
+                if let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: fullPath)) {
+                    let data = handle.readDataToEndOfFile()
+                    try? handle.close()
+                    
+                    if let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii),
+                       text.contains("Propagating selected model override") {
+                        text.enumerateLines { line, _ in
+                            guard let labelRange = line.range(of: "label=\"") else { return }
+                            let afterLabel = line[labelRange.upperBound...]
+                            guard let quoteEnd = afterLabel.firstIndex(of: "\"") else { return }
+                            let modelName = String(afterLabel[..<quoteEnd])
+                            
+                            if line.count >= 14 {
+                                let lineChars = Array(line.prefix(14))
+                                if let month = Int(String(lineChars[1...2])),
+                                   let day = Int(String(lineChars[3...4])),
+                                   let hour = Int(String(lineChars[6...7])),
+                                   let minute = Int(String(lineChars[9...10])),
+                                   let second = Int(String(lineChars[12...13])) {
+                                    var comps = DateComponents()
+                                    comps.year = year
+                                    comps.month = month
+                                    comps.day = day
+                                    comps.hour = hour
+                                    comps.minute = minute
+                                    comps.second = second
+                                    if let dt = calendar.date(from: comps) {
+                                        fileTransitions.append(ModelTransition(timestamp: dt, modelName: modelName))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                modelLogFileCacheLock.lock()
+                modelLogFileCache[file] = ModelLogFileEntry(
+                    modDate: fileMod,
+                    size: fileSize,
+                    transitions: fileTransitions
+                )
+                modelLogFileCacheLock.unlock()
+            }
+            
+            allTransitions.append(contentsOf: fileTransitions)
+        }
+        
+        allTransitions.sort { $0.timestamp < $1.timestamp }
+        
+        modelTransitionCacheLock.lock()
+        modelTransitionCache = ModelTransitionCacheEntry(
+            fileCount: logFiles.count,
+            newestName: newestFile,
+            newestModDate: newestMod,
+            cachedAt: now,
+            transitions: allTransitions
+        )
+        modelTransitionCacheLock.unlock()
+        
+        return allTransitions
+    }
+    
+    private static func findModelOverride(at date: Date, in transitions: [ModelTransition], calendar: Calendar) -> String? {
+        guard let idx = transitions.lastIndex(where: { $0.timestamp <= date }) else {
+            return nil
+        }
+        let trans = transitions[idx]
+        let diff = date.timeIntervalSince(trans.timestamp)
+        if diff >= 0 && diff < 8 * 3600 && calendar.isDate(trans.timestamp, inSameDayAs: date) {
+            return trans.modelName
+        }
+        return nil
     }
     
     private static func authAt(

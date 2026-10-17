@@ -29,6 +29,30 @@ public struct QueryEntry: Identifiable, Codable, Hashable {
     public var gcpProject: String? = nil
     public var accountEmail: String? = nil
 
+    public init(
+        display: String,
+        timestamp: Date,
+        workspace: String,
+        conversationId: String? = nil,
+        type: String? = nil,
+        conversationMeta: ConversationDbMeta? = nil,
+        modelName: String? = nil,
+        isGcp: Bool = false,
+        gcpProject: String? = nil,
+        accountEmail: String? = nil
+    ) {
+        self.display = display
+        self.timestamp = timestamp
+        self.workspace = workspace
+        self.conversationId = conversationId
+        self.type = type
+        self.conversationMeta = conversationMeta
+        self.modelName = modelName
+        self.isGcp = isGcp
+        self.gcpProject = gcpProject
+        self.accountEmail = accountEmail
+    }
+
     public var cleanWorkspaceName: String {
         let url = URL(fileURLWithPath: workspace)
         return url.lastPathComponent.isEmpty ? workspace : url.lastPathComponent
