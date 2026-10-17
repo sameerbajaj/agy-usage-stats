@@ -384,7 +384,7 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
 
     public func estimateTokensAndCost(for query: QueryEntry) -> (inputTokens: Int, outputTokens: Int, cost: Double) {
         let trimmed = query.display.trimmingCharacters(in: .whitespacesAndNewlines)
-        let offlineCommands: Set<String> = ["/help", "/clear", "/exit", "/theme", "/status", "/resume", "/settings", "/version", "/usage", "/model", "/context"]
+        let offlineCommands: Set<String> = ["/help", "/clear", "/exit", "/theme", "/status", "/resume", "/settings", "/version", "/usage", "/model", "/context", "/rewind", "/auth", "/login", "/logout"]
         let commandName = trimmed.components(separatedBy: .whitespaces).first?.lowercased() ?? ""
         let isOfflineCommand = offlineCommands.contains(commandName)
         
