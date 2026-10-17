@@ -702,7 +702,7 @@ struct agy_usage_statsTests {
 
     @Test func testPopoverTabConsolidation() {
         let tabs = PopoverTab.allCases
-        #expect(tabs.count == 3)
-        #expect(tabs == [.overview, .activity, .settings])
+        #expect(tabs.count == 2)
+        #expect(tabs == [.usage, .settings])
     }
 }

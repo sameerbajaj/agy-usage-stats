@@ -11,19 +11,15 @@ public struct OverviewTabView: View {
     @Environment(\.colorScheme) var colorScheme
     let viewModel: AgyStatsViewModel
     
-    public enum TimeScope: String, CaseIterable, Identifiable {
-        case week = "7D"
-        case twoWeeks = "14D"
-        case month = "30D"
-        case monthly = "Monthly"
+    public enum CostTimeframe: String, CaseIterable, Identifiable {
+        case today = "Today"
+        case week = "Last 7 Days"
+        case month = "Last 30 Days"
         
         public var id: String { rawValue }
-        public var label: String { rawValue }
     }
     
-    @State private var timeScope: TimeScope = .week
-    @State private var selectedDayKey: String? = nil
-    @State private var isHoveringScrubber = false
+    @State private var selectedTimeframe: CostTimeframe = .week
     
     private var isDark: Bool { colorScheme == .dark }
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
@@ -32,175 +28,254 @@ public struct OverviewTabView: View {
         self.viewModel = viewModel
     }
     
-    // MARK: - Computed Data for Scope
+    // MARK: - Cost & Token Computations
     
     private var activeBuckets: [UsageTimeBucket] {
-        switch timeScope {
+        switch selectedTimeframe {
+        case .today:
+            if let last = viewModel.stats.dailyUsage.last {
+                return [last]
+            }
+            return []
         case .week:
             return Array(viewModel.stats.dailyUsage.suffix(7))
-        case .twoWeeks:
-            return Array(viewModel.stats.dailyUsage.suffix(14))
         case .month:
             return Array(viewModel.stats.dailyUsage.suffix(30))
-        case .monthly:
-            if let currentMonth = viewModel.stats.monthlyUsage.last {
-                return [currentMonth]
-            }
-            return viewModel.stats.dailyUsage.isEmpty ? [] : Array(viewModel.stats.dailyUsage.suffix(30))
         }
     }
     
-    private var inspectedBucket: UsageTimeBucket? {
-        guard let key = selectedDayKey else { return nil }
-        return activeBuckets.first(where: { $0.periodKey == key })
+    private var totalCost: Double {
+        activeBuckets.aggregatedTotalCost
     }
     
-    private var isDrilldownActive: Bool {
-        inspectedBucket != nil
+    private var totalTokens: Int {
+        activeBuckets.aggregatedInputTokens + activeBuckets.aggregatedOutputTokens
     }
     
-    private var displayTotalCost: Double {
-        if let b = inspectedBucket {
-            return b.totalCost
-        }
-        return activeBuckets.aggregatedTotalCost
+    private var totalQueries: Int {
+        activeBuckets.aggregatedQueryCount
     }
     
-    private var displayInputTokens: Int {
-        if let b = inspectedBucket {
-            return b.inputTokens
-        }
-        return activeBuckets.aggregatedInputTokens
+    private struct ModelRowData: Identifiable {
+        let id: String
+        let name: String
+        let cost: Double
+        let percentage: Double
+        let tokens: Int
     }
     
-    private var displayOutputTokens: Int {
-        if let b = inspectedBucket {
-            return b.outputTokens
-        }
-        return activeBuckets.aggregatedOutputTokens
-    }
-    
-    private var displayTotalTokens: Int {
-        displayInputTokens + displayOutputTokens
-    }
-    
-    private var displayModelBreakdown: [(name: String, cost: Double, pct: Double)] {
-        let breakdown: [String: Double]
-        if let b = inspectedBucket {
-            breakdown = b.consolidatedModelBreakdown
-        } else {
-            breakdown = activeBuckets.aggregatedModelBreakdown
-        }
-        let total = max(0.0001, displayTotalCost)
+    private var modelRows: [ModelRowData] {
+        let breakdown = activeBuckets.aggregatedModelBreakdown
+        let total = max(0.0001, totalCost)
+        let totalToks = max(1, totalTokens)
+        
         return breakdown
             .filter { $0.value > 0 }
             .sorted { $0.value > $1.value }
-            .map { (name: $0.key, cost: $0.value, pct: ($0.value / total) * 100.0) }
+            .map { item in
+                let pct = (item.value / total) * 100.0
+                let estimatedTokens = Int(Double(totalToks) * (pct / 100.0))
+                return ModelRowData(
+                    id: item.key,
+                    name: item.key,
+                    cost: item.value,
+                    percentage: pct,
+                    tokens: estimatedTokens
+                )
+            }
     }
+    
+    // MARK: - Main Body
     
     public var body: some View {
         ScrollView {
-            VStack(spacing: 10) {
-                // 1. Active Model & Live Status
-                activeModelHeader
+            VStack(spacing: 14) {
+                // Title & Account Header
+                titleRow
                 
-                // 2. Real-Time Quotas
-                quotaCardsSection
+                // Terminal-Identical Quota Groups
+                quotaGroupsSection
                 
-                // 3. Direction C: Interactive Donut & Token Scrubber
-                directionCCostCard
-                
-                // 4. Tools & Telemetry Summary
-                telemetrySummaryCard
+                // Super Clean Model Cost Breakdown
+                costByModelSection
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
         }
         .background(theme.surfacePrimary)
     }
     
-    // MARK: - Section 1: Active Model Header
+    // MARK: - Title & Account Header
     
-    private var activeModelHeader: some View {
-        HStack {
-            HStack(spacing: 5) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 9))
-                    .foregroundStyle(theme.geminiAccent)
-                Text(viewModel.activeModelDisplayName)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(theme.textPrimary)
-            }
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("MODELS & QUOTA")
+                .font(.system(size: 11.5, weight: .black, design: .monospaced))
+                .foregroundStyle(theme.textPrimary)
+            
             Spacer()
-            if viewModel.settings.enableTelemetry == true {
-                TelemetryBadge()
+            
+            if let email = viewModel.stats.quotaInfo?.email, !email.isEmpty {
+                Text("Account: \(email)")
+                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(theme.linkBlue)
+            } else if viewModel.stats.isGcpActive, let project = viewModel.stats.gcpProject {
+                Text("GCP: \(project)")
+                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(theme.linkBlue)
             }
         }
-        .padding(.horizontal, 2)
+        .padding(.bottom, 2)
     }
     
-    // MARK: - Section 2: Quota Cards
+    // MARK: - Terminal-Identical Quota Groups Section
     
-    private var quotaCardsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("live quota limits")
-                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(theme.textSecondary)
-                Spacer()
-                Text(viewModel.isConnected ? "● connected" : "○ offline")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundStyle(viewModel.isConnected ? Color.green : Color.red)
+    private var quotaGroupsSection: some View {
+        VStack(spacing: 10) {
+            if let quota = viewModel.stats.quotaInfo, !quota.groups.isEmpty {
+                ForEach(quota.groups) { group in
+                    quotaGroupCard(group)
+                }
+            } else {
+                HStack {
+                    Text("No active quota sessions detected. Running via direct API / local state.")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                    Spacer()
+                }
+                .padding(12)
+                .themedCardStyle(theme: theme)
             }
-            .padding(.horizontal, 2)
-            
-            VStack(spacing: 6) {
-                if let quotaInfo = viewModel.stats.quotaInfo, !quotaInfo.groups.isEmpty {
-                    ForEach(quotaInfo.groups) { group in
-                        ForEach(group.sortedBuckets) { bucket in
-                            QuotaBucketRow(groupDisplayName: group.displayName, bucket: bucket)
-                        }
-                    }
-                } else {
-                    HStack {
-                        Text("No active quota sessions detected")
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(theme.textTertiary)
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
+        }
+    }
+    
+    private func quotaGroupCard(_ group: AgyQuotaGroup) -> some View {
+        let isGemini = group.displayName.lowercased().contains("gemini") || group.displayName.lowercased().contains("argon")
+        let groupAccent = isGemini ? theme.geminiAccent : theme.claudeAccent
+        
+        return VStack(alignment: .leading, spacing: 8) {
+            // Group Title & Subtitle
+            VStack(alignment: .leading, spacing: 2) {
+                Text(group.displayName.uppercased())
+                    .font(.system(size: 10.5, weight: .black, design: .monospaced))
+                    .foregroundStyle(groupAccent)
+                
+                if let desc = group.description, !desc.isEmpty {
+                    Text(desc)
+                        .font(.system(size: 9, weight: .regular))
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(2)
                 }
             }
-            .padding(10)
-            .themedCardStyle(theme: theme)
+            
+            // Buckets within group
+            VStack(spacing: 8) {
+                ForEach(group.sortedBuckets) { bucket in
+                    quotaBucketRow(bucket, groupDisplayName: group.displayName)
+                }
+            }
+        }
+        .padding(12)
+        .themedCardStyle(theme: theme)
+    }
+    
+    private func quotaBucketRow(_ bucket: AgyQuotaBucket, groupDisplayName: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Top: Name & Percentage
+            HStack(alignment: .center) {
+                Text(bucket.displayName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(bucket.disabled ? theme.textTertiary : theme.textPrimary)
+                
+                Spacer()
+                
+                if bucket.disabled {
+                    Text("—")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
+                } else if let fraction = bucket.remainingFraction {
+                    Text(String(format: "%.2f%%", fraction * 100.0))
+                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(healthColor(for: fraction))
+                } else {
+                    Text("unlimited")
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
+                }
+            }
+            
+            // Progress Bar
+            if !bucket.disabled, let fraction = bucket.remainingFraction {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.primary.opacity(0.08))
+                        
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(healthColor(for: fraction))
+                            .frame(width: max(0, geo.size.width * CGFloat(min(1.0, fraction))))
+                    }
+                }
+                .frame(height: 5.5)
+            }
+            
+            // Refresh countdown or disabled explanation
+            if bucket.disabled {
+                if let desc = bucket.resetDescription {
+                    Text(desc)
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(theme.dangerRed.opacity(0.85))
+                        .lineLimit(3)
+                        .padding(.top, 1)
+                }
+            } else if let countdown = formatHumanCountdown(bucket: bucket) {
+                Text(countdown)
+                    .font(.system(size: 8.5, weight: .semibold))
+                    .foregroundStyle(healthCountdownColor(bucket: bucket))
+            }
         }
     }
     
-    // MARK: - Section 3: Direction C Interactive Donut & Token Scrubber
+    // MARK: - Section: Super Clean Model Cost Breakdown
     
-    private var directionCCostCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var costByModelSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header & Cache Pill
+            HStack {
+                Text("ESTIMATED COST BY MODEL")
+                    .font(.system(size: 10.5, weight: .black, design: .monospaced))
+                    .foregroundStyle(theme.textPrimary)
+                
+                Spacer()
+                
+                Text("~92% CACHED (95% OFF)")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.costGreen)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(theme.costGreen.opacity(0.12)))
+            }
+            
             // Timeframe Selector
             HStack(spacing: 3) {
-                ForEach(TimeScope.allCases) { scope in
+                ForEach(CostTimeframe.allCases) { tf in
                     Button {
                         withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                            timeScope = scope
-                            selectedDayKey = nil
+                            selectedTimeframe = tf
                         }
                     } label: {
-                        Text(scope.label)
-                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                            .foregroundStyle(timeScope == scope ? Color.primary : Color.secondary)
+                        Text(tf.rawValue)
+                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(selectedTimeframe == tf ? Color.primary : Color.secondary)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 3.5)
+                            .padding(.vertical, 4)
                             .background(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(timeScope == scope ? theme.cardFillHovered : Color.clear)
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(selectedTimeframe == tf ? theme.cardFillHovered : Color.clear)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(timeScope == scope ? theme.cardStroke : Color.clear, lineWidth: 0.5)
+                                RoundedRectangle(cornerRadius: 5)
+                                    .stroke(selectedTimeframe == tf ? theme.cardStroke : Color.clear, lineWidth: 0.5)
                             )
                     }
                     .buttonStyle(.plain)
@@ -212,210 +287,157 @@ public struct OverviewTabView: View {
                     .fill(theme.surfaceSecondary)
             )
             
-            // Mode / Drilldown Indicator
-            HStack {
-                Text(modeIndicatorText)
-                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.textSecondary)
+            // Total Summary Line
+            HStack(alignment: .firstTextBaseline) {
+                HStack(spacing: 4) {
+                    Text(String(format: "$%.2f", totalCost))
+                        .font(.system(size: 16, weight: .black, design: .monospaced))
+                        .foregroundStyle(theme.costGreen)
+                    Text("TOTAL")
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
+                }
                 
                 Spacer()
                 
-                if isDrilldownActive {
-                    Button {
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                            selectedDayKey = nil
-                        }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 7, weight: .bold))
-                            Text("Reset to \(timeScope.rawValue)")
-                                .font(.system(size: 8, weight: .bold, design: .rounded))
-                        }
-                        .foregroundStyle(theme.costGreen)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(theme.costGreen.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.opacity)
+                Text("\(formatCompactTokens(totalTokens)) tokens · \(totalQueries) queries")
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .padding(.vertical, 2)
+            
+            // Model Cards List
+            if modelRows.isEmpty {
+                HStack {
+                    Text("No model queries recorded for \(selectedTimeframe.rawValue.lowercased())")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(theme.textTertiary)
+                    Spacer()
                 }
-            }
-            .padding(.horizontal, 2)
-            
-            // Donut & Scrubber Layout
-            HStack(alignment: .center, spacing: 12) {
-                // Donut Chart
-                donutChart
-                    .frame(width: 70, height: 70)
-                
-                // Bar Scrubber
-                scrubberBarChart
-                    .frame(height: 64)
-            }
-            
-            // Deduplicated & Consolidated Model Breakdown Chips
-            if !displayModelBreakdown.isEmpty {
-                VStack(spacing: 3) {
-                    ForEach(displayModelBreakdown, id: \.name) { item in
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(color(forModel: item.name))
-                                .frame(width: 5, height: 5)
-                            
-                            Text(item.name)
-                                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                                .foregroundStyle(theme.textPrimary)
-                            
-                            Spacer()
-                            
-                            Text(String(format: "%.0f%%", item.pct))
-                                .font(.system(size: 7.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(theme.textTertiary)
-                            
-                            Text(String(format: "$%.2f", item.cost))
-                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                                .foregroundStyle(theme.textPrimary)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2.5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(theme.surfaceSecondary.opacity(0.6))
-                        )
+                .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(modelRows) { row in
+                        modelCostCard(row)
                     }
                 }
-                .padding(.top, 2)
             }
-            
-            // Token Efficiency Row
-            HStack(spacing: 0) {
-                tokenMetricCell(title: "TOTAL TOKENS", value: formatCompactTokens(displayTotalTokens))
-                tokenDivider
-                tokenMetricCell(title: "EST. CACHED", value: "92.4%", color: theme.costGreen)
-                tokenDivider
-                tokenMetricCell(title: "BLENDED $/M", value: formatBlendedRate(cost: displayTotalCost, tokens: displayTotalTokens), color: theme.linkBlue)
-            }
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(theme.surfaceSecondary.opacity(0.4))
-            )
         }
-        .padding(10)
+        .padding(12)
         .themedCardStyle(theme: theme)
     }
     
-    private var modeIndicatorText: String {
-        if let b = inspectedBucket {
-            return "DRILLDOWN: \(b.label.uppercased())"
-        }
-        return "VIEWING: FULL \(timeScope.rawValue) AGGREGATE"
-    }
-    
-    // MARK: - Donut Chart Component
-    
-    private var donutChart: some View {
-        ZStack {
-            // Background track
-            Circle()
-                .stroke(theme.divider.opacity(0.4), lineWidth: 5.5)
-            
-            // Slices
-            donutSlices
-            
-            // Center info
-            VStack(spacing: 0) {
-                Text(String(format: "$%.2f", displayTotalCost))
-                    .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.textPrimary)
-                
-                Text(inspectedBucket != nil ? "DAY TOTAL" : "\(timeScope.rawValue) TOTAL")
-                    .font(.system(size: 6.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.textTertiary)
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private var donutSlices: some View {
-        let items = displayModelBreakdown
-        let total = max(0.0001, displayTotalCost)
-        var cumulative: Double = 0
+    private func modelCostCard(_ row: ModelRowData) -> some View {
+        let accent = modelAccentColor(row.name)
         
-        ForEach(items, id: \.name) { item in
-            let sliceFraction = item.cost / total
-            let start = cumulative
-            let end = cumulative + sliceFraction
-            let _ = (cumulative = end)
-            
-            Circle()
-                .trim(from: CGFloat(start), to: CGFloat(end))
-                .stroke(color(forModel: item.name), style: StrokeStyle(lineWidth: 5.5, lineCap: .butt))
-                .rotationEffect(.degrees(-90))
-        }
-    }
-    
-    // MARK: - Scrubber Bar Chart
-    
-    private var scrubberBarChart: some View {
-        let buckets = activeBuckets
-        let maxCost = max(0.01, buckets.map { $0.totalCost }.max() ?? 1.0)
-        
-        return HStack(alignment: .bottom, spacing: 3) {
-            ForEach(buckets) { bucket in
-                let isSelected = (bucket.periodKey == selectedDayKey) || (selectedDayKey == nil && bucket.periodKey == buckets.last?.periodKey)
-                let heightRatio = min(1.0, max(0.08, bucket.totalCost / maxCost))
-                
-                Button {
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                        if selectedDayKey == bucket.periodKey {
-                            selectedDayKey = nil
-                        } else {
-                            selectedDayKey = bucket.periodKey
-                        }
-                    }
-                } label: {
-                    VStack(spacing: 2) {
-                        Spacer(minLength: 0)
-                        
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(
-                                isSelected
-                                    ? LinearGradient(colors: [theme.costGreen, theme.costGreen.opacity(0.7)], startPoint: .top, endPoint: .bottom)
-                                    : LinearGradient(colors: [theme.textTertiary.opacity(0.6), theme.textTertiary.opacity(0.2)], startPoint: .top, endPoint: .bottom)
-                            )
-                            .frame(maxHeight: CGFloat(46 * heightRatio))
-                        
-                        Text(bucket.shortLabel)
-                            .font(.system(size: 6.5, weight: isSelected ? .bold : .medium, design: .monospaced))
-                            .foregroundStyle(isSelected ? theme.costGreen : theme.textTertiary)
-                    }
-                    .frame(maxWidth: .infinity)
+        return VStack(alignment: .leading, spacing: 4) {
+            // Row Top: Name with Dot + Big Bold Price
+            HStack {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 6, height: 6)
+                    Text(row.name)
+                        .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(theme.textPrimary)
                 }
-                .buttonStyle(.plain)
+                
+                Spacer()
+                
+                Text(String(format: "$%.2f", row.cost))
+                    .font(.system(size: 12, weight: .black, design: .monospaced))
+                    .foregroundStyle(theme.textPrimary)
+            }
+            
+            // Proportion Bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.primary.opacity(0.06))
+                    
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(accent)
+                        .frame(width: max(0, geo.size.width * CGFloat(row.percentage / 100.0)))
+                }
+            }
+            .frame(height: 4)
+            
+            // Subtitle Details
+            HStack {
+                Text("\(formatCompactTokens(row.tokens)) tokens")
+                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(theme.textTertiary)
+                
+                Spacer()
+                
+                Text(String(format: "%.0f%% of total spend", row.percentage))
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
             }
         }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(theme.surfaceSecondary.opacity(0.4))
+        )
     }
     
-    // MARK: - Token Metric Helpers
+    // MARK: - Helpers & Color Resolvers
     
-    private func tokenMetricCell(title: String, value: String, color: Color? = nil) -> some View {
-        VStack(spacing: 1) {
-            Text(title)
-                .font(.system(size: 6.5, weight: .bold, design: .monospaced))
-                .foregroundStyle(theme.textTertiary)
-            Text(value)
-                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                .foregroundStyle(color ?? theme.textPrimary)
+    private func healthColor(for fraction: Double) -> Color {
+        if fraction > 0.20 {
+            return theme.costGreen
+        } else if fraction > 0.05 {
+            return theme.claudeAccent
         }
-        .frame(maxWidth: .infinity)
+        return theme.dangerRed
     }
     
-    private var tokenDivider: some View {
-        Rectangle()
-            .fill(theme.divider)
-            .frame(width: 0.75, height: 16)
+    private func healthCountdownColor(bucket: AgyQuotaBucket) -> Color {
+        let fraction = bucket.remainingFraction ?? 1.0
+        if fraction <= 0.05 {
+            return theme.dangerRed
+        } else if fraction <= 0.20 {
+            return theme.claudeAccent
+        }
+        return theme.costGreen
+    }
+    
+    private func modelAccentColor(_ name: String) -> Color {
+        let lower = name.lowercased()
+        if lower.contains("argon") {
+            return theme.geminiAccent
+        } else if lower.contains("claude") || lower.contains("opus") || lower.contains("sonnet") {
+            return theme.claudeAccent
+        } else if lower.contains("flash") || lower.contains("gemini") {
+            return theme.linkBlue
+        }
+        return theme.costGreen
+    }
+    
+    private func formatHumanCountdown(bucket: AgyQuotaBucket) -> String? {
+        if let resetTimeStr = bucket.resetTime,
+           let date = ISO8601DateFormatter().date(from: resetTimeStr) {
+            let diff = date.timeIntervalSince(Date())
+            if diff > 0 {
+                let days = Int(diff) / 86400
+                let hours = (Int(diff) % 86400) / 3600
+                let minutes = (Int(diff) % 3600) / 60
+                
+                if days > 0 {
+                    return "Refreshes in \(days) day\(days == 1 ? "" : "s"), \(hours) hour\(hours == 1 ? "" : "s")"
+                } else if hours > 0 {
+                    return "Refreshes in \(hours)h \(minutes)m"
+                } else {
+                    return "Refreshes in \(minutes)m"
+                }
+            }
+        }
+        
+        if let desc = bucket.resetDescription, !desc.isEmpty {
+            return desc
+        }
+        return nil
     }
     
     private func formatCompactTokens(_ count: Int) -> String {
@@ -425,45 +447,5 @@ public struct OverviewTabView: View {
             return String(format: "%.0fK", Double(count) / 1_000.0)
         }
         return "\(count)"
-    }
-    
-    private func formatBlendedRate(cost: Double, tokens: Int) -> String {
-        guard tokens > 0 else { return "$0.00/M" }
-        let rate = (cost / Double(tokens)) * 1_000_000.0
-        return String(format: "$%.2f/M", rate)
-    }
-    
-    private func color(forModel name: String) -> Color {
-        let lower = name.lowercased()
-        if lower.contains("argon") || lower.contains("gemini") {
-            return theme.geminiAccent
-        } else if lower.contains("claude") || lower.contains("opus") || lower.contains("sonnet") {
-            return theme.claudeAccent
-        } else if lower.contains("gcp") {
-            return theme.linkBlue
-        }
-        return theme.costGreen
-    }
-    
-    // MARK: - Section 4: Telemetry Summary
-    
-    private var telemetrySummaryCard: some View {
-        HStack {
-            HStack(spacing: 4) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(theme.costGreen)
-                Text("\(viewModel.stats.queriesToday) queries today · \(viewModel.stats.totalToolCalls) tools executed")
-                    .font(.system(size: 8.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(theme.textSecondary)
-            }
-            Spacer()
-            Text("\(viewModel.stats.workspaces.count) active spaces")
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .foregroundStyle(theme.textTertiary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .themedCardStyle(theme: theme)
     }
 }

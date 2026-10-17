@@ -9,16 +9,14 @@ import SwiftUI
 import AppKit
 
 public enum PopoverTab: String, CaseIterable, Identifiable {
-    case overview = "Overview"
-    case activity = "Activity"
+    case usage = "Usage & Cost"
     case settings = "Settings"
     
     public var id: String { rawValue }
     
     public var icon: String {
         switch self {
-        case .overview: return "chart.bar.fill"
-        case .activity: return "clock.arrow.circlepath"
+        case .usage: return "chart.bar.fill"
         case .settings: return "gearshape.fill"
         }
     }
@@ -26,7 +24,7 @@ public enum PopoverTab: String, CaseIterable, Identifiable {
 
 public struct MenuBarPopover: View {
     @Bindable public var viewModel: AgyStatsViewModel
-    @State private var selectedTab: PopoverTab = .overview
+    @State private var selectedTab: PopoverTab = .usage
     @Namespace private var namespace
     @Environment(\.colorScheme) var colorScheme
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
@@ -54,22 +52,20 @@ public struct MenuBarPopover: View {
             
             Group {
                 switch selectedTab {
-                case .overview:
+                case .usage:
                     OverviewTabView(viewModel: viewModel)
-                case .activity:
-                    ActivityTabView(viewModel: viewModel)
                 case .settings:
                     SettingsTabView(viewModel: viewModel)
                 }
             }
-            .frame(height: 440)
+            .frame(height: 520)
             .background(theme.surfacePrimary)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
             
             footer
         }
-        .frame(width: 360)
+        .frame(width: 380)
         .background(theme.surfacePrimary)
         .preferredColorScheme(viewModel.selectedTheme.preferredColorScheme)
         .environment(\.colorScheme, viewModel.selectedTheme.preferredColorScheme)
