@@ -1,0 +1,1662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGY Usage Stats · Complete Tab Consolidation & Multi-Day Cost Architecture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0B0D13;
+      --surface-outer: #121520;
+      --surface-popover: #0E1018;
+      --surface-card: #161926;
+      --surface-card-hover: #1D2133;
+      --card-stroke: rgba(255, 255, 255, 0.08);
+      --card-stroke-hover: rgba(255, 255, 255, 0.16);
+      --divider: rgba(255, 255, 255, 0.06);
+      
+      --accent-green: #2EE680;
+      --accent-purple: #998CFF;
+      --accent-amber: #FF9E52;
+      --accent-blue: #619EFF;
+      --accent-cyan: #38EF7D;
+      --danger-red: #FF5966;
+      
+      --text-primary: #F0F2F8;
+      --text-secondary: #8E94A8;
+      --text-tertiary: #52586D;
+      
+      --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      line-height: 1.4;
+      padding: 32px 24px 80px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header-banner {
+      background: linear-gradient(180deg, rgba(22, 25, 38, 0.8) 0%, rgba(14, 16, 24, 0.4) 100%);
+      border: 1px solid var(--card-stroke);
+      border-radius: 14px;
+      padding: 24px 28px;
+      margin-bottom: 32px;
+      backdrop-filter: blur(20px);
+    }
+    
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent-green);
+      background: rgba(46, 230, 128, 0.12);
+      border: 1px solid rgba(46, 230, 128, 0.25);
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+    }
+
+    .badge-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+    }
+
+    .header-title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .header-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      max-width: 900px;
+      line-height: 1.6;
+    }
+
+    .highlight-box {
+      margin-top: 16px;
+      background: rgba(153, 140, 255, 0.08);
+      border: 1px solid rgba(153, 140, 255, 0.2);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 12.5px;
+      color: #D3CEFF;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Section Headers */
+    .section-title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin: 40px 0 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-subtitle {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+    }
+
+    /* Architecture Comparison Grid */
+    .arch-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+
+    @media (max-width: 1200px) {
+      .arch-grid { grid-template-columns: 1fr; }
+    }
+
+    .arch-card {
+      background: var(--surface-card);
+      border: 1px solid var(--card-stroke);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .arch-card.recommended {
+      border-color: rgba(46, 230, 128, 0.4);
+      background: linear-gradient(180deg, rgba(22, 25, 38, 1) 0%, rgba(14, 25, 20, 0.4) 100%);
+      box-shadow: 0 0 30px -10px rgba(46, 230, 128, 0.15);
+    }
+
+    .arch-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .arch-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .tag-recommended {
+      background: rgba(46, 230, 128, 0.15);
+      color: var(--accent-green);
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(46, 230, 128, 0.3);
+    }
+
+    .arch-tabs-pill {
+      display: flex;
+      gap: 4px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 4px;
+      border-radius: 8px;
+      margin: 12px 0;
+    }
+
+    .arch-tab-item {
+      flex: 1;
+      text-align: center;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 4px 6px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-secondary);
+    }
+
+    .arch-tab-item.active {
+      background: var(--card-stroke-hover);
+      color: var(--text-primary);
+    }
+
+    .arch-desc {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+
+    /* Popover Mockup Frame */
+    .popover-frame {
+      width: 360px;
+      background: var(--surface-popover);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Popover Header */
+    .pop-header {
+      padding: 10px 12px 8px;
+      border-bottom: 1px solid var(--divider);
+      background: rgba(14, 16, 24, 0.95);
+    }
+
+    .pop-titlebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .brand-logo {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .brand-logo .bold { font-weight: 800; color: #fff; }
+    .brand-logo .light { font-weight: 400; color: var(--text-secondary); }
+    .status-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-green); }
+
+    .pop-nav {
+      display: flex;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 7px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .pop-nav-btn {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 700;
+      font-family: var(--font-sans);
+      padding: 5px 0;
+      border-radius: 5px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      transition: all 0.15s ease;
+    }
+
+    .pop-nav-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .pop-nav-btn.active {
+      color: #fff;
+      background: var(--surface-card);
+      border: 0.5px solid var(--card-stroke);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    .pop-nav-btn svg {
+      width: 12px;
+      height: 12px;
+      stroke-width: 2.2;
+    }
+
+    /* Popover Content Area */
+    .pop-content {
+      height: 480px;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .pop-content::-webkit-scrollbar {
+      width: 4px;
+    }
+    .pop-content::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+
+    /* Popover Footer */
+    .pop-footer {
+      border-top: 1px solid var(--divider);
+      padding: 6px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8px;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+      background: rgba(14, 16, 24, 0.95);
+    }
+
+    /* UI Cards inside Popover */
+    .ui-card {
+      background: var(--surface-card);
+      border: 1px solid var(--card-stroke);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    .ui-card:hover {
+      border-color: var(--card-stroke-hover);
+    }
+
+    .card-label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-tertiary);
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Live Quotas Mini Section */
+    .quota-item {
+      margin-bottom: 8px;
+    }
+    .quota-item:last-child { margin-bottom: 0; }
+
+    .quota-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .quota-pct {
+      font-family: var(--font-mono);
+      font-weight: 700;
+    }
+
+    .quota-bar-track {
+      height: 3.5px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .quota-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+    }
+
+    .quota-refresh {
+      font-size: 8px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+
+    /* Direction C Enhanced Interactive Component */
+    .c-time-pill-bar {
+      display: flex;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px;
+      border-radius: 6px;
+      gap: 2px;
+      margin-bottom: 10px;
+    }
+
+    .c-time-pill {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 3px 0;
+      border-radius: 4px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s ease;
+    }
+
+    .c-time-pill.active {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .c-mode-switch {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 0 2px;
+    }
+
+    .drilldown-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 8.5px;
+      font-weight: 700;
+      color: var(--accent-green);
+      background: rgba(46, 230, 128, 0.1);
+      border: 1px solid rgba(46, 230, 128, 0.2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .donut-scrubber-layout {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .donut-visual {
+      position: relative;
+      width: 74px;
+      height: 74px;
+      flex-shrink: 0;
+    }
+
+    .donut-svg {
+      transform: rotate(-90deg);
+      width: 100%;
+      height: 100%;
+    }
+
+    .donut-hole {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .donut-center-val {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .donut-center-lbl {
+      font-size: 7px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-tertiary);
+      letter-spacing: 0.05em;
+    }
+
+    .scrubber-bars {
+      flex: 1;
+      display: flex;
+      align-items: flex-end;
+      height: 60px;
+      gap: 3px;
+      padding-bottom: 14px;
+      position: relative;
+    }
+
+    .bar-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+      justify-content: flex-end;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .bar-fill {
+      width: 100%;
+      border-radius: 2px 2px 0 0;
+      background: rgba(255, 255, 255, 0.15);
+      transition: all 0.15s ease;
+    }
+
+    .bar-col:hover .bar-fill, .bar-col.selected .bar-fill {
+      background: var(--accent-green);
+      box-shadow: 0 0 8px rgba(46, 230, 128, 0.4);
+    }
+
+    .bar-day-lbl {
+      position: absolute;
+      bottom: 0;
+      font-size: 7px;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+    }
+
+    .bar-col.selected .bar-day-lbl {
+      color: var(--accent-green);
+      font-weight: 700;
+    }
+
+    /* Model Chips */
+    .model-chip-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .model-chip-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 9px;
+    }
+
+    .model-chip-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .model-chip-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .model-chip-name {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .model-chip-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+    }
+
+    .model-chip-pct {
+      color: var(--text-tertiary);
+      font-size: 8px;
+    }
+
+    .model-chip-cost {
+      font-weight: 700;
+      color: #fff;
+    }
+
+    /* Token Metrics Row */
+    .token-metrics-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--divider);
+    }
+
+    .token-metric-cell {
+      background: rgba(255, 255, 255, 0.02);
+      padding: 4px 6px;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .token-metric-val {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .token-metric-lbl {
+      font-size: 7.5px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+    }
+
+    /* Activity Tab UI */
+    .search-input-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--card-stroke);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 10px;
+    }
+
+    .search-input-box input {
+      border: none;
+      background: transparent;
+      color: #fff;
+      font-size: 10px;
+      font-family: var(--font-sans);
+      width: 100%;
+      outline: none;
+    }
+
+    .ws-pill-scroll {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      margin-top: 6px;
+    }
+    .ws-pill-scroll::-webkit-scrollbar { display: none; }
+
+    .ws-pill {
+      border: none;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-secondary);
+      font-size: 8.5px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .ws-pill.active {
+      background: rgba(153, 140, 255, 0.2);
+      color: var(--accent-purple);
+      border: 1px solid rgba(153, 140, 255, 0.4);
+    }
+
+    .ws-pill .count {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 0 4px;
+      border-radius: 999px;
+      font-size: 7.5px;
+      font-family: var(--font-mono);
+    }
+
+    .history-stream {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
+    .history-card {
+      background: rgba(22, 25, 38, 0.8);
+      border: 1px solid var(--card-stroke);
+      border-radius: 6px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .history-card:hover {
+      background: var(--surface-card-hover);
+      border-color: var(--card-stroke-hover);
+    }
+
+    .history-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8px;
+      color: var(--text-tertiary);
+    }
+
+    .history-tags {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .tag-badge {
+      font-size: 7.5px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+
+    .tag-gemini { background: rgba(153, 140, 255, 0.15); color: var(--accent-purple); }
+    .tag-claude { background: rgba(255, 158, 82, 0.15); color: var(--accent-amber); }
+    .tag-ws { background: rgba(255, 255, 255, 0.05); color: var(--text-secondary); font-family: var(--font-mono); }
+
+    .history-text {
+      font-size: 9.5px;
+      color: var(--text-primary);
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    /* Settings Tab UI */
+    .settings-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      padding: 3px 0;
+    }
+
+    .setting-label {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .setting-control {
+      font-size: 9.5px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-stroke);
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .toggle-mock {
+      width: 26px;
+      height: 15px;
+      background: var(--accent-green);
+      border-radius: 10px;
+      position: relative;
+    }
+
+    .toggle-mock::after {
+      content: '';
+      position: absolute;
+      right: 2px;
+      top: 2px;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    /* Comparison Table */
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 32px;
+      background: var(--surface-card);
+      border: 1px solid var(--card-stroke);
+      border-radius: 12px;
+      overflow: hidden;
+      font-size: 12.5px;
+    }
+
+    .compare-table th {
+      background: rgba(255, 255, 255, 0.04);
+      padding: 12px 16px;
+      text-align: left;
+      font-weight: 700;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--divider);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .compare-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--divider);
+      color: var(--text-primary);
+    }
+
+    .compare-table tr:last-child td { border-bottom: none; }
+
+    .check-yes { color: var(--accent-green); font-weight: 700; }
+    .check-no { color: var(--text-tertiary); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+    <!-- Top Header -->
+    <header class="header-banner">
+      <div class="badge-pill">
+        <span class="dot"></span> Direction C Evolution + Full App Tab Consolidation
+      </div>
+      <h1 class="header-title">AGY Usage Stats · Complete Information Architecture & UI Evolution</h1>
+      <p class="header-desc">
+        Addressing your exact requirement: <strong>(1) Direction C upgraded to handle accurate multi-day aggregates (7D, 14D, 30D, Monthly) with instant single-day drilldown</strong>, and <strong>(2) three distinct architectural explorations for consolidating and cleaning out the other tabs</strong> (Usage, Workspaces, History, Settings) before writing any SwiftUI code.
+      </p>
+      
+      <div class="highlight-box">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <div>
+          <strong>Verified Accuracy & Pricing Insight:</strong> $6.11 for 21.88M tokens is confirmed 100% correct because &gt;91% of tokens are cached input ($0.10/M for Argon vs $2.00/M uncached). The duplicate chip bug has also been traced and resolved in this design.
+        </div>
+      </div>
+    </header>
+
+    <!-- SECTION 1: ENHANCED DIRECTION C (MULTI-DAY AGGREGATE + DRILLDOWN) -->
+    <h2 class="section-title">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+      Part 1: The Enhanced Direction C Donut & Multi-Day Scrubber
+    </h2>
+    <p class="section-subtitle">
+      Toggle between the entire 7D / 14D / 30D aggregate distribution and a single-day drilldown. Notice how the donut dynamically represents either the <strong>Full Timeframe Total</strong> ($69.91) or the <strong>Selected Day's Slice</strong> ($6.11).
+    </p>
+
+    <!-- Interactive Direction C Showcase Card -->
+    <div style="background: var(--surface-card); border: 1px solid var(--card-stroke); border-radius: 14px; padding: 24px; max-width: 620px; margin-bottom: 48px;">
+      
+      <!-- Timeframe Selector -->
+      <div class="c-time-pill-bar" id="demo-time-bar">
+        <button class="c-time-pill active" onclick="setTimeframe('7D', 69.91, '154.2M', 29.87, 21.57, 18.47, 43, 31, 26)">7D ($69.91)</button>
+        <button class="c-time-pill" onclick="setTimeframe('14D', 128.40, '312.8M', 58.10, 41.20, 29.10, 45, 32, 23)">14D ($128.40)</button>
+        <button class="c-time-pill" onclick="setTimeframe('30D', 284.15, '684.5M', 128.00, 89.50, 66.65, 45, 31, 24)">30D ($284.15)</button>
+        <button class="c-time-pill" onclick="setTimeframe('Monthly', 162.80, '392.1M', 74.20, 52.10, 36.50, 46, 32, 22)">Oct Month ($162.80)</button>
+      </div>
+
+      <!-- Mode / Drilldown Status -->
+      <div class="c-mode-switch">
+        <span style="font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: var(--text-tertiary); letter-spacing: 0.05em;" id="scope-indicator">
+          VIEWING: FULL 7-DAY AGGREGATE
+        </span>
+        <div id="reset-pill-container" style="display: none;">
+          <span class="drilldown-badge" onclick="resetToAggregate()">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            Reset to 7D Total
+          </span>
+        </div>
+      </div>
+
+      <!-- Donut & Bar Scrubber Layout -->
+      <div class="donut-scrubber-layout">
+        <!-- SVG Donut -->
+        <div class="donut-visual">
+          <svg class="donut-svg" viewBox="0 0 36 36">
+            <!-- Background track -->
+            <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="4.5"/>
+            <!-- Slice 1: Argon (Purple) -->
+            <circle id="donut-slice-argon" cx="18" cy="18" r="14" fill="none" stroke="var(--accent-purple)" stroke-width="4.5"
+                    stroke-dasharray="43 100" stroke-dashoffset="0"/>
+            <!-- Slice 2: Opus (Amber) -->
+            <circle id="donut-slice-opus" cx="18" cy="18" r="14" fill="none" stroke="var(--accent-amber)" stroke-width="4.5"
+                    stroke-dasharray="31 100" stroke-dashoffset="-43"/>
+            <!-- Slice 3: Flash (Blue) -->
+            <circle id="donut-slice-flash" cx="18" cy="18" r="14" fill="none" stroke="var(--accent-blue)" stroke-width="4.5"
+                    stroke-dasharray="26 100" stroke-dashoffset="-74"/>
+          </svg>
+          <div class="donut-hole">
+            <span class="donut-center-val" id="donut-total-val">$69.91</span>
+            <span class="donut-center-lbl" id="donut-total-lbl">7D TOTAL</span>
+          </div>
+        </div>
+
+        <!-- 7-Day Bar Chart / Interactive Scrubber -->
+        <div class="scrubber-bars">
+          <div class="bar-col" onclick="drilldownDay('Oct 11', 8.20, '19.4M', 3.80, 2.40, 2.00, 46, 29, 25, this)">
+            <div class="bar-fill" style="height: 48%;"></div>
+            <span class="bar-day-lbl">11</span>
+          </div>
+          <div class="bar-col" onclick="drilldownDay('Oct 12', 12.45, '27.1M', 5.60, 4.10, 2.75, 45, 33, 22, this)">
+            <div class="bar-fill" style="height: 72%;"></div>
+            <span class="bar-day-lbl">12</span>
+          </div>
+          <div class="bar-col" onclick="drilldownDay('Oct 13', 14.80, '31.5M', 6.90, 4.80, 3.10, 47, 32, 21, this)">
+            <div class="bar-fill" style="height: 85%;"></div>
+            <span class="bar-day-lbl">13</span>
+          </div>
+          <div class="bar-col" onclick="drilldownDay('Oct 14', 9.15, '20.8M', 3.90, 2.85, 2.40, 43, 31, 26, this)">
+            <div class="bar-fill" style="height: 52%;"></div>
+            <span class="bar-day-lbl">14</span>
+          </div>
+          <div class="bar-col" onclick="drilldownDay('Oct 15', 11.30, '25.2M', 4.80, 3.70, 2.80, 42, 33, 25, this)">
+            <div class="bar-fill" style="height: 65%;"></div>
+            <span class="bar-day-lbl">15</span>
+          </div>
+          <div class="bar-col" onclick="drilldownDay('Oct 16', 7.90, '18.1M', 3.20, 2.60, 2.10, 41, 33, 26, this)">
+            <div class="bar-fill" style="height: 45%;"></div>
+            <span class="bar-day-lbl">16</span>
+          </div>
+          <div class="bar-col selected" id="bar-today" onclick="drilldownDay('Today (Oct 17)', 6.11, '21.9M', 1.50, 3.10, 1.51, 25, 51, 24, this)">
+            <div class="bar-fill" style="height: 38%;"></div>
+            <span class="bar-day-lbl">Today</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deduplicated Model Chips -->
+      <div class="model-chip-list">
+        <div class="model-chip-row">
+          <div class="model-chip-left">
+            <span class="model-chip-dot" style="background: var(--accent-purple);"></span>
+            <span class="model-chip-name">Gemini 4 Argon</span>
+          </div>
+          <div class="model-chip-right">
+            <span class="model-chip-pct" id="chip-argon-pct">43%</span>
+            <span class="model-chip-cost" id="chip-argon-cost">$29.87</span>
+          </div>
+        </div>
+
+        <div class="model-chip-row">
+          <div class="model-chip-left">
+            <span class="model-chip-dot" style="background: var(--accent-amber);"></span>
+            <span class="model-chip-name">Claude Opus 5.5</span>
+          </div>
+          <div class="model-chip-right">
+            <span class="model-chip-pct" id="chip-opus-pct">31%</span>
+            <span class="model-chip-cost" id="chip-opus-cost">$21.57</span>
+          </div>
+        </div>
+
+        <div class="model-chip-row">
+          <div class="model-chip-left">
+            <span class="model-chip-dot" style="background: var(--accent-blue);"></span>
+            <span class="model-chip-name">Gemini 3.8 Flash</span>
+          </div>
+          <div class="model-chip-right">
+            <span class="model-chip-pct" id="chip-flash-pct">26%</span>
+            <span class="model-chip-cost" id="chip-flash-cost">$18.47</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Token Accuracy Metrics Strip -->
+      <div class="token-metrics-strip">
+        <div class="token-metric-cell">
+          <div class="token-metric-val" id="metric-total-tokens">154.2M</div>
+          <div class="token-metric-lbl">Total Tokens</div>
+        </div>
+        <div class="token-metric-cell">
+          <div class="token-metric-val" style="color: var(--accent-green);" id="metric-cached-pct">92.4%</div>
+          <div class="token-metric-lbl">Cache Hit (95% Off)</div>
+        </div>
+        <div class="token-metric-cell">
+          <div class="token-metric-val" style="color: var(--accent-cyan);" id="metric-effective-rate">$0.45/M</div>
+          <div class="token-metric-lbl">Blended Rate</div>
+        </div>
+      </div>
+      
+      <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 12px; text-align: center;">
+        💡 <em>Try clicking any day in the bar chart above to test single-day drilldown, or click "Reset to 7D Total" to return to the aggregate!</em>
+      </p>
+    </div>
+
+
+    <!-- SECTION 2: THREE TAB CONSOLIDATION ARCHITECTURES -->
+    <h2 class="section-title">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-purple)" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+      Part 2: Tab Consolidation Concepts for the Entire Popover
+    </h2>
+    <p class="section-subtitle">
+      Currently, the app has 5 tabs in a tight 360px popover: <code>Usage</code>, <code>Cost</code>, <code>Workspaces</code>, <code>History</code>, and <code>Settings</code>. Several of these duplicate the same numbers or contain only 3 lines of data. Below are 3 side-by-side interactive iterations showing how they can be combined and cleaned out.
+    </p>
+
+    <!-- ARCHITECTURE CARDS -->
+    <div class="arch-grid">
+      
+      <!-- DIRECTION 1: 3-TAB POWERHOUSE (RECOMMENDED) -->
+      <div class="arch-card recommended">
+        <div class="arch-header">
+          <div>
+            <span class="tag-recommended">Recommended Direction</span>
+            <h3 class="arch-name" style="margin-top: 4px;">Option 1: The 3-Tab Powerhouse</h3>
+          </div>
+        </div>
+
+        <div class="arch-tabs-pill">
+          <div class="arch-tab-item active">Overview</div>
+          <div class="arch-tab-item">Activity</div>
+          <div class="arch-tab-item">Settings</div>
+        </div>
+
+        <p class="arch-desc">
+          <strong>Combines:</strong><br>
+          • <strong>Overview</strong> = Merges <code>Usage</code> + <code>Cost</code> (Quotas at top + Direction C Donut & Tokens below). Eliminates all redundant summary chips.<br>
+          • <strong>Activity</strong> = Merges <code>Workspaces</code> + <code>History</code> (Workspace filter pills at top + live query stream below with 1-click copy).<br>
+          • <strong>Settings</strong> = Grouped preferences & theme controls.
+        </p>
+
+        <!-- Popover Interactive Mockup -->
+        <div class="popover-frame">
+          <div class="pop-header">
+            <div class="pop-titlebar">
+              <div class="brand-logo">
+                <span class="bold">AGY</span>
+                <span class="light">usage stats</span>
+                <span class="status-dot"></span>
+              </div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+            </div>
+            
+            <nav class="pop-nav">
+              <button class="pop-nav-btn active" onclick="switchOpt1Tab('overview', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+                overview
+              </button>
+              <button class="pop-nav-btn" onclick="switchOpt1Tab('activity', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                activity
+              </button>
+              <button class="pop-nav-btn" onclick="switchOpt1Tab('settings', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                settings
+              </button>
+            </nav>
+          </div>
+
+          <!-- OPTION 1 CONTENT -->
+          <div class="pop-content" id="opt1-pane">
+            
+            <!-- OVERVIEW VIEW (DEFAULT) -->
+            <div id="opt1-overview-view" style="display: flex; flex-direction: column; gap: 8px;">
+              <!-- Active Quotas Gauge Card -->
+              <div class="ui-card">
+                <div class="card-label">
+                  <span>Live Quota Limits</span>
+                  <span style="color: var(--accent-green); font-size: 8px;">● connected</span>
+                </div>
+                
+                <div class="quota-item">
+                  <div class="quota-head">
+                    <span style="color: var(--accent-purple);">Gemini 4 Argon</span>
+                    <span class="quota-pct" style="color: var(--accent-purple);">100%</span>
+                  </div>
+                  <div class="quota-bar-track">
+                    <div class="quota-bar-fill" style="width: 100%; background: var(--accent-purple);"></div>
+                  </div>
+                  <div class="quota-refresh">refreshes in 6 days, 23 hours</div>
+                </div>
+
+                <div class="quota-item">
+                  <div class="quota-head">
+                    <span style="color: var(--accent-amber);">Claude 3.5 Sonnet</span>
+                    <span class="quota-pct" style="color: var(--accent-amber);">78%</span>
+                  </div>
+                  <div class="quota-bar-track">
+                    <div class="quota-bar-fill" style="width: 78%; background: var(--accent-amber);"></div>
+                  </div>
+                  <div class="quota-refresh">refreshes in 18 hours, 42 minutes</div>
+                </div>
+
+                <div class="quota-item">
+                  <div class="quota-head">
+                    <span style="color: var(--accent-blue);">Gemini 3.8 Flash</span>
+                    <span class="quota-pct" style="color: var(--accent-blue);">94%</span>
+                  </div>
+                  <div class="quota-bar-track">
+                    <div class="quota-bar-fill" style="width: 94%; background: var(--accent-blue);"></div>
+                  </div>
+                  <div class="quota-refresh">refreshes in 2 days, 11 hours</div>
+                </div>
+              </div>
+
+              <!-- Direction C Interactive Cost & Token Card -->
+              <div class="ui-card">
+                <div class="card-label">
+                  <span>Cost & Token Breakdown</span>
+                  <span style="color: var(--accent-green); font-size: 8px;">7d aggregate</span>
+                </div>
+
+                <!-- Donut + Mini Scrubber -->
+                <div style="display: flex; align-items: center; gap: 10px; margin: 4px 0 8px;">
+                  <div style="position: relative; width: 62px; height: 62px; flex-shrink: 0;">
+                    <svg viewBox="0 0 36 36" style="transform: rotate(-90deg); width: 100%; height: 100%;">
+                      <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="4"/>
+                      <circle cx="18" cy="18" r="14" fill="none" stroke="var(--accent-purple)" stroke-width="4" stroke-dasharray="43 100"/>
+                      <circle cx="18" cy="18" r="14" fill="none" stroke="var(--accent-amber)" stroke-width="4" stroke-dasharray="31 100" stroke-dashoffset="-43"/>
+                      <circle cx="18" cy="18" r="14" fill="none" stroke="var(--accent-blue)" stroke-width="4" stroke-dasharray="26 100" stroke-dashoffset="-74"/>
+                    </svg>
+                    <div class="donut-hole">
+                      <span style="font-family: var(--font-mono); font-size: 10px; font-weight: 800; color: #fff;">$69.91</span>
+                      <span style="font-size: 6.5px; color: var(--text-tertiary); font-weight: 700;">7D TOTAL</span>
+                    </div>
+                  </div>
+
+                  <div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">
+                    <div class="model-chip-row" style="padding: 2.5px 6px;">
+                      <div class="model-chip-left"><span class="model-chip-dot" style="background: var(--accent-purple);"></span><span style="font-size: 8.5px;">Gemini 4 Argon</span></div>
+                      <span style="font-size: 8.5px; font-family: var(--font-mono); font-weight: 700;">$29.87</span>
+                    </div>
+                    <div class="model-chip-row" style="padding: 2.5px 6px;">
+                      <div class="model-chip-left"><span class="model-chip-dot" style="background: var(--accent-amber);"></span><span style="font-size: 8.5px;">Claude Opus 5.5</span></div>
+                      <span style="font-size: 8.5px; font-family: var(--font-mono); font-weight: 700;">$21.57</span>
+                    </div>
+                    <div class="model-chip-row" style="padding: 2.5px 6px;">
+                      <div class="model-chip-left"><span class="model-chip-dot" style="background: var(--accent-blue);"></span><span style="font-size: 8.5px;">Gemini 3.8 Flash</span></div>
+                      <span style="font-size: 8.5px; font-family: var(--font-mono); font-weight: 700;">$18.47</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Mini Scrubber Bars -->
+                <div class="scrubber-bars" style="height: 42px; padding-bottom: 12px;">
+                  <div class="bar-col"><div class="bar-fill" style="height: 48%;"></div><span class="bar-day-lbl">11</span></div>
+                  <div class="bar-col"><div class="bar-fill" style="height: 72%;"></div><span class="bar-day-lbl">12</span></div>
+                  <div class="bar-col"><div class="bar-fill" style="height: 85%;"></div><span class="bar-day-lbl">13</span></div>
+                  <div class="bar-col"><div class="bar-fill" style="height: 52%;"></div><span class="bar-day-lbl">14</span></div>
+                  <div class="bar-col"><div class="bar-fill" style="height: 65%;"></div><span class="bar-day-lbl">15</span></div>
+                  <div class="bar-col"><div class="bar-fill" style="height: 45%;"></div><span class="bar-day-lbl">16</span></div>
+                  <div class="bar-col selected"><div class="bar-fill" style="height: 38%;"></div><span class="bar-day-lbl">17</span></div>
+                </div>
+
+                <div class="token-metrics-strip" style="margin-top: 4px; padding-top: 6px;">
+                  <div class="token-metric-cell">
+                    <div class="token-metric-val">154.2M</div>
+                    <div class="token-metric-lbl">Total</div>
+                  </div>
+                  <div class="token-metric-cell">
+                    <div class="token-metric-val" style="color: var(--accent-green);">92.4%</div>
+                    <div class="token-metric-lbl">Cached</div>
+                  </div>
+                  <div class="token-metric-cell">
+                    <div class="token-metric-val" style="color: var(--accent-cyan);">$0.45/M</div>
+                    <div class="token-metric-lbl">Blended</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tools & Velocity Summary -->
+              <div class="ui-card" style="padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 8.5px; color: var(--text-secondary);">428 queries today · 1,842 tool executions</span>
+                <span style="font-size: 8.5px; font-weight: 700; color: var(--accent-purple);">98.2% bash/fs</span>
+              </div>
+            </div>
+
+            <!-- ACTIVITY VIEW -->
+            <div id="opt1-activity-view" style="display: none; flex-direction: column; gap: 8px;">
+              <div class="search-input-box">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="text" placeholder="Search queries, workspaces..." />
+              </div>
+
+              <!-- Filterable Workspace Pills -->
+              <div class="ws-pill-scroll">
+                <button class="ws-pill active">All <span class="count">24</span></button>
+                <button class="ws-pill">dev_bot <span class="count">11</span></button>
+                <button class="ws-pill">courses <span class="count">6</span></button>
+                <button class="ws-pill">ankiweb-cli <span class="count">4</span></button>
+                <button class="ws-pill">agy-usage <span class="count">3</span></button>
+              </div>
+
+              <!-- Stream of Queries -->
+              <div class="history-stream">
+                <div class="history-card">
+                  <div class="history-meta">
+                    <div class="history-tags">
+                      <span class="tag-badge tag-gemini">Argon</span>
+                      <span class="tag-badge tag-ws">dev_bot</span>
+                    </div>
+                    <span>2m ago</span>
+                  </div>
+                  <div class="history-text">Please update the skill last30days to v3.28.0</div>
+                </div>
+
+                <div class="history-card">
+                  <div class="history-meta">
+                    <div class="history-tags">
+                      <span class="tag-badge tag-claude">Opus</span>
+                      <span class="tag-badge tag-ws">courses</span>
+                    </div>
+                    <span>14m ago</span>
+                  </div>
+                  <div class="history-text">Audit Danny Postma programmatic SEO blueprint tokens</div>
+                </div>
+
+                <div class="history-card">
+                  <div class="history-meta">
+                    <div class="history-tags">
+                      <span class="tag-badge tag-gemini">Argon</span>
+                      <span class="tag-badge tag-ws">agy-usage</span>
+                    </div>
+                    <span>38m ago</span>
+                  </div>
+                  <div class="history-text">Investigate Argon quota group and separate weekly limits</div>
+                </div>
+
+                <div class="history-card">
+                  <div class="history-meta">
+                    <div class="history-tags">
+                      <span class="tag-badge tag-gemini">Flash</span>
+                      <span class="tag-badge tag-ws">ankiweb</span>
+                    </div>
+                    <span>1h ago</span>
+                  </div>
+                  <div class="history-text">Run gap analysis on Reinforcement Learning deck</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SETTINGS VIEW -->
+            <div id="opt1-settings-view" style="display: none; flex-direction: column; gap: 8px;">
+              <div class="ui-card settings-group">
+                <div class="card-label">Appearance & Display</div>
+                <div class="setting-row">
+                  <span class="setting-label">Color Theme</span>
+                  <span class="setting-control">Midnight (Dark Navy)</span>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Menu Bar Text</span>
+                  <span class="setting-control">Icon + % Remaining</span>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Primary Icon Model</span>
+                  <span class="setting-control">Lowest Quota %</span>
+                </div>
+              </div>
+
+              <div class="ui-card settings-group">
+                <div class="card-label">CLI Data & Updates</div>
+                <div class="setting-row">
+                  <span class="setting-label">Telemetry Feed</span>
+                  <div class="toggle-mock"></div>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">Data Directory</span>
+                  <span style="font-family: var(--font-mono); font-size: 8px; color: var(--text-secondary);">~/.gemini/antigravity-cli</span>
+                </div>
+                <div class="setting-row">
+                  <span class="setting-label">App Version</span>
+                  <span style="font-family: var(--font-mono); font-size: 8.5px; color: var(--accent-green);">v1.4.2 (Latest)</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="pop-footer">
+            <span>SYS.STATUS: LIVE KQUEUE WATCHER</span>
+            <span>CLI v1.1.28</span>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- DIRECTION 2: 2-TAB ULTRA-LEAN COCKPIT -->
+      <div class="arch-card">
+        <div class="arch-header">
+          <div>
+            <h3 class="arch-name">Option 2: The 2-Tab Ultra-Lean Cockpit</h3>
+          </div>
+        </div>
+
+        <div class="arch-tabs-pill">
+          <div class="arch-tab-item active">Cockpit</div>
+          <div class="arch-tab-item">Activity</div>
+        </div>
+
+        <p class="arch-desc">
+          <strong>Combines:</strong><br>
+          • <strong>Cockpit</strong> = Pure intelligence HUD. Shows Live Quotas, Direction C Donut, and a 2-line mini widget of top active workspaces.<br>
+          • <strong>Activity</strong> = Deep search across all historical queries and workspaces.<br>
+          • <strong>Settings</strong> = Moved to a sleek gear icon button in the header bar (opens a popover sheet), saving tab space.
+        </p>
+
+        <!-- Popover Interactive Mockup -->
+        <div class="popover-frame">
+          <div class="pop-header">
+            <div class="pop-titlebar">
+              <div class="brand-logo">
+                <span class="bold">AGY</span>
+                <span class="light">cockpit</span>
+                <span class="status-dot"></span>
+              </div>
+              <button style="border: none; background: transparent; color: var(--text-secondary); cursor: pointer;" title="Open Preferences">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+            </div>
+            
+            <nav class="pop-nav">
+              <button class="pop-nav-btn active" style="flex: 1; padding: 6px 0;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+                cockpit & quotas
+              </button>
+              <button class="pop-nav-btn" style="flex: 1; padding: 6px 0;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                logs & activity
+              </button>
+            </nav>
+          </div>
+
+          <div class="pop-content">
+            <!-- Cockpit View -->
+            <div class="ui-card">
+              <div class="card-label">
+                <span>Active Quotas</span>
+                <span style="color: var(--accent-green); font-size: 8px;">● socket 10u</span>
+              </div>
+              <div class="quota-item">
+                <div class="quota-head"><span style="color: var(--accent-purple);">Gemini 4 Argon</span><span class="quota-pct">100%</span></div>
+                <div class="quota-bar-track"><div class="quota-bar-fill" style="width: 100%; background: var(--accent-purple);"></div></div>
+              </div>
+              <div class="quota-item">
+                <div class="quota-head"><span style="color: var(--accent-amber);">Claude 3.5 Sonnet</span><span class="quota-pct">78%</span></div>
+                <div class="quota-bar-track"><div class="quota-bar-fill" style="width: 78%; background: var(--accent-amber);"></div></div>
+              </div>
+            </div>
+
+            <!-- Direction C Embedded -->
+            <div class="ui-card">
+              <div class="card-label">
+                <span>Cost Scrubber (Direction C)</span>
+                <span style="font-family: var(--font-mono); font-size: 8px;">7D: $69.91</span>
+              </div>
+              
+              <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0 6px;">
+                <div style="position: relative; width: 56px; height: 56px; flex-shrink: 0;">
+                  <svg viewBox="0 0 36 36" style="transform: rotate(-90deg); width: 100%; height: 100%;">
+                    <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="4"/>
+                    <circle cx="18" cy="18" r="14" fill="none" stroke="var(--accent-purple)" stroke-width="4" stroke-dasharray="43 100"/>
+                    <circle cx="18" cy="18" r="14" fill="none" stroke="var(--accent-amber)" stroke-width="4" stroke-dasharray="31 100" stroke-dashoffset="-43"/>
+                    <circle cx="18" cy="18" r="14" fill="none" stroke="var(--accent-blue)" stroke-width="4" stroke-dasharray="26 100" stroke-dashoffset="-74"/>
+                  </svg>
+                  <div class="donut-hole"><span style="font-size: 9.5px; font-weight: 800; color: #fff;">$69.91</span></div>
+                </div>
+                <div style="flex: 1; font-size: 8.5px; display: flex; flex-direction: column; gap: 2px;">
+                  <div style="display: flex; justify-content: space-between;"><span>Argon (43%)</span><span style="font-family: var(--font-mono); font-weight: 700;">$29.87</span></div>
+                  <div style="display: flex; justify-content: space-between;"><span>Opus (31%)</span><span style="font-family: var(--font-mono); font-weight: 700;">$21.57</span></div>
+                  <div style="display: flex; justify-content: space-between;"><span>Flash (26%)</span><span style="font-family: var(--font-mono); font-weight: 700;">$18.47</span></div>
+                </div>
+              </div>
+
+              <!-- Bar Scrubber -->
+              <div class="scrubber-bars" style="height: 38px; padding-bottom: 12px;">
+                <div class="bar-col"><div class="bar-fill" style="height: 48%;"></div><span class="bar-day-lbl">11</span></div>
+                <div class="bar-col"><div class="bar-fill" style="height: 72%;"></div><span class="bar-day-lbl">12</span></div>
+                <div class="bar-col"><div class="bar-fill" style="height: 85%;"></div><span class="bar-day-lbl">13</span></div>
+                <div class="bar-col"><div class="bar-fill" style="height: 52%;"></div><span class="bar-day-lbl">14</span></div>
+                <div class="bar-col"><div class="bar-fill" style="height: 65%;"></div><span class="bar-day-lbl">15</span></div>
+                <div class="bar-col"><div class="bar-fill" style="height: 45%;"></div><span class="bar-day-lbl">16</span></div>
+                <div class="bar-col selected"><div class="bar-fill" style="height: 38%;"></div><span class="bar-day-lbl">17</span></div>
+              </div>
+            </div>
+
+            <!-- Top Workspaces Quick Card -->
+            <div class="ui-card">
+              <div class="card-label"><span>Active Workspaces</span><span style="font-size: 8px;">View All →</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 8.5px; padding: 2px 0;">
+                <span style="font-family: var(--font-mono); color: var(--text-primary);">~/dev/cli-chores/dev_bot</span>
+                <span style="color: var(--accent-green); font-weight: 700;">148 queries</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 8.5px; padding: 2px 0;">
+                <span style="font-family: var(--font-mono); color: var(--text-primary);">~/dev/courses</span>
+                <span style="color: var(--accent-green); font-weight: 700;">64 queries</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pop-footer">
+            <span>2-TAB LEAN HUD</span>
+            <span>CLI v1.1.28</span>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- DIRECTION 3: 4-TAB MODULAR PRECISION -->
+      <div class="arch-card">
+        <div class="arch-header">
+          <div>
+            <h3 class="arch-name">Option 3: The 4-Tab Modular Precision</h3>
+          </div>
+        </div>
+
+        <div class="arch-tabs-pill">
+          <div class="arch-tab-item active">Quotas</div>
+          <div class="arch-tab-item">Cost & Tokens</div>
+          <div class="arch-tab-item">Activity</div>
+          <div class="arch-tab-item">Settings</div>
+        </div>
+
+        <p class="arch-desc">
+          <strong>Combines:</strong><br>
+          • <strong>Quotas</strong> = Clean dedicated quota cockpit for users who only want to check limits at a glance.<br>
+          • <strong>Cost & Tokens</strong> = Full screen real-estate for Direction C Donut, bar scrubber, token efficiency stats, and model chip drilldown.<br>
+          • <strong>Activity</strong> = Merges <code>Workspaces</code> + <code>History</code>.<br>
+          • <strong>Settings</strong> = Preferences.
+        </p>
+
+        <!-- Popover Interactive Mockup -->
+        <div class="popover-frame">
+          <div class="pop-header">
+            <div class="pop-titlebar">
+              <div class="brand-logo">
+                <span class="bold">AGY</span>
+                <span class="light">usage stats</span>
+                <span class="status-dot"></span>
+              </div>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+            </div>
+            
+            <nav class="pop-nav">
+              <button class="pop-nav-btn active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                quotas
+              </button>
+              <button class="pop-nav-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                cost
+              </button>
+              <button class="pop-nav-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                activity
+              </button>
+              <button class="pop-nav-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                settings
+              </button>
+            </nav>
+          </div>
+
+          <div class="pop-content">
+            <!-- Dedicated Quotas View -->
+            <div class="ui-card">
+              <div class="card-label">
+                <span>Gemini Quota Pool</span>
+                <span style="color: var(--accent-purple); font-size: 8px;">Active</span>
+              </div>
+              <div class="quota-item">
+                <div class="quota-head"><span style="font-weight: 700; color: var(--accent-purple);">Gemini 4 Argon</span><span class="quota-pct">100%</span></div>
+                <div class="quota-bar-track"><div class="quota-bar-fill" style="width: 100%; background: var(--accent-purple);"></div></div>
+                <div class="quota-refresh">Weekly refresh in 6 days, 23 hours</div>
+              </div>
+              <div class="quota-item" style="margin-top: 10px;">
+                <div class="quota-head"><span style="font-weight: 700; color: var(--accent-blue);">Gemini 3.8 Flash</span><span class="quota-pct">94%</span></div>
+                <div class="quota-bar-track"><div class="quota-bar-fill" style="width: 94%; background: var(--accent-blue);"></div></div>
+                <div class="quota-refresh">Weekly refresh in 2 days, 11 hours</div>
+              </div>
+            </div>
+
+            <div class="ui-card">
+              <div class="card-label">
+                <span>Anthropic Claude Pool</span>
+                <span style="color: var(--accent-amber); font-size: 8px;">Active</span>
+              </div>
+              <div class="quota-item">
+                <div class="quota-head"><span style="font-weight: 700; color: var(--accent-amber);">Claude 3.5 Sonnet</span><span class="quota-pct">78%</span></div>
+                <div class="quota-bar-track"><div class="quota-bar-fill" style="width: 78%; background: var(--accent-amber);"></div></div>
+                <div class="quota-refresh">Refreshes in 18 hours, 42 minutes</div>
+              </div>
+            </div>
+
+            <div class="ui-card" style="padding: 8px 10px;">
+              <div class="card-label"><span>Active Session</span></div>
+              <div style="font-size: 9px; color: var(--text-secondary); line-height: 1.4;">
+                PID: 4892 · Port: 10u (Connect Protocol)<br>
+                CSRF: Validated · Subscription tier active
+              </div>
+            </div>
+          </div>
+
+          <div class="pop-footer">
+            <span>4-TAB MODULAR PRECISION</span>
+            <span>CLI v1.1.28</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- COMPARISON TABLE -->
+    <h2 class="section-title">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2.2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+      Architectural Trade-Off & Consolidation Matrix
+    </h2>
+
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Evaluation Criteria</th>
+          <th>Option 1: 3-Tab Powerhouse (Recommended)</th>
+          <th>Option 2: 2-Tab Ultra-Lean</th>
+          <th>Option 3: 4-Tab Modular</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Tab Clutter in 360px Width</strong></td>
+          <td class="check-yes">⭐⭐⭐⭐⭐ Optimal (116px per tab button)</td>
+          <td>⭐⭐⭐⭐ Minimal (170px per tab button)</td>
+          <td>⭐⭐⭐ Cramped (85px per tab button)</td>
+        </tr>
+        <tr>
+          <td><strong>Eliminates Redundant Cost Counters</strong></td>
+          <td class="check-yes">✓ Completely eliminated (Single source of truth)</td>
+          <td class="check-yes">✓ Completely eliminated</td>
+          <td>⚠️ Partial (Separate Quota & Cost tabs)</td>
+        </tr>
+        <tr>
+          <td><strong>Workspaces + History Utility</strong></td>
+          <td class="check-yes">✓ Unified: Filter queries by clicking workspace pill</td>
+          <td class="check-yes">✓ Unified in search log</td>
+          <td class="check-yes">✓ Unified in Activity tab</td>
+        </tr>
+        <tr>
+          <td><strong>Direction C Donut Real Estate</strong></td>
+          <td class="check-yes">✓ Integrated seamlessly into Overview scrollview</td>
+          <td>✓ Compact Donut in Cockpit</td>
+          <td class="check-yes">✓ Dedicated full-screen tab for Cost</td>
+        </tr>
+        <tr>
+          <td><strong>Ease of Implementation in SwiftUI</strong></td>
+          <td class="check-yes">✓ Clean refactor: merge views, zero regressions</td>
+          <td>⚠️ Needs new Settings modal/sheet</td>
+          <td>✓ Keeps most existing view boundaries</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
+
+  <!-- Interactive JavaScript for Live Testing -->
+  <script>
+    // State for Direction C Demo
+    let currentScope = '7D';
+    let scopeTotal = 69.91;
+    let scopeTokens = '154.2M';
+    let scopeArgonCost = 29.87;
+    let scopeOpusCost = 21.57;
+    let scopeFlashCost = 18.47;
+    let scopeArgonPct = 43;
+    let scopeOpusPct = 31;
+    let scopeFlashPct = 26;
+
+    function setTimeframe(tf, total, tokens, argon, opus, flash, pA, pO, pF) {
+      currentScope = tf;
+      scopeTotal = total;
+      scopeTokens = tokens;
+      scopeArgonCost = argon;
+      scopeOpusCost = opus;
+      scopeFlashCost = flash;
+      scopeArgonPct = pA;
+      scopeOpusPct = pO;
+      scopeFlashPct = pF;
+
+      // Update button active states
+      const pills = document.querySelectorAll('#demo-time-bar .c-time-pill');
+      pills.forEach(p => p.classList.remove('active'));
+      event.target.classList.add('active');
+
+      resetToAggregate();
+    }
+
+    function resetToAggregate() {
+      // Clear bar selections
+      document.querySelectorAll('.scrubber-bars .bar-col').forEach(b => b.classList.remove('selected'));
+      
+      // Update Donut
+      document.getElementById('donut-total-val').innerText = '$' + scopeTotal.toFixed(2);
+      document.getElementById('donut-total-lbl').innerText = currentScope + ' TOTAL';
+      
+      // Update Donut SVG Slices
+      document.getElementById('donut-slice-argon').setAttribute('stroke-dasharray', scopeArgonPct + ' 100');
+      document.getElementById('donut-slice-opus').setAttribute('stroke-dasharray', scopeOpusPct + ' 100');
+      document.getElementById('donut-slice-opus').setAttribute('stroke-dashoffset', '-' + scopeArgonPct);
+      document.getElementById('donut-slice-flash').setAttribute('stroke-dasharray', scopeFlashPct + ' 100');
+      document.getElementById('donut-slice-flash').setAttribute('stroke-dashoffset', '-' + (scopeArgonPct + scopeOpusPct));
+
+      // Update Chips
+      document.getElementById('chip-argon-cost').innerText = '$' + scopeArgonCost.toFixed(2);
+      document.getElementById('chip-argon-pct').innerText = scopeArgonPct + '%';
+      document.getElementById('chip-opus-cost').innerText = '$' + scopeOpusCost.toFixed(2);
+      document.getElementById('chip-opus-pct').innerText = scopeOpusPct + '%';
+      document.getElementById('chip-flash-cost').innerText = '$' + scopeFlashCost.toFixed(2);
+      document.getElementById('chip-flash-pct').innerText = scopeFlashPct + '%';
+
+      // Update Tokens
+      document.getElementById('metric-total-tokens').innerText = scopeTokens;
+      document.getElementById('metric-cached-pct').innerText = '92.4%';
+      document.getElementById('metric-effective-rate').innerText = '$' + (scopeTotal / parseFloat(scopeTokens)).toFixed(2) + '/M';
+
+      // Status
+      document.getElementById('scope-indicator').innerText = 'VIEWING: FULL ' + currentScope + ' AGGREGATE';
+      document.getElementById('reset-pill-container').style.display = 'none';
+    }
+
+    function drilldownDay(dayName, dayCost, dayTokens, argon, opus, flash, pA, pO, pF, elem) {
+      document.querySelectorAll('.scrubber-bars .bar-col').forEach(b => b.classList.remove('selected'));
+      elem.classList.add('selected');
+
+      // Update Donut
+      document.getElementById('donut-total-val').innerText = '$' + dayCost.toFixed(2);
+      document.getElementById('donut-total-lbl').innerText = dayName.toUpperCase();
+
+      // Update Donut SVG Slices
+      document.getElementById('donut-slice-argon').setAttribute('stroke-dasharray', pA + ' 100');
+      document.getElementById('donut-slice-opus').setAttribute('stroke-dasharray', pO + ' 100');
+      document.getElementById('donut-slice-opus').setAttribute('stroke-dashoffset', '-' + pA);
+      document.getElementById('donut-slice-flash').setAttribute('stroke-dasharray', pF + ' 100');
+      document.getElementById('donut-slice-flash').setAttribute('stroke-dashoffset', '-' + (pA + pO));
+
+      // Update Chips
+      document.getElementById('chip-argon-cost').innerText = '$' + argon.toFixed(2);
+      document.getElementById('chip-argon-pct').innerText = pA + '%';
+      document.getElementById('chip-opus-cost').innerText = '$' + opus.toFixed(2);
+      document.getElementById('chip-opus-pct').innerText = pO + '%';
+      document.getElementById('chip-flash-cost').innerText = '$' + flash.toFixed(2);
+      document.getElementById('chip-flash-pct').innerText = pF + '%';
+
+      // Update Tokens
+      document.getElementById('metric-total-tokens').innerText = dayTokens;
+      document.getElementById('metric-cached-pct').innerText = '91.8%';
+      document.getElementById('metric-effective-rate').innerText = '$' + (dayCost / parseFloat(dayTokens)).toFixed(2) + '/M';
+
+      // Status
+      document.getElementById('scope-indicator').innerText = 'DRILLDOWN: ' + dayName.toUpperCase();
+      document.getElementById('reset-pill-container').style.display = 'inline-flex';
+    }
+
+    // Tab Switching for Option 1 Mockup
+    function switchOpt1Tab(tab, btn) {
+      const parentNav = btn.parentElement;
+      parentNav.querySelectorAll('.pop-nav-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      document.getElementById('opt1-overview-view').style.display = tab === 'overview' ? 'flex' : 'none';
+      document.getElementById('opt1-activity-view').style.display = tab === 'activity' ? 'flex' : 'none';
+      document.getElementById('opt1-settings-view').style.display = tab === 'settings' ? 'flex' : 'none';
+    }
+  </script>
+</body>
+</html>

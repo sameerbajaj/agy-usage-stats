@@ -483,3 +483,69 @@ public var defaultGeminiModel: ModelCostInfo {
     knownModels[0]
 }
 
+// MARK: - Canonical Model Consolidation & Aggregation
+
+public func canonicalModelDisplayName(from rawName: String) -> String {
+    var name = rawName
+    for suffix in [" (Low)", " (Medium)", " (High)", " (Thinking)", " (current)"] {
+        name = name.replacingOccurrences(of: suffix, with: "")
+    }
+    let lower = name.lowercased()
+    if lower.contains("argon") {
+        return "Gemini 4 Argon"
+    } else if lower.contains("sonnet 5.5") {
+        return "Claude Sonnet 5.5"
+    } else if lower.contains("opus 5.5") {
+        return "Claude Opus 5.5"
+    } else if lower.contains("3.8 flash") || lower.contains("flash 3.8") {
+        return "Gemini 3.8 Flash"
+    } else if lower.contains("3.7 flash") || lower.contains("flash 3.7") {
+        return "Gemini 3.7 Flash"
+    } else if lower.contains("3.6 flash") || lower.contains("flash 3.6") {
+        return "Gemini 3.6 Flash"
+    } else if lower.contains("3.5 flash") || lower.contains("flash 3.5") {
+        return "Gemini 3.5 Flash"
+    }
+    return name
+}
+
+public extension UsageTimeBucket {
+    /// Returns model breakdown grouped and summed by canonical model name
+    var consolidatedModelBreakdown: [String: Double] {
+        var result: [String: Double] = [:]
+        for (rawModel, cost) in modelBreakdown where cost > 0 {
+            let canonical = canonicalModelDisplayName(from: rawModel)
+            result[canonical, default: 0.0] += cost
+        }
+        return result
+    }
+}
+
+public extension Sequence where Element == UsageTimeBucket {
+    var aggregatedModelBreakdown: [String: Double] {
+        var result: [String: Double] = [:]
+        for bucket in self {
+            for (model, cost) in bucket.consolidatedModelBreakdown {
+                result[model, default: 0.0] += cost
+            }
+        }
+        return result
+    }
+    
+    var aggregatedTotalCost: Double {
+        reduce(0.0) { $0 + $1.totalCost }
+    }
+    
+    var aggregatedInputTokens: Int {
+        reduce(0) { $0 + $1.inputTokens }
+    }
+    
+    var aggregatedOutputTokens: Int {
+        reduce(0) { $0 + $1.outputTokens }
+    }
+    
+    var aggregatedQueryCount: Int {
+        reduce(0) { $0 + $1.queryCount }
+    }
+}
+

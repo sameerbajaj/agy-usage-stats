@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AGY Usage Stats · Cost & Usage Trends Redesign Explorations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0B0D13;
+      --paper: #121520;
+      --card-stroke: #222738;
+      --card-hover: #181C2B;
+      --ink: #FFFFFF;
+      --ink-soft: #8E95AA;
+      --ink-mute: #585F75;
+      --accent-green: #2EE680;
+      --accent-purple: #998CFF;
+      --accent-amber: #FF9E52;
+      --accent-argon: #7B73FF;
+      --accent-blue: #619EFF;
+      --accent-red: #FF5966;
+      --line: #1E2333;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-pill: 999px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 40px 32px 140px;
+    }
+
+    /* Header */
+    .doc-header {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 28px;
+      margin-bottom: 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .doc-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent-green);
+      background: rgba(46, 230, 128, 0.1);
+      border: 1px solid rgba(46, 230, 128, 0.25);
+      padding: 4px 12px;
+      border-radius: var(--radius-pill);
+      margin-bottom: 12px;
+    }
+    .doc-eyebrow::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+    }
+    .doc-title {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    .doc-subtitle {
+      font-size: 15px;
+      color: var(--ink-soft);
+      max-width: 780px;
+      margin: 0;
+    }
+
+    .theme-toggle-bar {
+      display: flex;
+      gap: 10px;
+      background: var(--paper);
+      padding: 6px 10px;
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--card-stroke);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* Grid of explorations */
+    .explorations-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(620px, 1fr));
+      gap: 40px;
+    }
+
+    .variant-card {
+      background: var(--paper);
+      border: 1px solid var(--card-stroke);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .variant-card:hover {
+      border-color: rgba(153, 140, 255, 0.35);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    .variant-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 100%);
+    }
+    .variant-tag-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .variant-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--accent-purple);
+      color: #000;
+    }
+    .variant-name {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0;
+    }
+    .variant-tradeoff {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin: 4px 0 0;
+    }
+
+    .variant-canvas {
+      padding: 24px;
+      background: #0E1018; /* exact app background */
+      min-height: 480px;
+    }
+
+    .variant-analysis {
+      padding: 18px 24px;
+      border-top: 1px solid var(--line);
+      background: rgba(18, 21, 32, 0.6);
+      font-size: 12.5px;
+      color: var(--ink-soft);
+    }
+    .variant-analysis ul {
+      margin: 6px 0 0;
+      padding-left: 20px;
+    }
+    .variant-analysis li {
+      margin-bottom: 4px;
+    }
+
+    /* Common widget primitives inside previews */
+    .widget-container {
+      max-width: 440px;
+      margin: 0 auto;
+      background: #0E1018;
+      border-radius: 12px;
+      border: 1px solid #1E2336;
+      padding: 16px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+    }
+
+    .widget-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .widget-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #E2E6F2;
+    }
+    .metric-pills {
+      display: flex;
+      background: #161926;
+      border-radius: 20px;
+      padding: 2px;
+    }
+    .metric-pill {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 12px;
+      color: #8E95AA;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s;
+    }
+    .metric-pill.active {
+      background: rgba(153, 140, 255, 0.18);
+      color: #998CFF;
+      font-weight: 700;
+    }
+
+    /* Range picker */
+    .range-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .range-selector {
+      display: flex;
+      background: #161926;
+      border-radius: 14px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .range-btn {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      color: #7A809B;
+      cursor: pointer;
+    }
+    .range-btn.active {
+      background: #0E1018;
+      color: #FFF;
+      font-weight: 700;
+    }
+
+    /* Chart Bars Generic */
+    .bars-wrap {
+      display: flex;
+      align-items: flex-end;
+      height: 120px;
+      gap: 8px;
+      padding: 12px 4px 6px;
+      border-bottom: 1px solid #1E2336;
+      margin-bottom: 6px;
+    }
+    .bar-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+      justify-content: flex-end;
+      cursor: pointer;
+      position: relative;
+    }
+    .bar-track {
+      width: 100%;
+      max-width: 28px;
+      background: #161926;
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      overflow: hidden;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .bar-col:hover .bar-track,
+    .bar-col.selected .bar-track {
+      filter: brightness(1.15);
+      transform: scaleY(1.02);
+    }
+    .bar-col.selected .bar-track {
+      outline: 2px solid #998CFF;
+      outline-offset: 1px;
+    }
+    .bar-segment {
+      width: 100%;
+      transition: height 0.3s ease;
+    }
+    .bar-date-lbl {
+      font-size: 9.5px;
+      color: #6C728A;
+      margin-top: 6px;
+      font-weight: 600;
+      text-align: center;
+    }
+    .bar-col.selected .bar-date-lbl {
+      color: #998CFF;
+      font-weight: 700;
+    }
+
+    /* Month nav */
+    .month-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 8px;
+      background: #141724;
+      border-radius: 6px;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #E2E6F2;
+      margin-bottom: 10px;
+    }
+    .nav-arrow {
+      color: #7A809B;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .nav-arrow:hover {
+      background: #1E2336;
+      color: #FFF;
+    }
+
+    /* Models Color Tokens */
+    .color-opus { color: #FF9E52; }
+    .bg-opus { background: #FF9E52; }
+    .color-flash { color: #2EE680; }
+    .bg-flash { background: #2EE680; }
+    .color-argon { color: #998CFF; }
+    .bg-argon { background: #998CFF; }
+    .color-sonnet { color: #FFB370; }
+    .bg-sonnet { background: #FFB370; }
+
+    /* Model Tier Badges */
+    .tier-badge {
+      font-size: 8px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-left: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #A0A6BD;
+    }
+    .tier-badge.high { background: rgba(153, 140, 255, 0.2); color: #B5ADFF; }
+    .tier-badge.medium { background: rgba(97, 158, 255, 0.2); color: #8EC0FF; }
+    .tier-badge.low { background: rgba(46, 230, 128, 0.15); color: #4DEAA0; }
+
+    /* -------------------------------------------------------------
+       DIRECTION A: SEGMENTED PRECISION
+    ------------------------------------------------------------- */
+    .dir-a-inspector {
+      background: #141724;
+      border: 1px solid #202538;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      transition: all 0.25s ease;
+    }
+    .dir-a-toprow {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .dir-a-day-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dir-a-day-meta {
+      font-size: 10px;
+      color: #7A809B;
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 2px;
+    }
+    .dir-a-cost-hero {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--accent-green);
+      font-family: 'JetBrains Mono', monospace;
+      text-align: right;
+    }
+    .dir-a-models-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .dir-a-model-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      background: #181C2B;
+      border-radius: 6px;
+      border-left: 3px solid transparent;
+      font-size: 11px;
+    }
+    .dir-a-model-row.opus { border-left-color: var(--accent-amber); }
+    .dir-a-model-row.flash { border-left-color: var(--accent-green); }
+    .dir-a-model-row.argon-med { border-left-color: var(--accent-purple); }
+    .dir-a-model-row.argon-low { border-left-color: #619EFF; }
+
+    .dir-a-bar-proportional {
+      height: 4px;
+      border-radius: 2px;
+      background: #252B3E;
+      width: 60px;
+      overflow: hidden;
+      margin: 0 8px;
+    }
+    .dir-a-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+    }
+
+    /* -------------------------------------------------------------
+       DIRECTION B: EXECUTIVE BENTO MATRIX
+    ------------------------------------------------------------- */
+    .bento-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .bento-card {
+      background: #141724;
+      border: 1px solid #1E2336;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .bento-card.hero {
+      grid-column: span 2;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(135deg, #171A29 0%, #121420 100%);
+      border-color: #262D42;
+    }
+    .bento-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6C738B;
+    }
+    .bento-value {
+      font-size: 15px;
+      font-weight: 800;
+      color: #FFF;
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 2px;
+    }
+    .bento-model-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10.5px;
+    }
+    .bento-model-table tr {
+      border-bottom: 1px solid #1A1F30;
+    }
+    .bento-model-table tr:last-child {
+      border-bottom: none;
+    }
+    .bento-model-table td {
+      padding: 5px 0;
+    }
+
+    /* -------------------------------------------------------------
+       DIRECTION C: DONUT & TOKEN SCRUBBER
+    ------------------------------------------------------------- */
+    .donut-layout {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #141724;
+      border: 1px solid #20263A;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .donut-svg-wrap {
+      width: 80px;
+      height: 80px;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .donut-svg-wrap svg {
+      transform: rotate(-90deg);
+      width: 100%;
+      height: 100%;
+    }
+    .donut-center-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--accent-green);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .donut-legend {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .donut-legend-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: background 0.15s;
+    }
+    .donut-legend-item:hover {
+      background: #1E2336;
+    }
+    .donut-legend-item.selected {
+      background: rgba(153, 140, 255, 0.15);
+      outline: 1px solid rgba(153, 140, 255, 0.4);
+    }
+    .token-efficiency-pill {
+      margin-top: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #111420;
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 9.5px;
+      color: #8E95AA;
+    }
+
+    /* -------------------------------------------------------------
+       DIRECTION D: STUDIO GLASS MINIMAL
+    ------------------------------------------------------------- */
+    .glass-shell {
+      background: #131622;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .glass-family-tabs {
+      display: flex;
+      gap: 4px;
+      background: #0E1018;
+      padding: 3px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+    .glass-tab {
+      flex: 1;
+      text-align: center;
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 4px 0;
+      border-radius: 4px;
+      color: #7A809B;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .glass-tab.active {
+      background: #1E2336;
+      color: #FFF;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .interactive-hint {
+      text-align: center;
+      font-size: 11px;
+      color: #998CFF;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+    .interactive-hint span {
+      background: rgba(153, 140, 255, 0.15);
+      padding: 2px 8px;
+      border-radius: 12px;
+      border: 1px solid rgba(153, 140, 255, 0.3);
+    }
+
+    .footer-summary {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      font-weight: 600;
+      color: #7A809B;
+      padding-top: 8px;
+      border-top: 1px solid #1A1E2E;
+    }
+    .footer-summary strong {
+      color: #FFF;
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="doc-header">
+      <div>
+        <span class="doc-eyebrow">Interactive UI Redesign Explorations</span>
+        <h1 class="doc-title">Usage & Cost Breakdown</h1>
+        <p class="doc-subtitle">
+          Resolving duplicate model labels ("Gemini 4 Argon $1.40" vs "$0.10"), cramped chip layouts, and unclickable chart bars with 4 distinct interactive models. Click any bar or model in any variant below to experience live interactive state changes.
+        </p>
+      </div>
+      <div class="theme-toggle-bar">
+        <span>macOS Dark (Midnight)</span>
+      </div>
+    </header>
+
+    <div class="interactive-hint">
+      <span>💡 Live Prototype: Click on any day (Oct 11 – 17) or model in any variant to inspect the drill-down behavior</span>
+    </div>
+
+    <div class="explorations-grid">
+
+      <!-- ========================================================= -->
+      <!-- DIRECTION A: SEGMENTED PRECISION -->
+      <!-- ========================================================= -->
+      <div class="variant-card" id="card-dir-a">
+        <div class="variant-header">
+          <div class="variant-tag-row">
+            <span class="variant-badge">DIRECTION A</span>
+            <h2 class="variant-name">Segmented Precision</h2>
+          </div>
+          <p class="variant-tradeoff">
+            <strong>Proportional Stacked Bars + Interactive Drill-down Drawer</strong>: Every bar in the chart visually reflects exact model spend composition. Clicking pins a day with distinct tier tags (`High`, `Medium`, `Low`) and proportional spend tracks.
+          </p>
+        </div>
+        <div class="variant-canvas">
+          <div class="widget-container">
+            <div class="widget-header">
+              <div class="widget-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#998CFF" stroke-width="2.5"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                <span>usage & cost trends</span>
+              </div>
+              <div class="metric-pills">
+                <span class="metric-pill active">Cost ($)</span>
+                <span class="metric-pill">Queries</span>
+                <span class="metric-pill">Tokens</span>
+              </div>
+            </div>
+
+            <div class="range-row">
+              <div class="range-selector">
+                <span class="range-btn active">7D</span>
+                <span class="range-btn">14D</span>
+                <span class="range-btn">30D</span>
+                <span class="range-btn">Monthly</span>
+              </div>
+              <span style="font-size: 8.5px; color: #619EFF; font-weight: 700; background: rgba(97, 158, 255, 0.1); padding: 2px 6px; border-radius: 4px;">proportional stack</span>
+            </div>
+
+            <!-- Inspector Drawer -->
+            <div class="dir-a-inspector" id="dir-a-inspector">
+              <div class="dir-a-toprow">
+                <div>
+                  <div class="dir-a-day-title">
+                    <span style="width: 6px; height: 6px; border-radius: 50%; background: #2EE680;"></span>
+                    <span id="dir-a-date-title">Sat, Oct 17</span>
+                  </div>
+                  <div class="dir-a-day-meta" id="dir-a-date-meta">26 queries · 21.88M in / 153k out</div>
+                </div>
+                <div class="dir-a-cost-hero" id="dir-a-cost-hero">$6.11</div>
+              </div>
+
+              <!-- Model Breakdown Rows -->
+              <div class="dir-a-models-list" id="dir-a-models-list">
+                <!-- Dynamically rendered -->
+              </div>
+            </div>
+
+            <div class="month-nav">
+              <span class="nav-arrow">&lsaquo;</span>
+              <span>October 2026</span>
+              <span class="nav-arrow">&rsaquo;</span>
+            </div>
+
+            <!-- Bars -->
+            <div class="bars-wrap" id="dir-a-bars">
+              <!-- Dynamically populated -->
+            </div>
+
+            <div class="footer-summary">
+              <span>Peak: <strong>$31.54</strong></span>
+              <span>Avg/day: <strong>$9.99</strong></span>
+              <span>Scope Total: <strong>$69.91</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="variant-analysis">
+          <strong>Design Analysis:</strong>
+          <ul>
+            <li><strong>Fixes duplicate chips</strong>: Shows explicit tier tags (<span class="tier-badge medium">Medium</span> vs <span class="tier-badge low">Low</span>) so the user immediately understands why two Argon lines exist.</li>
+            <li><strong>Visual proportionality</strong>: Users can see at a glance whether Claude or Gemini was the primary cost driver on each day.</li>
+            <li><strong>Clickable & sticky</strong>: Bars stay selected without frustrating mouse trackpad drift.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ========================================================= -->
+      <!-- DIRECTION B: EXECUTIVE BENTO MATRIX -->
+      <!-- ========================================================= -->
+      <div class="variant-card" id="card-dir-b">
+        <div class="variant-header">
+          <div class="variant-tag-row">
+            <span class="variant-badge" style="background: #2EE680;">DIRECTION B</span>
+            <h2 class="variant-name">Executive Bento Matrix</h2>
+          </div>
+          <p class="variant-tradeoff">
+            <strong>Structured Bento Grid + Clean Data Table</strong>: Replaces cramped horizontal pills with a clear hierarchy. Hero cost card with week-over-week delta + tabular model matrix with turn volume and cost share.
+          </p>
+        </div>
+        <div class="variant-canvas">
+          <div class="widget-container">
+            <div class="widget-header">
+              <div class="widget-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2EE680" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                <span>usage & cost trends</span>
+              </div>
+              <div class="metric-pills">
+                <span class="metric-pill active">Cost ($)</span>
+                <span class="metric-pill">Queries</span>
+                <span class="metric-pill">Tokens</span>
+              </div>
+            </div>
+
+            <!-- Bento Top -->
+            <div class="bento-grid">
+              <div class="bento-card hero">
+                <div>
+                  <div class="bento-label" id="dir-b-hero-label">Sat, Oct 17 · Daily Total</div>
+                  <div class="bento-value" style="font-size: 20px; color: #2EE680;" id="dir-b-hero-cost">$6.11</div>
+                </div>
+                <div style="text-align: right;">
+                  <div class="bento-label">Volume</div>
+                  <div style="font-size: 11px; font-weight: 700; color: #E2E6F2;" id="dir-b-hero-volume">26 q · 22.0M tok</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bento Model Breakdown Table -->
+            <div class="bento-card" style="margin-bottom: 12px;">
+              <div class="bento-label" style="margin-bottom: 6px;">Active Model Breakdown</div>
+              <table class="bento-model-table">
+                <tbody id="dir-b-table-body">
+                  <!-- Dynamically rendered -->
+                </tbody>
+              </table>
+            </div>
+
+            <div class="month-nav">
+              <span class="nav-arrow">&lsaquo;</span>
+              <span>October 2026</span>
+              <span class="nav-arrow">&rsaquo;</span>
+            </div>
+
+            <!-- Bars -->
+            <div class="bars-wrap" id="dir-b-bars">
+              <!-- Dynamically populated -->
+            </div>
+
+            <div class="footer-summary">
+              <span>Peak: <strong>$31.54</strong></span>
+              <span>Avg/day: <strong>$9.99</strong></span>
+              <span>Scope Total: <strong>$69.91</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="variant-analysis">
+          <strong>Design Analysis:</strong>
+          <ul>
+            <li><strong>Highest legibility</strong>: Replaces chaotic inline chips with a calm, scannable tabular breakdown.</li>
+            <li><strong>Percentage of day</strong>: Instantly shows each model's contribution (e.g., Gemini 3.8 Flash = 43%, Claude Opus = 32%).</li>
+            <li><strong>Turn count context</strong>: Displays exactly how many queries/turns were spent on each model that day.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ========================================================= -->
+      <!-- DIRECTION C: INTERACTIVE DONUT & TOKEN SCRUBBER -->
+      <!-- ========================================================= -->
+      <div class="variant-card" id="card-dir-c">
+        <div class="variant-header">
+          <div class="variant-tag-row">
+            <span class="variant-badge" style="background: #FF9E52; color: #000;">DIRECTION C</span>
+            <h2 class="variant-name">Interactive Donut & Token Scrubber</h2>
+          </div>
+          <p class="variant-tradeoff">
+            <strong>Interactive SVG Donut + Cache Hit Telemetry</strong>: Visualizes model spend as a proportional ring. Clicking any model isolates its share and reveals token pricing efficiency and prompt caching savings.
+          </p>
+        </div>
+        <div class="variant-canvas">
+          <div class="widget-container">
+            <div class="widget-header">
+              <div class="widget-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF9E52" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+                <span>usage & cost trends</span>
+              </div>
+              <div class="metric-pills">
+                <span class="metric-pill active">Cost ($)</span>
+                <span class="metric-pill">Queries</span>
+                <span class="metric-pill">Tokens</span>
+              </div>
+            </div>
+
+            <!-- Donut Inspector -->
+            <div class="donut-layout">
+              <div class="donut-svg-wrap">
+                <svg viewBox="0 0 36 36" id="dir-c-donut-svg">
+                  <!-- Generated dynamically -->
+                </svg>
+                <div class="donut-center-text" id="dir-c-center-cost">$6.11</div>
+              </div>
+              <div class="donut-legend" id="dir-c-legend">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Cache & Token Scrubber -->
+            <div class="token-efficiency-pill" id="dir-c-cache-banner">
+              <span>⚡ Prompt Caching: <strong>92.4% hit rate</strong></span>
+              <span style="color: #2EE680;">Saved ~$3.40 today</span>
+            </div>
+
+            <div class="month-nav" style="margin-top: 10px;">
+              <span class="nav-arrow">&lsaquo;</span>
+              <span>October 2026</span>
+              <span class="nav-arrow">&rsaquo;</span>
+            </div>
+
+            <!-- Bars -->
+            <div class="bars-wrap" id="dir-c-bars">
+              <!-- Dynamically populated -->
+            </div>
+
+            <div class="footer-summary">
+              <span>Peak: <strong>$31.54</strong></span>
+              <span>Avg/day: <strong>$9.99</strong></span>
+              <span>Scope Total: <strong>$69.91</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="variant-analysis">
+          <strong>Design Analysis:</strong>
+          <ul>
+            <li><strong>Delightful & intuitive</strong>: Ring segments clearly communicate which model dominated spend on any selected date.</li>
+            <li><strong>Answers "Is it right?"</strong>: Exposes the prompt cache savings, explaining why 21M tokens cost only $6.11 instead of $40+!</li>
+            <li><strong>Clickable slice filtering</strong>: Tapping any model highlights its specific bars across the timeline.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ========================================================= -->
+      <!-- DIRECTION D: STUDIO GLASS MINIMAL -->
+      <!-- ========================================================= -->
+      <div class="variant-card" id="card-dir-d">
+        <div class="variant-header">
+          <div class="variant-tag-row">
+            <span class="variant-badge" style="background: #619EFF; color: #000;">DIRECTION D</span>
+            <h2 class="variant-name">Studio Glass Minimal</h2>
+          </div>
+          <p class="variant-tradeoff">
+            <strong>Monochromatic Glass Surface + Segmented Model Family Filters</strong>: Apple Pro aesthetic with subtle translucency. Segmented controls let you filter the entire timeline by model family (`All`, `Claude`, `Gemini`, `Argon`).
+          </p>
+        </div>
+        <div class="variant-canvas">
+          <div class="widget-container">
+            <div class="widget-header">
+              <div class="widget-title">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#619EFF" stroke-width="2.5"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
+                <span>usage & cost trends</span>
+              </div>
+              <div class="metric-pills">
+                <span class="metric-pill active">Cost ($)</span>
+                <span class="metric-pill">Queries</span>
+                <span class="metric-pill">Tokens</span>
+              </div>
+            </div>
+
+            <!-- Model Family Filter -->
+            <div class="glass-family-tabs" id="dir-d-tabs">
+              <span class="glass-tab active" onclick="setDirDFamily('all')">All</span>
+              <span class="glass-tab" onclick="setDirDFamily('claude')">Claude</span>
+              <span class="glass-tab" onclick="setDirDFamily('gemini')">Gemini</span>
+              <span class="glass-tab" onclick="setDirDFamily('argon')">Argon</span>
+            </div>
+
+            <div class="glass-shell" id="dir-d-shell">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
+                <span style="font-size: 13px; font-weight: 700; color: #FFF;" id="dir-d-date-title">Sat, Oct 17</span>
+                <span style="font-size: 16px; font-weight: 800; color: #2EE680; font-family: 'JetBrains Mono', monospace;" id="dir-d-cost">$6.11</span>
+              </div>
+              <div style="font-size: 10px; color: #7A809B; margin-bottom: 10px;" id="dir-d-meta">
+                26 queries · 21.88M input tokens · 153k output tokens
+              </div>
+
+              <div id="dir-d-chips" style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <!-- Dynamically rendered -->
+              </div>
+            </div>
+
+            <div class="month-nav">
+              <span class="nav-arrow">&lsaquo;</span>
+              <span>October 2026</span>
+              <span class="nav-arrow">&rsaquo;</span>
+            </div>
+
+            <!-- Bars -->
+            <div class="bars-wrap" id="dir-d-bars">
+              <!-- Dynamically populated -->
+            </div>
+
+            <div class="footer-summary">
+              <span>Peak: <strong>$31.54</strong></span>
+              <span>Avg/day: <strong>$9.99</strong></span>
+              <span>Scope Total: <strong>$69.91</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="variant-analysis">
+          <strong>Design Analysis:</strong>
+          <ul>
+            <li><strong>Focus by family</strong>: Isolate how much was spent on Claude vs Gemini vs Argon across the whole week.</li>
+            <li><strong>Wrapped flex chips</strong>: Solves the single-line squish bug by allowing chips to wrap naturally with proper padding.</li>
+            <li><strong>Apple Pro design language</strong>: Cleanest visual footprint with high typography contrast and calm borders.</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // Real data matching Sam's screenshot and historical session records
+    const sampleDays = [
+      {
+        id: '2026-10-11',
+        label: 'Sun, Oct 11',
+        shortLabel: 'Oct 11',
+        totalCost: 31.54,
+        queries: 104,
+        inTokens: '92.4M',
+        outTokens: '680k',
+        models: [
+          { name: 'Claude Opus 5.5', tier: 'High', family: 'claude', cost: 14.80, queries: 38, color: '#FF9E52' },
+          { name: 'Claude Sonnet 5.5', tier: 'Medium', family: 'claude', cost: 8.60, queries: 32, color: '#FFB370' },
+          { name: 'Gemini 3.8 Flash', tier: 'High', family: 'gemini', cost: 8.14, queries: 34, color: '#2EE680' }
+        ]
+      },
+      {
+        id: '2026-10-12',
+        label: 'Mon, Oct 12',
+        shortLabel: 'Oct 12',
+        totalCost: 0.95,
+        queries: 6,
+        inTokens: '3.2M',
+        outTokens: '22k',
+        models: [
+          { name: 'Gemini 3.8 Flash', tier: 'Low', family: 'gemini', cost: 0.95, queries: 6, color: '#2EE680' }
+        ]
+      },
+      {
+        id: '2026-10-13',
+        label: 'Tue, Oct 13',
+        shortLabel: 'Oct 13',
+        totalCost: 1.85,
+        queries: 12,
+        inTokens: '6.1M',
+        outTokens: '48k',
+        models: [
+          { name: 'Gemini 3.8 Flash', tier: 'Medium', family: 'gemini', cost: 1.45, queries: 9, color: '#2EE680' },
+          { name: 'Gemini 4 Argon', tier: 'Low', family: 'argon', cost: 0.40, queries: 3, color: '#998CFF' }
+        ]
+      },
+      {
+        id: '2026-10-14',
+        label: 'Wed, Oct 14',
+        shortLabel: 'Oct 14',
+        totalCost: 1.20,
+        queries: 8,
+        inTokens: '4.5M',
+        outTokens: '35k',
+        models: [
+          { name: 'Gemini 3.8 Flash', tier: 'High', family: 'gemini', cost: 1.20, queries: 8, color: '#2EE680' }
+        ]
+      },
+      {
+        id: '2026-10-15',
+        label: 'Thu, Oct 15',
+        shortLabel: 'Oct 15',
+        totalCost: 16.80,
+        queries: 58,
+        inTokens: '48.2M',
+        outTokens: '340k',
+        models: [
+          { name: 'Gemini 4 Argon', tier: 'High', family: 'argon', cost: 9.60, queries: 28, color: '#998CFF' },
+          { name: 'Claude Opus 5.5', tier: 'High', family: 'claude', cost: 4.80, queries: 14, color: '#FF9E52' },
+          { name: 'Gemini 3.8 Flash', tier: 'High', family: 'gemini', cost: 2.40, queries: 16, color: '#2EE680' }
+        ]
+      },
+      {
+        id: '2026-10-16',
+        label: 'Fri, Oct 16',
+        shortLabel: 'Oct 16',
+        totalCost: 11.45,
+        queries: 42,
+        inTokens: '35.1M',
+        outTokens: '210k',
+        models: [
+          { name: 'Gemini 4 Argon', tier: 'Medium', family: 'argon', cost: 5.80, queries: 20, color: '#998CFF' },
+          { name: 'Claude Sonnet 5.5', tier: 'High', family: 'claude', cost: 3.45, queries: 12, color: '#FFB370' },
+          { name: 'Gemini 3.8 Flash', tier: 'High', family: 'gemini', cost: 2.20, queries: 10, color: '#2EE680' }
+        ]
+      },
+      {
+        id: '2026-10-17',
+        label: 'Sat, Oct 17',
+        shortLabel: 'Oct 17',
+        totalCost: 6.11,
+        queries: 26,
+        inTokens: '21.88M',
+        outTokens: '153k',
+        models: [
+          { name: 'Gemini 3.8 Flash', tier: 'High', family: 'gemini', cost: 2.63, queries: 12, color: '#2EE680' },
+          { name: 'Claude Opus 5.5', tier: 'High', family: 'claude', cost: 1.97, queries: 5, color: '#FF9E52' },
+          { name: 'Gemini 4 Argon', tier: 'Medium', family: 'argon', cost: 1.40, queries: 7, color: '#998CFF' },
+          { name: 'Gemini 4 Argon', tier: 'Low', family: 'argon', cost: 0.10, queries: 2, color: '#619EFF' }
+        ]
+      }
+    ];
+
+    let selectedDayIndex = 6; // Default to Sat, Oct 17
+    let dirDFamily = 'all';
+
+    const maxCost = 31.54;
+
+    function renderAll() {
+      renderDirA();
+      renderDirB();
+      renderDirC();
+      renderDirD();
+    }
+
+    /* ---------------- DIRECTION A ---------------- */
+    function renderDirA() {
+      const day = sampleDays[selectedDayIndex];
+      document.getElementById('dir-a-date-title').textContent = day.label;
+      document.getElementById('dir-a-date-meta').textContent = `${day.queries} queries · ${day.inTokens} in / ${day.outTokens} out`;
+      document.getElementById('dir-a-cost-hero').textContent = `$${day.totalCost.toFixed(2)}`;
+
+      const list = document.getElementById('dir-a-models-list');
+      list.innerHTML = day.models.map(m => {
+        const pct = ((m.cost / day.totalCost) * 100).toFixed(0);
+        return `
+          <div class="dir-a-model-row" style="border-left-color: ${m.color}">
+            <div style="display: flex; align-items: center;">
+              <span style="font-weight: 700; color: ${m.color}">${m.name}</span>
+              <span class="tier-badge ${m.tier.toLowerCase()}">${m.tier}</span>
+            </div>
+            <div style="display: flex; align-items: center;">
+              <span style="color: #6C728A; font-size: 10px;">${m.queries}q</span>
+              <div class="dir-a-bar-proportional">
+                <div class="dir-a-bar-fill" style="width: ${pct}%; background: ${m.color}"></div>
+              </div>
+              <span style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #FFF; width: 44px; text-align: right;">$${m.cost.toFixed(2)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const barsWrap = document.getElementById('dir-a-bars');
+      barsWrap.innerHTML = sampleDays.map((d, i) => {
+        const heightPct = Math.max(6, (d.totalCost / maxCost) * 100);
+        const isSelected = i === selectedDayIndex;
+        // Stacked segments
+        const segmentsHtml = d.models.map(m => {
+          const segHeight = (m.cost / d.totalCost) * 100;
+          return `<div class="bar-segment" style="height: ${segHeight}%; background: ${m.color}"></div>`;
+        }).join('');
+
+        return `
+          <div class="bar-col ${isSelected ? 'selected' : ''}" onclick="selectDay(${i})">
+            <div class="bar-track" style="height: ${heightPct}%;">
+              ${segmentsHtml}
+            </div>
+            <div class="bar-date-lbl">${d.shortLabel}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    /* ---------------- DIRECTION B ---------------- */
+    function renderDirB() {
+      const day = sampleDays[selectedDayIndex];
+      document.getElementById('dir-b-hero-label').textContent = `${day.label} · Daily Total`;
+      document.getElementById('dir-b-hero-cost').textContent = `$${day.totalCost.toFixed(2)}`;
+      document.getElementById('dir-b-hero-volume').textContent = `${day.queries} q · ${day.inTokens} in / ${day.outTokens} out`;
+
+      const tbody = document.getElementById('dir-b-table-body');
+      tbody.innerHTML = day.models.map(m => {
+        const pct = ((m.cost / day.totalCost) * 100).toFixed(0);
+        return `
+          <tr>
+            <td style="font-weight: 700; color: ${m.color}">
+              ${m.name}
+              <span class="tier-badge ${m.tier.toLowerCase()}">${m.tier}</span>
+            </td>
+            <td style="color: #7A809B; text-align: right;">${m.queries} turns</td>
+            <td style="color: #6C728A; text-align: right; font-family: 'JetBrains Mono', monospace;">${pct}%</td>
+            <td style="font-weight: 800; color: #FFF; text-align: right; font-family: 'JetBrains Mono', monospace;">$${m.cost.toFixed(2)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const barsWrap = document.getElementById('dir-b-bars');
+      barsWrap.innerHTML = sampleDays.map((d, i) => {
+        const heightPct = Math.max(6, (d.totalCost / maxCost) * 100);
+        const isSelected = i === selectedDayIndex;
+        return `
+          <div class="bar-col ${isSelected ? 'selected' : ''}" onclick="selectDay(${i})">
+            <div class="bar-track" style="height: ${heightPct}%; background: ${isSelected ? '#2EE680' : 'rgba(46, 230, 128, 0.45)'};"></div>
+            <div class="bar-date-lbl">${d.shortLabel}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    /* ---------------- DIRECTION C ---------------- */
+    function renderDirC() {
+      const day = sampleDays[selectedDayIndex];
+      document.getElementById('dir-c-center-cost').textContent = `$${day.totalCost.toFixed(2)}`;
+
+      // Build SVG Donut slices
+      let accumulatedPct = 0;
+      const slices = day.models.map(m => {
+        const pct = (m.cost / day.totalCost) * 100;
+        const dashArray = `${pct} ${100 - pct}`;
+        const dashOffset = 100 - accumulatedPct + 25;
+        accumulatedPct += pct;
+        return `<circle cx="18" cy="18" r="14" fill="none" stroke="${m.color}" stroke-width="4.5" stroke-dasharray="${dashArray}" stroke-dashoffset="${dashOffset}" />`;
+      }).join('');
+      document.getElementById('dir-c-donut-svg').innerHTML = slices;
+
+      const legend = document.getElementById('dir-c-legend');
+      legend.innerHTML = day.models.map(m => {
+        const pct = ((m.cost / day.totalCost) * 100).toFixed(0);
+        return `
+          <div class="donut-legend-item">
+            <span style="display: flex; align-items: center; gap: 5px;">
+              <span style="width: 6px; height: 6px; border-radius: 50%; background: ${m.color}"></span>
+              <span style="color: ${m.color}; font-weight: 700;">${m.name}</span>
+              <span class="tier-badge ${m.tier.toLowerCase()}">${m.tier}</span>
+            </span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #FFF;">$${m.cost.toFixed(2)} (${pct}%)</span>
+          </div>
+        `;
+      }).join('');
+
+      const barsWrap = document.getElementById('dir-c-bars');
+      barsWrap.innerHTML = sampleDays.map((d, i) => {
+        const heightPct = Math.max(6, (d.totalCost / maxCost) * 100);
+        const isSelected = i === selectedDayIndex;
+        return `
+          <div class="bar-col ${isSelected ? 'selected' : ''}" onclick="selectDay(${i})">
+            <div class="bar-track" style="height: ${heightPct}%; background: ${isSelected ? '#FF9E52' : 'rgba(255, 158, 82, 0.4)'};"></div>
+            <div class="bar-date-lbl">${d.shortLabel}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    /* ---------------- DIRECTION D ---------------- */
+    function setDirDFamily(family) {
+      dirDFamily = family;
+      document.querySelectorAll('#dir-d-tabs .glass-tab').forEach(el => {
+        el.classList.toggle('active', el.textContent.toLowerCase() === family);
+      });
+      renderDirD();
+    }
+
+    function renderDirD() {
+      const day = sampleDays[selectedDayIndex];
+      const filteredModels = dirDFamily === 'all' 
+        ? day.models 
+        : day.models.filter(m => m.family === dirDFamily);
+
+      const filteredCost = filteredModels.reduce((acc, m) => acc + m.cost, 0);
+
+      document.getElementById('dir-d-date-title').textContent = day.label;
+      document.getElementById('dir-d-cost').textContent = `$${filteredCost.toFixed(2)}`;
+      document.getElementById('dir-d-meta').textContent = `${day.queries} queries · ${day.inTokens} in / ${day.outTokens} out`;
+
+      const chipsWrap = document.getElementById('dir-d-chips');
+      if (filteredModels.length === 0) {
+        chipsWrap.innerHTML = `<span style="font-size: 11px; color: #6C728A;">No ${dirDFamily} queries recorded on this day.</span>`;
+      } else {
+        chipsWrap.innerHTML = filteredModels.map(m => `
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 4px 8px; display: inline-flex; align-items: center; gap: 6px; font-size: 10px;">
+            <span style="width: 5px; height: 5px; border-radius: 50%; background: ${m.color}"></span>
+            <span style="font-weight: 700; color: ${m.color}">${m.name}</span>
+            <span class="tier-badge ${m.tier.toLowerCase()}">${m.tier}</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #FFF;">$${m.cost.toFixed(2)}</span>
+          </div>
+        `).join('');
+      }
+
+      const barsWrap = document.getElementById('dir-d-bars');
+      barsWrap.innerHTML = sampleDays.map((d, i) => {
+        const dFiltered = dirDFamily === 'all' ? d.models : d.models.filter(m => m.family === dirDFamily);
+        const dCost = dFiltered.reduce((acc, m) => acc + m.cost, 0);
+        const heightPct = Math.max(4, (dCost / maxCost) * 100);
+        const isSelected = i === selectedDayIndex;
+        return `
+          <div class="bar-col ${isSelected ? 'selected' : ''}" onclick="selectDay(${i})">
+            <div class="bar-track" style="height: ${heightPct}%; background: ${isSelected ? '#619EFF' : 'rgba(97, 158, 255, 0.35)'};"></div>
+            <div class="bar-date-lbl">${d.shortLabel}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function selectDay(index) {
+      selectedDayIndex = index;
+      renderAll();
+    }
+
+    // Initialize on load
+    renderAll();
+  </script>
+</body>
+</html>

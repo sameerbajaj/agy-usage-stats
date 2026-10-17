@@ -650,4 +650,59 @@ struct agy_usage_statsTests {
         let dedicatedShortMatch = vm.getGroup(matchingModelName: "argon-high")
         #expect(dedicatedShortMatch?.displayName == "Gemini 4 Argon")
     }
+
+    // MARK: - Tab Consolidation & Canonical Model Tests
+
+    @Test func testCanonicalModelConsolidation() {
+        let bucket = UsageTimeBucket(
+            periodKey: "2026-10-17",
+            label: "Today",
+            shortLabel: "17",
+            date: Date(),
+            queryCount: 15,
+            totalCost: 1.50,
+            inputTokens: 20_000,
+            outputTokens: 1_000,
+            modelBreakdown: [
+                "Gemini 4 Argon (High)": 1.40,
+                "Gemini 4 Argon (Medium)": 0.10
+            ]
+        )
+
+        let consolidated = bucket.consolidatedModelBreakdown
+        #expect(consolidated.count == 1)
+        #expect(consolidated["Gemini 4 Argon"] != nil)
+        #expect(abs((consolidated["Gemini 4 Argon"] ?? 0.0) - 1.50) < 0.001)
+
+        // Test multi-day aggregation
+        let bucket2 = UsageTimeBucket(
+            periodKey: "2026-10-16",
+            label: "Oct 16",
+            shortLabel: "16",
+            date: Date().addingTimeInterval(-86400),
+            queryCount: 10,
+            totalCost: 2.20,
+            inputTokens: 30_000,
+            outputTokens: 2_000,
+            modelBreakdown: [
+                "Gemini 4 Argon (High)": 0.80,
+                "Claude Opus 5.5 (High)": 1.40
+            ]
+        )
+
+        let multiDay = [bucket, bucket2]
+        let multiBreakdown = multiDay.aggregatedModelBreakdown
+
+        #expect(multiBreakdown.count == 2)
+        #expect(abs((multiBreakdown["Gemini 4 Argon"] ?? 0.0) - 2.30) < 0.001)
+        #expect(abs((multiBreakdown["Claude Opus 5.5"] ?? 0.0) - 1.40) < 0.001)
+        #expect(abs(multiDay.aggregatedTotalCost - 3.70) < 0.001)
+        #expect(multiDay.aggregatedQueryCount == 25)
+    }
+
+    @Test func testPopoverTabConsolidation() {
+        let tabs = PopoverTab.allCases
+        #expect(tabs.count == 3)
+        #expect(tabs == [.overview, .activity, .settings])
+    }
 }

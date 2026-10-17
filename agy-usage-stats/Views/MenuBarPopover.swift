@@ -9,20 +9,16 @@ import SwiftUI
 import AppKit
 
 public enum PopoverTab: String, CaseIterable, Identifiable {
-    case usage = "Usage"
-    case cost = "Cost"
-    case workspaces = "Workspaces"
-    case history = "History"
+    case overview = "Overview"
+    case activity = "Activity"
     case settings = "Settings"
     
     public var id: String { rawValue }
     
     public var icon: String {
         switch self {
-        case .usage: return "chart.bar.fill"
-        case .cost: return "dollarsign.circle.fill"
-        case .workspaces: return "folder.fill"
-        case .history: return "clock.arrow.circlepath"
+        case .overview: return "chart.bar.fill"
+        case .activity: return "clock.arrow.circlepath"
         case .settings: return "gearshape.fill"
         }
     }
@@ -30,7 +26,7 @@ public enum PopoverTab: String, CaseIterable, Identifiable {
 
 public struct MenuBarPopover: View {
     @Bindable public var viewModel: AgyStatsViewModel
-    @State private var selectedTab: PopoverTab = .usage
+    @State private var selectedTab: PopoverTab = .overview
     @Namespace private var namespace
     @Environment(\.colorScheme) var colorScheme
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
@@ -58,23 +54,15 @@ public struct MenuBarPopover: View {
             
             Group {
                 switch selectedTab {
-                case .usage:
-                    StatsTabView(viewModel: viewModel, onNavigateToCost: {
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                            selectedTab = .cost
-                        }
-                    })
-                case .cost:
-                    CostTabView(viewModel: viewModel)
-                case .workspaces:
-                    WorkspacesTabView(viewModel: viewModel)
-                case .history:
-                    HistoryTabView(viewModel: viewModel)
+                case .overview:
+                    OverviewTabView(viewModel: viewModel)
+                case .activity:
+                    ActivityTabView(viewModel: viewModel)
                 case .settings:
                     SettingsTabView(viewModel: viewModel)
                 }
             }
-            .frame(height: 420)
+            .frame(height: 440)
             .background(theme.surfacePrimary)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
