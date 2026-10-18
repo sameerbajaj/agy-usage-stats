@@ -141,6 +141,20 @@ public enum MenuBarPresentationResolver {
     public static let gcpBlueColor = NSColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0)
     public static let apiGreenColor = NSColor(red: 0.15, green: 0.85, blue: 0.55, alpha: 1.0)
 
+    public static let healthyGreenColor = NSColor(red: 0.15, green: 0.85, blue: 0.55, alpha: 1.0)
+    public static let warningAmberColor = NSColor(red: 1.0, green: 0.60, blue: 0.15, alpha: 1.0)
+    public static let lowRedColor = NSColor(red: 1.0, green: 0.35, blue: 0.35, alpha: 1.0)
+
+    public static func healthColor(for fraction: Double) -> NSColor {
+        if fraction > 0.50 {
+            return healthyGreenColor
+        } else if fraction > 0.20 {
+            return warningAmberColor
+        } else {
+            return lowRedColor
+        }
+    }
+
     public static let menuBarFont: NSFont = {
         let baseDesc = NSFont.systemFont(ofSize: 11.0, weight: .bold).fontDescriptor.withDesign(.rounded)
         if let baseDesc {
@@ -241,7 +255,9 @@ public enum MenuBarPresentationResolver {
             if let fraction = activeUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = activeFillFraction ?? fraction
-                return IconPresentationState(text: pctText, textColor: litColor, gaugeStyle: .single(fraction: fill, strokeColor: litColor), spendBadge: badge)
+                let textColor = healthColor(for: fraction)
+                let strokeColor = healthColor(for: fill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
             } else if queriesToday > 0 {
                 let pctText = "\(queriesToday)q"
                 return IconPresentationState(text: pctText, textColor: litColor, gaugeStyle: .single(fraction: 1.0, strokeColor: litColor), spendBadge: badge)
@@ -268,7 +284,9 @@ public enum MenuBarPresentationResolver {
             if let fraction = depletedFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = depletedFill ?? fraction
-                return IconPresentationState(text: pctText, textColor: litColor, gaugeStyle: .single(fraction: fill, strokeColor: litColor), spendBadge: badge)
+                let textColor = healthColor(for: fraction)
+                let strokeColor = healthColor(for: fill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
             } else if queriesToday > 0 {
                 let pctText = "\(queriesToday)q"
                 return IconPresentationState(text: pctText, textColor: litColor, gaugeStyle: .single(fraction: 1.0, strokeColor: litColor), spendBadge: badge)
@@ -280,7 +298,9 @@ public enum MenuBarPresentationResolver {
             if let fraction = geminiUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = geminiFillFraction ?? fraction
-                return IconPresentationState(text: pctText, textColor: geminiColor, gaugeStyle: .single(fraction: fill, strokeColor: geminiColor), spendBadge: badge)
+                let textColor = healthColor(for: fraction)
+                let strokeColor = healthColor(for: fill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
             } else {
                 return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
             }
@@ -289,7 +309,9 @@ public enum MenuBarPresentationResolver {
             if let fraction = argonUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = argonFillFraction ?? fraction
-                return IconPresentationState(text: pctText, textColor: argonColor, gaugeStyle: .single(fraction: fill, strokeColor: argonColor), spendBadge: badge)
+                let textColor = healthColor(for: fraction)
+                let strokeColor = healthColor(for: fill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
             } else {
                 return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
             }
@@ -298,7 +320,9 @@ public enum MenuBarPresentationResolver {
             if let fraction = claudeUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = claudeFillFraction ?? fraction
-                return IconPresentationState(text: pctText, textColor: claudeColor, gaugeStyle: .single(fraction: fill, strokeColor: claudeColor), spendBadge: badge)
+                let textColor = healthColor(for: fraction)
+                let strokeColor = healthColor(for: fill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
             } else {
                 return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
             }
@@ -328,11 +352,15 @@ public enum MenuBarPresentationResolver {
             } else if let gf = geminiUsageFraction {
                 let pctText = String(format: "%.0f%%", gf * 100)
                 let gFill = geminiFillFraction ?? gf
-                return IconPresentationState(text: pctText, textColor: geminiColor, gaugeStyle: .single(fraction: gFill, strokeColor: geminiColor), spendBadge: badge)
+                let textColor = healthColor(for: gf)
+                let strokeColor = healthColor(for: gFill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: gFill, strokeColor: strokeColor), spendBadge: badge)
             } else if let cf = claudeUsageFraction {
                 let pctText = String(format: "%.0f%%", cf * 100)
                 let cFill = claudeFillFraction ?? cf
-                return IconPresentationState(text: pctText, textColor: claudeColor, gaugeStyle: .single(fraction: cFill, strokeColor: claudeColor), spendBadge: badge)
+                let textColor = healthColor(for: cf)
+                let strokeColor = healthColor(for: cFill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: cFill, strokeColor: strokeColor), spendBadge: badge)
             } else {
                 return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
             }
@@ -358,11 +386,11 @@ public enum MenuBarPresentationResolver {
             } else if let gf = gFill, let cf = cFill {
                 gauge = .both(geminiFraction: gf, claudeFraction: cf)
             } else if let gf = gFill {
-                gauge = .single(fraction: gf, strokeColor: geminiColor)
+                gauge = .single(fraction: gf, strokeColor: healthColor(for: gf))
             } else if let af = aFill {
-                gauge = .single(fraction: af, strokeColor: argonColor)
+                gauge = .single(fraction: af, strokeColor: healthColor(for: af))
             } else if let cf = cFill {
-                gauge = .single(fraction: cf, strokeColor: claudeColor)
+                gauge = .single(fraction: cf, strokeColor: healthColor(for: cf))
             } else {
                 gauge = .none
             }
@@ -515,12 +543,12 @@ public enum AgyMenuBarRenderer {
             case .single(let fraction, let strokeColor):
                 drawGauge(center: NSPoint(x: 8.0, y: 8.0), radius: 5.5, fraction: fraction, strokeColor: strokeColor)
             case .both(let geminiFraction, let claudeFraction):
-                drawGauge(center: NSPoint(x: 6.0, y: 8.0), radius: 4.2, fraction: geminiFraction, strokeColor: MenuBarPresentationResolver.geminiColor, chevronSize: 2.0)
-                drawGauge(center: NSPoint(x: 16.0, y: 8.0), radius: 4.2, fraction: claudeFraction, strokeColor: MenuBarPresentationResolver.claudeColor, chevronSize: 2.0)
+                drawGauge(center: NSPoint(x: 6.0, y: 8.0), radius: 4.2, fraction: geminiFraction, strokeColor: MenuBarPresentationResolver.healthColor(for: geminiFraction), chevronSize: 2.0)
+                drawGauge(center: NSPoint(x: 16.0, y: 8.0), radius: 4.2, fraction: claudeFraction, strokeColor: MenuBarPresentationResolver.healthColor(for: claudeFraction), chevronSize: 2.0)
             case .three(let geminiFraction, let argonFraction, let claudeFraction):
-                drawGauge(center: NSPoint(x: 5.0, y: 8.0), radius: 3.8, fraction: geminiFraction, strokeColor: MenuBarPresentationResolver.geminiColor, chevronSize: 1.8)
-                drawGauge(center: NSPoint(x: 14.0, y: 8.0), radius: 3.8, fraction: argonFraction, strokeColor: MenuBarPresentationResolver.argonColor, chevronSize: 1.8)
-                drawGauge(center: NSPoint(x: 23.0, y: 8.0), radius: 3.8, fraction: claudeFraction, strokeColor: MenuBarPresentationResolver.claudeColor, chevronSize: 1.8)
+                drawGauge(center: NSPoint(x: 5.0, y: 8.0), radius: 3.8, fraction: geminiFraction, strokeColor: MenuBarPresentationResolver.healthColor(for: geminiFraction), chevronSize: 1.8)
+                drawGauge(center: NSPoint(x: 14.0, y: 8.0), radius: 3.8, fraction: argonFraction, strokeColor: MenuBarPresentationResolver.healthColor(for: argonFraction), chevronSize: 1.8)
+                drawGauge(center: NSPoint(x: 23.0, y: 8.0), radius: 3.8, fraction: claudeFraction, strokeColor: MenuBarPresentationResolver.healthColor(for: claudeFraction), chevronSize: 1.8)
             case .none:
                 let maxFloat: CGFloat = 4.5
                 let floatOffset: CGFloat

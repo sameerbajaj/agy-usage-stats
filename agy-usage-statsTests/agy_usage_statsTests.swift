@@ -113,7 +113,7 @@ struct agy_usage_statsTests {
     @Test func testIconPresentationActiveModel() {
         let litNS = NSColor.systemGreen
 
-        // Active model with valid fraction
+        // Active model with valid fraction (> 50% -> healthy green)
         let activeWithQuota = MenuBarPresentationResolver.resolveIconPresentation(
             showUsage: true,
             selectedModel: .active,
@@ -127,7 +127,42 @@ struct agy_usage_statsTests {
             claudeFillFraction: nil
         )
         #expect(activeWithQuota.text == "65%")
-        #expect(activeWithQuota.gaugeStyle == .single(fraction: 0.65, strokeColor: litNS))
+        #expect(activeWithQuota.textColor == MenuBarPresentationResolver.healthyGreenColor)
+        #expect(activeWithQuota.gaugeStyle == .single(fraction: 0.65, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
+
+        // Active model with decoupled colors: 5-Hour low (15% -> red) vs Weekly healthy (85% -> green)
+        let decoupledActive = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 10,
+            litColor: litNS,
+            activeUsageFraction: 0.15,
+            activeFillFraction: 0.85,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(decoupledActive.text == "15%")
+        #expect(decoupledActive.textColor == MenuBarPresentationResolver.lowRedColor)
+        #expect(decoupledActive.gaugeStyle == .single(fraction: 0.85, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
+
+        // Active model with warning tier (35% -> amber)
+        let amberActive = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 10,
+            litColor: litNS,
+            activeUsageFraction: 0.35,
+            activeFillFraction: 0.35,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(amberActive.text == "35%")
+        #expect(amberActive.textColor == MenuBarPresentationResolver.warningAmberColor)
+        #expect(amberActive.gaugeStyle == .single(fraction: 0.35, strokeColor: MenuBarPresentationResolver.warningAmberColor))
 
         // Active model with NO quota fraction, but queriesToday > 0: activity fallback (Nq)
         let activeActivityFallback = MenuBarPresentationResolver.resolveIconPresentation(
@@ -165,7 +200,7 @@ struct agy_usage_statsTests {
     @Test func testIconPresentationSingleModelsMissingQuota() {
         let litNS = NSColor.systemGreen
 
-        // Gemini with quota
+        // Gemini with quota (> 50% -> healthy green)
         let geminiPresent = MenuBarPresentationResolver.resolveIconPresentation(
             showUsage: true,
             selectedModel: .gemini,
@@ -179,7 +214,8 @@ struct agy_usage_statsTests {
             claudeFillFraction: nil
         )
         #expect(geminiPresent.text == "82%")
-        #expect(geminiPresent.gaugeStyle == .single(fraction: 0.82, strokeColor: MenuBarPresentationResolver.geminiColor))
+        #expect(geminiPresent.textColor == MenuBarPresentationResolver.healthyGreenColor)
+        #expect(geminiPresent.gaugeStyle == .single(fraction: 0.82, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
 
         // Gemini missing quota: neutral chevron, never "GCP" or "100%"
         let geminiMissing = MenuBarPresentationResolver.resolveIconPresentation(
@@ -197,7 +233,7 @@ struct agy_usage_statsTests {
         #expect(geminiMissing.text == "")
         #expect(geminiMissing.gaugeStyle == .none)
 
-        // Claude with quota
+        // Claude with warning quota (45% -> warning amber)
         let claudePresent = MenuBarPresentationResolver.resolveIconPresentation(
             showUsage: true,
             selectedModel: .claude,
@@ -211,7 +247,25 @@ struct agy_usage_statsTests {
             claudeFillFraction: 0.45
         )
         #expect(claudePresent.text == "45%")
-        #expect(claudePresent.gaugeStyle == .single(fraction: 0.45, strokeColor: MenuBarPresentationResolver.claudeColor))
+        #expect(claudePresent.textColor == MenuBarPresentationResolver.warningAmberColor)
+        #expect(claudePresent.gaugeStyle == .single(fraction: 0.45, strokeColor: MenuBarPresentationResolver.warningAmberColor))
+
+        // Claude with low quota (12% -> low red)
+        let claudeLow = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .claude,
+            queriesToday: 5,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            claudeUsageFraction: 0.12,
+            claudeFillFraction: 0.12
+        )
+        #expect(claudeLow.text == "12%")
+        #expect(claudeLow.textColor == MenuBarPresentationResolver.lowRedColor)
+        #expect(claudeLow.gaugeStyle == .single(fraction: 0.12, strokeColor: MenuBarPresentationResolver.lowRedColor))
 
         // Claude missing quota: neutral chevron, never "GCP" or "100%"
         let claudeMissing = MenuBarPresentationResolver.resolveIconPresentation(
@@ -263,7 +317,8 @@ struct agy_usage_statsTests {
             claudeFillFraction: nil
         )
         #expect(geminiOnlyInBoth.text == "85%")
-        #expect(geminiOnlyInBoth.gaugeStyle == .single(fraction: 0.85, strokeColor: MenuBarPresentationResolver.geminiColor))
+        #expect(geminiOnlyInBoth.textColor == MenuBarPresentationResolver.healthyGreenColor)
+        #expect(geminiOnlyInBoth.gaugeStyle == .single(fraction: 0.85, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
 
         // Only Claude present in Both mode: safe single gauge & text, no fabricated Gemini 100%
         let claudeOnlyInBoth = MenuBarPresentationResolver.resolveIconPresentation(
@@ -279,7 +334,8 @@ struct agy_usage_statsTests {
             claudeFillFraction: 0.40
         )
         #expect(claudeOnlyInBoth.text == "40%")
-        #expect(claudeOnlyInBoth.gaugeStyle == .single(fraction: 0.40, strokeColor: MenuBarPresentationResolver.claudeColor))
+        #expect(claudeOnlyInBoth.textColor == MenuBarPresentationResolver.warningAmberColor)
+        #expect(claudeOnlyInBoth.gaugeStyle == .single(fraction: 0.40, strokeColor: MenuBarPresentationResolver.warningAmberColor))
 
         // Both missing: neutral chevron, never "GCP" or "100%"
         let bothMissing = MenuBarPresentationResolver.resolveIconPresentation(
@@ -504,9 +560,27 @@ struct agy_usage_statsTests {
             claudeFillFraction: 0.22
         )
 
-        // Claude is at 22% vs Gemini at 75%, so most depleted is Claude at 22%
+        // Claude is at 22% vs Gemini at 75%, so most depleted is Claude at 22% (warning amber)
         #expect(presentation.text == "22%")
-        #expect(presentation.gaugeStyle == .single(fraction: 0.22, strokeColor: litNS))
+        #expect(presentation.textColor == MenuBarPresentationResolver.warningAmberColor)
+        #expect(presentation.gaugeStyle == .single(fraction: 0.22, strokeColor: MenuBarPresentationResolver.warningAmberColor))
+
+        // Claude is at 10% (low red)
+        let redPresentation = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .mostDepleted,
+            queriesToday: 12,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: 0.75,
+            geminiFillFraction: 0.75,
+            claudeUsageFraction: 0.10,
+            claudeFillFraction: 0.10
+        )
+        #expect(redPresentation.text == "10%")
+        #expect(redPresentation.textColor == MenuBarPresentationResolver.lowRedColor)
+        #expect(redPresentation.gaugeStyle == .single(fraction: 0.10, strokeColor: MenuBarPresentationResolver.lowRedColor))
     }
 
     // MARK: - Gemini 4 Argon & Claude 5.5 Tests
@@ -837,7 +911,8 @@ struct agy_usage_statsTests {
             claudeFillFraction: nil
         )
         #expect(argonPresent.text == "75%")
-        #expect(argonPresent.gaugeStyle == .single(fraction: 0.75, strokeColor: MenuBarPresentationResolver.argonColor))
+        #expect(argonPresent.textColor == MenuBarPresentationResolver.healthyGreenColor)
+        #expect(argonPresent.gaugeStyle == .single(fraction: 0.75, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
 
         // Argon missing presentation -> neutral chevron
         let argonMissing = MenuBarPresentationResolver.resolveIconPresentation(
@@ -1144,6 +1219,45 @@ struct agy_usage_statsTests {
         vm.iconQuotaLimitTarget = .weekly
         #expect(vm.selectedModelUsageFraction == 0.82)
         #expect(vm.selectedModelCircleFillFraction == 0.82)
+
+        // Decoupled colors: percentage number and ring gauge independently color-coded
+        vm.iconQuotaLimitTarget = .fiveHour
+        vm.iconCircleFillMetric = .weekly
+        let decoupledPresentation = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .gemini,
+            queriesToday: 4,
+            litColor: .systemGreen,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: vm.geminiUsageFraction,
+            geminiFillFraction: vm.geminiCircleFillFraction,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        // 5-Hour is 34% (warning amber), Weekly is 82% (healthy green)
+        #expect(decoupledPresentation.textColor == MenuBarPresentationResolver.warningAmberColor)
+        #expect(decoupledPresentation.gaugeStyle == .single(fraction: 0.82, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
+
+        // Red (15%) + Green (82%) decoupled presentation
+        let redGreenPresentation = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .gemini,
+            queriesToday: 4,
+            litColor: .systemGreen,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: 0.15,
+            geminiFillFraction: 0.82,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(redGreenPresentation.textColor == MenuBarPresentationResolver.lowRedColor)
+        #expect(redGreenPresentation.gaugeStyle == .single(fraction: 0.82, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
     }
 
     @Test func testSpendBadgePresentationAndMenuBarSpendSource() {
