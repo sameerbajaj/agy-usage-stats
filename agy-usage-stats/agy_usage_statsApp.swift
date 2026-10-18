@@ -68,6 +68,9 @@ struct MenuBarLabel: View {
             }
             .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
                 refreshTrigger.toggle()
+                Task {
+                    await viewModel.refreshQuotaOnly()
+                }
             }
     }
 

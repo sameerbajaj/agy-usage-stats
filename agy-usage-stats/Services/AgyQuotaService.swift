@@ -119,9 +119,21 @@ public actor AgyQuotaService {
 
     private static var lastActivePort: Int? = nil
     private static var cachedQuota: CachedQuota? = nil
-    private static let cacheTTL: TimeInterval = 30.0
+    private static let cacheTTL: TimeInterval = 4.0
     private static let nilCacheTTL: TimeInterval = 15.0
     private static let quotaLock = NSLock()
+
+    public static var hasActiveSession: Bool {
+        quotaLock.lock()
+        defer { quotaLock.unlock() }
+        return lastActivePort != nil
+    }
+
+    public static var activePort: Int? {
+        quotaLock.lock()
+        defer { quotaLock.unlock() }
+        return lastActivePort
+    }
 
     private static let sharedLocalhostSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral

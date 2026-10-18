@@ -71,6 +71,9 @@ public struct MenuBarPopover: View {
         .environment(\.colorScheme, viewModel.selectedTheme.preferredColorScheme)
         .onAppear {
             viewModel.setup()
+            Task {
+                await viewModel.refreshQuotaOnly(forceRefresh: true)
+            }
         }
     }
     

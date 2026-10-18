@@ -174,7 +174,7 @@ public final class AgyFileWatcher {
                 }
             }
             debounceWorkItem = workItem
-            queue.asyncAfter(deadline: .now() + 1.5, execute: workItem)
+            queue.asyncAfter(deadline: .now() + 0.3, execute: workItem)
         }
     }
     

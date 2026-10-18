@@ -1364,6 +1364,23 @@ struct agy_usage_statsTests {
         )
         #expect(spendDisabled.spendBadge == nil)
     }
+
+    // MARK: - Fast Quota & Adaptive Polling Tests
+
+    @Test func testAdaptiveQuotaSessionDetectionAndCacheClearing() {
+        // Clear active port and cache
+        AgyQuotaService.clearCache(clearActivePort: true)
+        #expect(AgyQuotaService.hasActiveSession == false)
+        #expect(AgyQuotaService.activePort == nil)
+    }
+
+    @Test func testViewModelRefreshQuotaOnlyMainActorExecution() async {
+        let viewModel = AgyStatsViewModel()
+        #expect(viewModel.stats.quotaInfo == nil)
+        
+        // Calling refreshQuotaOnly runs safely without crash or race
+        await viewModel.refreshQuotaOnly(forceRefresh: false)
+    }
 }
 
 

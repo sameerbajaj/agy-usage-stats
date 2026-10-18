@@ -728,24 +728,56 @@ public final class AgyStatsViewModel {
     }
     
     private var isSetup = false
+    private var quotaPollingTask: Task<Void, Never>?
     
     public func setup() {
         guard !isSetup else { return }
         isSetup = true
         
-        // Start watching for file changes
+        // Start watching for file changes with instant response
         watcher.cliDirOverride = cliDir
         watcher.onFileChanged = { [weak self] in
             Task { [weak self] in
+                AgyQuotaService.clearCache()
                 await self?.refresh()
+                // Fast follow-up: language server quota accounting may take 1-2s to settle after streaming
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                await self?.refreshQuotaOnly(forceRefresh: true)
             }
         }
         watcher.start()
+        
+        // Start adaptive background quota polling
+        startAdaptiveQuotaPolling()
         
         // Initial load
         Task {
             await refresh()
             await checkForUpdates()
+        }
+    }
+    
+    public func startAdaptiveQuotaPolling() {
+        quotaPollingTask?.cancel()
+        quotaPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                // Adaptive interval: 4s when active session port is known, 25s when idle
+                let hasActive = AgyQuotaService.hasActiveSession
+                let intervalSeconds: UInt64 = hasActive ? 4 : 25
+                try? await Task.sleep(nanoseconds: intervalSeconds * 1_000_000_000)
+                if Task.isCancelled { break }
+                await self?.refreshQuotaOnly()
+            }
+        }
+    }
+    
+    /// Fast-path quota refresh without re-reading or parsing history files (<1ms localhost request)
+    public func refreshQuotaOnly(forceRefresh: Bool = false) async {
+        guard let quota = await AgyQuotaService.fetchQuota(forceRefresh: forceRefresh) else { return }
+        await MainActor.run {
+            if self.stats.quotaInfo != quota {
+                self.stats.quotaInfo = quota
+            }
         }
     }
     
@@ -783,6 +815,7 @@ public final class AgyStatsViewModel {
     
     deinit {
         watcher.stop()
+        quotaPollingTask?.cancel()
     }
     
     // Helper actions
