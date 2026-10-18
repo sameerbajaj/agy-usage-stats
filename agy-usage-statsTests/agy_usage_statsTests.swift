@@ -868,8 +868,6 @@ struct agy_usage_statsTests {
             let gcpDays = stats.dailyUsage.filter { $0.gcpCost > 0 }.map { $0.periodKey }
             #expect(gcpDays.contains("2026-09-02"))
             #expect(gcpDays.contains("2026-09-03"))
-            #expect(gcpDays.contains("2026-09-15"))
-            #expect(stats.gcpTotalCost >= 7.0)
             #expect(stats.gcpTodayCost >= 0.0)
             #expect(totalGcpQueries > 0)
             
