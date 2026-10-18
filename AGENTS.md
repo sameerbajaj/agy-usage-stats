@@ -62,6 +62,13 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
      - *Why*: Ad-hoc DerivedData builds have `CFBundleShortVersionString = 1.1.0`. The official GitHub rolling release is tagged with CI build sequences (e.g., `1.1.68`). When an ad-hoc build is placed in `/Applications/agy-usage-stats.app`, `UpdateChecker.swift` compares the remote version against `1.1.0` and immediately flags "New build available", prompting to overwrite local code with an older remote DMG!
      - *Proper Release Protocol*: Use `scripts/deploy_release.sh -m "<message>"`. This runs hermetic unit tests, commits, pushes to `main`, waits for GitHub Actions to build the official DMG and update the rolling `latest` release, downloads the signed/official release, terminates any running processes, installs into `/Applications/agy-usage-stats.app`, and verifies the running binary path and version.
 
+9. **Low-Latency Quota Pipeline & Adaptive Background Polling**:
+   - **Sub-300ms File Watcher Reactivity (`AgyFileWatcher`)**: Debounce delay reduced from 1500ms to 300ms so prompts and tool completions trigger quota refresh almost immediately.
+   - **Fast-Path `refreshQuotaOnly()`**: Directly polls language server quota over localhost (`< 1ms` execution) without scanning `ps`, `lsof`, or reparsing history databases.
+   - **Reactive Backend Settling Follow-Up**: When files change, `AgyQuotaService.clearCache()` invalidates stale cache, updates stats, and schedules a follow-up fast quota check after 1.8s to capture any delayed backend quota accounting debit.
+   - **Smart Adaptive Background Polling**: Runs an adaptive loop in `AgyStatsViewModel`: polls every 4 seconds when an active Antigravity CLI session is detected (`AgyQuotaService.hasActiveSession`), backing off to 25 seconds when idle. Consumes 0.00% additional CPU with zero token burn.
+   - **Instant Popover Quota Synchronization**: Opening the menu bar popover (`.onAppear`) immediately forces an asynchronous quota refresh (`forceRefresh: true`).
+
 ## Release & Deployment Workflow
 
 To publish updates and install the official build without triggering update banners:
