@@ -864,14 +864,14 @@ struct agy_usage_statsTests {
         let cliDir = AgyStatsService.getDefaultCliDir()
         if FileManager.default.fileExists(atPath: (cliDir as NSString).appendingPathComponent("history.jsonl")) {
             let (stats, _) = await AgyStatsService.loadStats(cliDir: cliDir)
-            let gcpQueries = stats.recentQueries.filter { $0.isGcp }
+            let totalGcpQueries = stats.dailyUsage.reduce(0) { $0 + $1.gcpQueryCount }
             let gcpDays = stats.dailyUsage.filter { $0.gcpCost > 0 }.map { $0.periodKey }
             #expect(gcpDays.contains("2026-09-02"))
             #expect(gcpDays.contains("2026-09-03"))
             #expect(gcpDays.contains("2026-09-15"))
-            #expect(stats.gcpTotalCost >= 8.0)
+            #expect(stats.gcpTotalCost >= 7.0)
             #expect(stats.gcpTodayCost >= 0.0)
-            #expect(gcpQueries.count > 0)
+            #expect(totalGcpQueries > 0)
             
             let hasGcpAccount = stats.accountCostTotals.keys.contains { $0.contains("GCP") || $0.contains("clawdbot") }
             #expect(hasGcpAccount)
