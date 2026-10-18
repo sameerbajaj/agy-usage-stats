@@ -48,6 +48,13 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - **Clean 2-Tab Architecture**: Structure the popover strictly around 2 primary tabs: `Usage & Cost` (single unified sheet with quotas + cost by model) and `Settings`.
    - **Cost Breakdown by Model**: Keep cost breakdowns simple, bold, and organized by model with direct proportion bars, bold price, and token counts, supporting `Today | Last 7 Days | Last 30 Days`.
 
+8. **Multi-Box Ingestion & Account Switching (Direction 1 Capsule)**:
+   - **Dual Data Ingestion**: Concurrently monitors and ingests usage and queries from both `~/.gemini/antigravity-cli` (Consumer Subscription box) and `~/.agy-gcp-home/.gemini/antigravity-cli` (Google Cloud Platform $300 credit box via `agy-gcp`).
+   - **Segmented Header Capsule**: Uses Direction 1 (`[ All | ● Sub | ☁️ GCP ]`) in `OverviewTabView` header. Persists selection via `@AppStorage("agy_selectedAccountFilter")`.
+   - **GCP Credit Card**: When `GCP` or `All` is selected, renders a dedicated card detailing `$300 Promo Credit Pool`, remaining balance, today's spend, total consumed percentage, and Herdr delegation guard status.
+   - **Menu Bar Account Stability**: Menu bar presentation is controllable via `SettingsTabView` (`MenuBarAccountTarget`: `.subscription`, `.gcp`, `.auto`). Defaults strictly to `.subscription` so cloud background sessions never abruptly disrupt consumer quota gauges.
+   - **Hermetic Unit Tests**: View model unit tests must explicitly initialize `vm.selectedModelForIcon = .active` and target limits to prevent cross-test leakage via `UserDefaults.standard`.
+
 ## Testing Guidelines
 
 - Run unit tests with:
@@ -56,3 +63,4 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
   ```
 - **Do not run the full UI test suite (`agy_usage_statsUITests`) for routine validation** unless specifically benchmarking launch performance or visual UI regressions. UI tests repeatedly launch the app 7+ times, toggle macOS light/dark appearance, and take ~2 minutes.
 - `agy_usage_statsTests` uses Swift Testing (`import Testing`) with fast, deterministic fixture-only tests that do not hit live network ports or scan disk histories. It is annotated with `@Suite(.serialized)`.
+
