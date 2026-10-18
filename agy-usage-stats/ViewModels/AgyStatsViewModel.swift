@@ -23,27 +23,78 @@ public enum MenuBarDisplayMode: String, Codable, CaseIterable, Identifiable {
 public enum IconModelSelection: String, Codable, CaseIterable, Identifiable {
     case active = "Active Model"
     case mostDepleted = "Most Depleted"
-    case gemini = "Gemini Only"
+    case gemini = "Gemini"
     case argon = "Gemini 4 Argon"
-    case claude = "Claude Only"
+    case claude = "Claude"
     case both = "Both (G & C)"
     case allThree = "All Three (G, A, C)"
+    case gcp = "GCP Cloud Spend"
     
     public var id: String { rawValue }
+
+    public static var primaryCases: [IconModelSelection] {
+        [.active, .mostDepleted, .gemini, .argon, .claude]
+    }
+
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "Active Model", "active": self = .active
+        case "Most Depleted", "mostDepleted": self = .mostDepleted
+        case "Gemini", "Gemini Only", "gemini": self = .gemini
+        case "Gemini 4 Argon", "argon": self = .argon
+        case "Claude", "Claude Only", "claude": self = .claude
+        case "Both (G & C)", "both": self = .both
+        case "All Three (G, A, C)", "allThree": self = .allThree
+        case "GCP Cloud Spend", "gcp": self = .gcp
+        default: return nil
+        }
+    }
 }
 
 public enum IconQuotaLimitTarget: String, Codable, CaseIterable, Identifiable {
-    case minimum = "Minimum (Auto)"
-    case weekly = "Weekly Limit"
     case fiveHour = "5-Hour Limit"
+    case weekly = "Weekly Limit"
+    case auto = "Auto"
     
     public var id: String { rawValue }
+
+    public static let minimum: IconQuotaLimitTarget = .auto
+
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "5-Hour Limit", "fiveHour": self = .fiveHour
+        case "Weekly Limit", "weekly": self = .weekly
+        case "Auto", "Auto (Active)", "Minimum (Auto)", "minimum", "auto": self = .auto
+        default: return nil
+        }
+    }
 }
 
 public enum IconCircleFillMetric: String, Codable, CaseIterable, Identifiable {
-    case usageRemaining = "Usage Remaining"
-    case timeUntilReset = "Time Until Reset"
+    case weekly = "Weekly Limit"
+    case fiveHour = "5-Hour Limit"
+    case matchNumber = "Match Percentage"
     
+    public var id: String { rawValue }
+
+    public static let usageRemaining: IconCircleFillMetric = .matchNumber
+    public static let timeUntilReset: IconCircleFillMetric = .weekly
+
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "Weekly Limit", "weekly": self = .weekly
+        case "5-Hour Limit", "fiveHour": self = .fiveHour
+        case "Match Percentage", "Match Number", "matchNumber", "Usage Remaining", "usageRemaining", "timeUntilReset": self = .matchNumber
+        default: return nil
+        }
+    }
+}
+
+public enum MenuBarSpendSource: String, Codable, CaseIterable, Identifiable {
+    case gcpToday = "GCP Cloud Spend (Today)"
+    case apiToday = "Today's API Spend (All)"
+    case gcpTotal = "GCP Cloud Spend (Total)"
+
     public var id: String { rawValue }
 }
 
@@ -97,6 +148,18 @@ public final class AgyStatsViewModel {
     public var showWeeklyLimitAndReset: Bool {
         didSet {
             UserDefaults.standard.set(showWeeklyLimitAndReset, forKey: "agy_showWeeklyLimitAndReset")
+        }
+    }
+
+    public var showMenuBarSpend: Bool {
+        didSet {
+            UserDefaults.standard.set(showMenuBarSpend, forKey: "agy_showMenuBarSpend")
+        }
+    }
+
+    public var menuBarSpendSource: MenuBarSpendSource {
+        didSet {
+            UserDefaults.standard.set(menuBarSpendSource.rawValue, forKey: "agy_menuBarSpendSource")
         }
     }
     
@@ -155,7 +218,7 @@ public final class AgyStatsViewModel {
         if let savedModeStr, let mode = MenuBarDisplayMode(rawValue: savedModeStr) {
             self.menuBarDisplayMode = mode
         } else {
-            self.menuBarDisplayMode = .both
+            self.menuBarDisplayMode = .iconOnly
         }
         
         self.showModelUsageInIcon = UserDefaults.standard.bool(forKey: "agy_showModelUsageInIcon")
@@ -171,14 +234,27 @@ public final class AgyStatsViewModel {
         if let savedLimitTarget, let limitTarget = IconQuotaLimitTarget(rawValue: savedLimitTarget) {
             self.iconQuotaLimitTarget = limitTarget
         } else {
-            self.iconQuotaLimitTarget = .minimum
+            self.iconQuotaLimitTarget = .auto
         }
 
         let savedFillMetric = UserDefaults.standard.string(forKey: "agy_iconCircleFillMetric")
         if let savedFillMetric, let fillMetric = IconCircleFillMetric(rawValue: savedFillMetric) {
             self.iconCircleFillMetric = fillMetric
         } else {
-            self.iconCircleFillMetric = .usageRemaining
+            self.iconCircleFillMetric = .weekly
+        }
+
+        if UserDefaults.standard.object(forKey: "agy_showMenuBarSpend") != nil {
+            self.showMenuBarSpend = UserDefaults.standard.bool(forKey: "agy_showMenuBarSpend")
+        } else {
+            self.showMenuBarSpend = true
+        }
+
+        let savedSpendSource = UserDefaults.standard.string(forKey: "agy_menuBarSpendSource")
+        if let savedSpendSource, let spendSource = MenuBarSpendSource(rawValue: savedSpendSource) {
+            self.menuBarSpendSource = spendSource
+        } else {
+            self.menuBarSpendSource = .gcpToday
         }
         
         self.showWeeklyLimitAndReset = UserDefaults.standard.bool(forKey: "agy_showWeeklyLimitAndReset")
@@ -329,6 +405,10 @@ public final class AgyStatsViewModel {
     }
 
     public var activeModelDisplayName: String {
+        if let firstQ = stats.recentQueries.first, firstQ.isGcp, let specificName = firstQ.modelName {
+            return "\(specificName) (GCP)"
+        }
+
         guard let group = getActiveGroup() else {
             return settings.model ?? (stats.quotaInfo?.plan ?? "Gemini 3.8 Flash")
         }
@@ -340,6 +420,9 @@ public final class AgyStatsViewModel {
                    ((m.contains("claude") || m.contains("sonnet") || m.contains("opus") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt") || groupName.contains("openai") || groupName.contains("anthropic") || groupName.contains("sonnet") || groupName.contains("opus")))
         }
         if let specificName = matchingQuery?.modelName {
+            if matchingQuery?.isGcp == true {
+                return "\(specificName) (GCP)"
+            }
             return specificName
         }
 
@@ -403,8 +486,30 @@ public final class AgyStatsViewModel {
                 let id = bucket.bucketId.lowercased()
                 return name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five")
             } ?? candidates.first
-        case .minimum:
+        case .auto:
             return candidates.min(by: { ($0.remainingFraction ?? 1.0) < ($1.remainingFraction ?? 1.0) })
+        }
+    }
+
+    public var circleRingTarget: IconQuotaLimitTarget {
+        switch iconCircleFillMetric {
+        case .weekly:
+            return .weekly
+        case .fiveHour:
+            return .fiveHour
+        case .matchNumber:
+            return iconQuotaLimitTarget
+        }
+    }
+
+    public var menuBarSpendAmount: Double {
+        switch menuBarSpendSource {
+        case .gcpToday:
+            return stats.gcpTodayCost
+        case .apiToday:
+            return stats.todayCostEstimate
+        case .gcpTotal:
+            return stats.gcpTotalCost
         }
     }
 
@@ -413,31 +518,7 @@ public final class AgyStatsViewModel {
     }
 
     private func getCircleFillFraction(for bucket: AgyQuotaBucket?) -> Double? {
-        guard let bucket = bucket else { return nil }
-        switch iconCircleFillMetric {
-        case .usageRemaining:
-            return bucket.remainingFraction
-        case .timeUntilReset:
-            guard let resetTimeStr = bucket.resetTime,
-                  let remaining = bucket.remainingFraction,
-                  remaining < 1.0 else {
-                return 1.0
-            }
-            
-            guard let resetDate = Self.isoFormatter.date(from: resetTimeStr) else {
-                return 1.0
-            }
-            
-            let now = Date()
-            let timeRemaining = resetDate.timeIntervalSince(now)
-            if timeRemaining <= 0 {
-                return 1.0
-            }
-            
-            let totalWindow = getWindowDuration(for: bucket)
-            let fraction = timeRemaining / totalWindow
-            return max(0.0, min(1.0, fraction))
-        }
+        return bucket?.remainingFraction
     }
 
     private func getWindowDuration(for bucket: AgyQuotaBucket) -> TimeInterval {
@@ -454,6 +535,11 @@ public final class AgyStatsViewModel {
 
     // The usage remaining fractions (always 0.0 to 1.0) for the models
     public var selectedModelUsageFraction: Double? {
+        if selectedModelForIcon == .gcp {
+            let total = stats.gcpTotalCost
+            let pool = gcpCreditPool > 0 ? gcpCreditPool : 300.0
+            return max(0.0, 1.0 - (total / pool))
+        }
         let group: AgyQuotaGroup?
         switch selectedModelForIcon {
         case .active:
@@ -466,7 +552,7 @@ public final class AgyStatsViewModel {
             group = getArgonGroup()
         case .claude:
             group = getClaudeGroup()
-        case .both, .allThree:
+        case .both, .allThree, .gcp:
             group = getActiveGroup()
         }
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
@@ -493,6 +579,11 @@ public final class AgyStatsViewModel {
 
     // The circle fill fractions for the models (respects the circle fill metric setting)
     public var selectedModelCircleFillFraction: Double? {
+        if selectedModelForIcon == .gcp {
+            let total = stats.gcpTotalCost
+            let pool = gcpCreditPool > 0 ? gcpCreditPool : 300.0
+            return max(0.0, 1.0 - (total / pool))
+        }
         let group: AgyQuotaGroup?
         switch selectedModelForIcon {
         case .active:
@@ -505,29 +596,75 @@ public final class AgyStatsViewModel {
             group = getArgonGroup()
         case .claude:
             group = getClaudeGroup()
-        case .both, .allThree:
+        case .both, .allThree, .gcp:
             group = getActiveGroup()
         }
-        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        let bucket = getBucket(forGroup: group, target: circleRingTarget)
         return getCircleFillFraction(for: bucket)
     }
 
     public var geminiCircleFillFraction: Double? {
         let group = getGeminiGroup()
-        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        let bucket = getBucket(forGroup: group, target: circleRingTarget)
         return getCircleFillFraction(for: bucket)
     }
 
     public var argonCircleFillFraction: Double? {
         let group = getArgonGroup()
-        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        let bucket = getBucket(forGroup: group, target: circleRingTarget)
         return getCircleFillFraction(for: bucket)
     }
 
     public var claudeCircleFillFraction: Double? {
         let group = getClaudeGroup()
-        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        let bucket = getBucket(forGroup: group, target: circleRingTarget)
         return getCircleFillFraction(for: bucket)
+    }
+
+    public func makeMenuBarImage(litColor: Color? = nil) -> NSImage {
+        let color: Color
+        if let litColor {
+            color = litColor
+        } else {
+            var fractions: [Double] = []
+            if let gf = geminiUsageFraction { fractions.append(gf) }
+            if let af = argonUsageFraction { fractions.append(af) }
+            if let cf = claudeUsageFraction { fractions.append(cf) }
+            if let minFraction = fractions.min() {
+                if minFraction > 0.5 {
+                    color = Color(red: 0.15, green: 0.85, blue: 0.55)
+                } else if minFraction > 0.2 {
+                    color = Color(red: 1.0, green: 0.60, blue: 0.15)
+                } else {
+                    color = Color(red: 1.0, green: 0.35, blue: 0.35)
+                }
+            } else if stats.queriesToday > 0 {
+                color = Color(red: 0.65, green: 0.45, blue: 1.0)
+            } else {
+                color = .primary.opacity(0.65)
+            }
+        }
+
+        return AgyMenuBarRenderer.makeAntigravityImage(
+            queriesToday: stats.queriesToday,
+            litColor: color,
+            showUsage: showModelUsageInIcon,
+            selectedModelForIcon: selectedModelForIcon,
+            activeUsageFraction: selectedModelUsageFraction,
+            geminiUsageFraction: geminiUsageFraction,
+            argonUsageFraction: argonUsageFraction,
+            claudeUsageFraction: claudeUsageFraction,
+            activeFillFraction: selectedModelCircleFillFraction,
+            geminiFillFraction: geminiCircleFillFraction,
+            argonFillFraction: argonCircleFillFraction,
+            claudeFillFraction: claudeCircleFillFraction,
+            showMenuBarSpend: showMenuBarSpend,
+            menuBarSpendSource: menuBarSpendSource,
+            spendAmount: menuBarSpendAmount,
+            gcpTodayCost: stats.gcpTodayCost,
+            gcpTotalCost: stats.gcpTotalCost,
+            todayCost: stats.todayCostEstimate
+        )
     }
 
     // Compatibility properties mapped to circle fill fractions

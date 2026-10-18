@@ -148,6 +148,11 @@ public struct OverviewTabView: View {
                 // Quota or GCP Cloud Credit Section
                 if selectedAccount == .gcp {
                     gcpCloudCreditCard
+                } else if selectedAccount == .all {
+                    quotaGroupsSection
+                    if viewModel.stats.gcpTotalCost > 0 || viewModel.stats.gcpTodayCost > 0 {
+                        gcpCloudCreditCard
+                    }
                 } else {
                     quotaGroupsSection
                 }

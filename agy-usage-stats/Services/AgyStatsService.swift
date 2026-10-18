@@ -120,6 +120,9 @@ public enum AgyStatsService {
         let historyModDate: Date
         let historySize: Int64
         let conversationsDirModDate: Date
+        let gcpHistoryModDate: Date
+        let gcpHistorySize: Int64
+        let gcpConversationsDirModDate: Date
         let stats: AgyUsageStats
     }
     
@@ -237,6 +240,10 @@ public enum AgyStatsService {
             let conversationsDir = (expandedDir as NSString).appendingPathComponent("conversations")
             let logDir = (expandedDir as NSString).appendingPathComponent("log")
             
+            let gcpCliDir = "\(NSHomeDirectory())/.agy-gcp-home/.gemini/antigravity-cli"
+            let gcpHistoryPath = (gcpCliDir as NSString).appendingPathComponent("history.jsonl")
+            let gcpConversationsDir = (gcpCliDir as NSString).appendingPathComponent("conversations")
+            
             let fm = FileManager.default
             let calendar = Calendar.current
             let now = Date()
@@ -249,16 +256,26 @@ public enum AgyStatsService {
             let convDirAttrs = try? fm.attributesOfItem(atPath: conversationsDir)
             let convDirMod = convDirAttrs?[.modificationDate] as? Date ?? Date.distantPast
             
+            let gcpHistAttrs = try? fm.attributesOfItem(atPath: gcpHistoryPath)
+            let gcpHistMod = gcpHistAttrs?[.modificationDate] as? Date ?? Date.distantPast
+            let gcpHistSize = (gcpHistAttrs?[.size] as? NSNumber)?.int64Value ?? 0
+            
+            let gcpConvDirAttrs = try? fm.attributesOfItem(atPath: gcpConversationsDir)
+            let gcpConvDirMod = gcpConvDirAttrs?[.modificationDate] as? Date ?? Date.distantPast
+            
             let settings = loadSettings(at: settingsPath)
             
-            // Fast cache check: if history.jsonl, conversations dir, and settings haven't changed today, return immediately
+            // Fast cache check: if history.jsonl, conversations dir, GCP dual-box files, and settings haven't changed today, return immediately
             statsCacheLock.lock()
             if let cached = statsCache,
                cached.settings == settings,
                cached.startOfToday == startOfToday,
                cached.historyModDate == histMod,
                cached.historySize == histSize,
-               cached.conversationsDirModDate == convDirMod {
+               cached.conversationsDirModDate == convDirMod,
+               cached.gcpHistoryModDate == gcpHistMod,
+               cached.gcpHistorySize == gcpHistSize,
+               cached.gcpConversationsDirModDate == gcpConvDirMod {
                 var cachedStats = cached.stats
                 statsCacheLock.unlock()
                 
@@ -285,9 +302,8 @@ public enum AgyStatsService {
             let (loadedQueries, workspaces, lastQuery, _) = loadHistory(at: historyPath)
             
             // Ingest GCP box history if available in ~/.agy-gcp-home
-            let gcpCliDir = "\(NSHomeDirectory())/.agy-gcp-home/.gemini/antigravity-cli"
-            let gcpHistoryPath = (gcpCliDir as NSString).appendingPathComponent("history.jsonl")
-            let gcpConversationsDir = (gcpCliDir as NSString).appendingPathComponent("conversations")
+            let gcpAuth = loadActiveAuthMethod(cliDir: gcpCliDir)
+            let resolvedGcpProject = gcpAuth.project ?? settings.gcp?.project ?? "clawdbot-485304"
             
             var combinedLoadedQueries = loadedQueries
             var combinedWorkspaces = workspaces
@@ -299,7 +315,7 @@ public enum AgyStatsService {
                     let gcpMapped = gcpLoaded.map { q -> QueryEntry in
                         var copy = q
                         copy.isGcp = true
-                        copy.gcpProject = "clawdbot-485304"
+                        copy.gcpProject = resolvedGcpProject
                         copy.accountEmail = nil
                         if copy.modelName == nil {
                             copy.modelName = "Gemini 4 Argon (High)"
@@ -955,7 +971,7 @@ public enum AgyStatsService {
                 
                 let authState = authForDate(genDate)
                 let isGcp = gen.isGcpOrigin || authState.isGcp
-                let accName = gen.isGcpOrigin ? "GCP (clawdbot-485304)" : authState.accountDisplayName
+                let accName = gen.isGcpOrigin ? "GCP (\(resolvedGcpProject))" : authState.accountDisplayName
                 
                 totalCost += cost
                 accountCostTotals[accName, default: 0.0] += cost
@@ -1084,7 +1100,7 @@ public enum AgyStatsService {
                 todayCostEstimate: todayCost,
                 dailyUsage: sortedDaily,
                 monthlyUsage: sortedMonthly,
-                gcpProject: (gcpTotalCost > 0 || currentIsGcp) ? (settings.gcp?.project ?? "clawdbot-485304") : settings.gcp?.project,
+                gcpProject: (gcpTotalCost > 0 || currentIsGcp) ? resolvedGcpProject : settings.gcp?.project,
                 gcpLocation: settings.gcp?.location ?? "us",
                 gcpTotalCost: gcpTotalCost,
                 gcpTodayCost: gcpTodayCost,
@@ -1105,6 +1121,9 @@ public enum AgyStatsService {
                 historyModDate: histMod,
                 historySize: histSize,
                 conversationsDirModDate: convDirMod,
+                gcpHistoryModDate: gcpHistMod,
+                gcpHistorySize: gcpHistSize,
+                gcpConversationsDirModDate: gcpConvDirMod,
                 stats: stats
             )
             statsCacheLock.unlock()

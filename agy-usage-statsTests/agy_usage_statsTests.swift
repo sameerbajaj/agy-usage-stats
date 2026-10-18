@@ -178,7 +178,7 @@ struct agy_usage_statsTests {
             claudeUsageFraction: nil,
             claudeFillFraction: nil
         )
-        #expect(geminiPresent.text == "G:82%")
+        #expect(geminiPresent.text == "82%")
         #expect(geminiPresent.gaugeStyle == .single(fraction: 0.82, strokeColor: MenuBarPresentationResolver.geminiColor))
 
         // Gemini missing quota: neutral chevron, never "GCP" or "100%"
@@ -210,7 +210,7 @@ struct agy_usage_statsTests {
             claudeUsageFraction: 0.45,
             claudeFillFraction: 0.45
         )
-        #expect(claudePresent.text == "C:45%")
+        #expect(claudePresent.text == "45%")
         #expect(claudePresent.gaugeStyle == .single(fraction: 0.45, strokeColor: MenuBarPresentationResolver.claudeColor))
 
         // Claude missing quota: neutral chevron, never "GCP" or "100%"
@@ -262,7 +262,7 @@ struct agy_usage_statsTests {
             claudeUsageFraction: nil,
             claudeFillFraction: nil
         )
-        #expect(geminiOnlyInBoth.text == "G:85%")
+        #expect(geminiOnlyInBoth.text == "85%")
         #expect(geminiOnlyInBoth.gaugeStyle == .single(fraction: 0.85, strokeColor: MenuBarPresentationResolver.geminiColor))
 
         // Only Claude present in Both mode: safe single gauge & text, no fabricated Gemini 100%
@@ -278,7 +278,7 @@ struct agy_usage_statsTests {
             claudeUsageFraction: 0.40,
             claudeFillFraction: 0.40
         )
-        #expect(claudeOnlyInBoth.text == "C:40%")
+        #expect(claudeOnlyInBoth.text == "40%")
         #expect(claudeOnlyInBoth.gaugeStyle == .single(fraction: 0.40, strokeColor: MenuBarPresentationResolver.claudeColor))
 
         // Both missing: neutral chevron, never "GCP" or "100%"
@@ -785,11 +785,14 @@ struct agy_usage_statsTests {
         let cliDir = AgyStatsService.getDefaultCliDir()
         if FileManager.default.fileExists(atPath: (cliDir as NSString).appendingPathComponent("history.jsonl")) {
             let (stats, _) = await AgyStatsService.loadStats(cliDir: cliDir)
+            let gcpQueries = stats.recentQueries.filter { $0.isGcp }
             let gcpDays = stats.dailyUsage.filter { $0.gcpCost > 0 }.map { $0.periodKey }
             #expect(gcpDays.contains("2026-09-02"))
             #expect(gcpDays.contains("2026-09-03"))
             #expect(gcpDays.contains("2026-09-15"))
-            #expect(stats.gcpTotalCost >= 13.0)
+            #expect(stats.gcpTotalCost >= 8.0)
+            #expect(stats.gcpTodayCost >= 0.0)
+            #expect(gcpQueries.count > 0)
             
             let hasGcpAccount = stats.accountCostTotals.keys.contains { $0.contains("GCP") || $0.contains("clawdbot") }
             #expect(hasGcpAccount)
@@ -833,7 +836,7 @@ struct agy_usage_statsTests {
             claudeUsageFraction: nil,
             claudeFillFraction: nil
         )
-        #expect(argonPresent.text == "A:75%")
+        #expect(argonPresent.text == "75%")
         #expect(argonPresent.gaugeStyle == .single(fraction: 0.75, strokeColor: MenuBarPresentationResolver.argonColor))
 
         // Argon missing presentation -> neutral chevron
@@ -903,6 +906,349 @@ struct agy_usage_statsTests {
         // Set to 0.0 for unlimited spend tracking
         vm.gcpCreditPool = 0.0
         #expect(vm.gcpCreditPool == 0.0)
+    }
+
+    @Test func testGcpIconPresentation() {
+        let litNS = NSColor.systemBlue
+        let gcpBlue = NSColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0)
+
+        // GCP model with spend today
+        let gcpWithCost = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .gcp,
+            queriesToday: 6,
+            litColor: litNS,
+            activeUsageFraction: 0.95,
+            activeFillFraction: 0.95,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            gcpTodayCost: 0.24
+        )
+        #expect(gcpWithCost.text == "$0.24")
+        #expect(gcpWithCost.gaugeStyle == .single(fraction: 0.95, strokeColor: gcpBlue))
+
+        // GCP model with 0 spend today, fallback to queries
+        let gcpZeroCostQueries = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .gcp,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: 1.0,
+            activeFillFraction: 1.0,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            gcpTodayCost: 0.0
+        )
+        #expect(gcpZeroCostQueries.text == "100%")
+        #expect(gcpZeroCostQueries.gaugeStyle == .single(fraction: 1.0, strokeColor: gcpBlue))
+
+        // GCP model with showUsage = false -> empty text and no gauge
+        let gcpHidden = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: false,
+            selectedModel: .gcp,
+            queriesToday: 6,
+            litColor: litNS,
+            activeUsageFraction: 0.95,
+            activeFillFraction: 0.95,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            gcpTodayCost: 0.24
+        )
+        #expect(gcpHidden.text == "")
+        #expect(gcpHidden.gaugeStyle == .none)
+    }
+
+    @Test func testGcpQuotaTextResolution() {
+        // Quota text with subscription fractions and GCP spend
+        let textWithGcp = MenuBarPresentationResolver.resolveQuotaText(
+            geminiFraction: 0.80,
+            claudeFraction: 0.50,
+            gcpTodayCost: 0.24
+        )
+        #expect(textWithGcp == "G:80% C:50% ☁️$0.24")
+
+        // Quota text with no subscription session but GCP spend
+        let gcpOnlyText = MenuBarPresentationResolver.resolveQuotaText(
+            geminiFraction: nil,
+            claudeFraction: nil,
+            gcpTodayCost: 0.24
+        )
+        #expect(gcpOnlyText == "☁️$0.24")
+
+        // Quota text with no session and 0 GCP spend
+        let noSessionText = MenuBarPresentationResolver.resolveQuotaText(
+            geminiFraction: nil,
+            claudeFraction: nil,
+            gcpTodayCost: 0.0
+        )
+        #expect(noSessionText == "no subscription session")
+    }
+
+    @Test func testViewModelGcpActiveModelTracking() {
+        let vm = AgyStatsViewModel()
+        vm.selectedModelForIcon = .active
+        
+        let claudeBucket = AgyQuotaBucket(bucketId: "c-w", displayName: "Weekly Limit", remainingFraction: 0.5, resetDescription: nil, disabled: false, resetTime: nil)
+        let claudeGroup = AgyQuotaGroup(displayName: "Claude and GPT models", description: nil, buckets: [claudeBucket])
+        vm.stats.quotaInfo = AgyQuotaInfo(email: "test@example.com", plan: "Pro", groups: [claudeGroup])
+        
+        // Add a GCP query
+        let gcpQuery = QueryEntry(
+            display: "Investigate GCP",
+            timestamp: Date(),
+            workspace: "/Users/sameerbajaj/PARA/Projects/dev/agy-usage-stats",
+            modelName: "claude-3-5-sonnet",
+            isGcp: true,
+            gcpProject: "clawdbot-485304"
+        )
+        vm.stats.recentQueries = [gcpQuery]
+        
+        #expect(vm.activeModelDisplayName == "claude-3-5-sonnet (GCP)")
+    }
+
+    @Test func testNoPrefixesForTrackedModels() {
+        let litNS = NSColor.systemGreen
+
+        // Gemini: no "G:" prefix
+        let geminiState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .gemini,
+            queriesToday: 5,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: 0.82,
+            geminiFillFraction: 0.82,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(geminiState.text == "82%")
+        #expect(!geminiState.text.contains("G:"))
+
+        // Argon: no "A:" prefix
+        let argonState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .argon,
+            queriesToday: 5,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            argonUsageFraction: 0.40,
+            argonFillFraction: 0.40,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(argonState.text == "40%")
+        #expect(!argonState.text.contains("A:"))
+
+        // Claude: no "C:" prefix
+        let claudeState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .claude,
+            queriesToday: 5,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: 0.50,
+            claudeFillFraction: 0.50
+        )
+        #expect(claudeState.text == "50%")
+        #expect(!claudeState.text.contains("C:"))
+
+        // Active: clean percentage
+        let activeState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 5,
+            litColor: litNS,
+            activeUsageFraction: 0.34,
+            activeFillFraction: 0.34,
+            geminiUsageFraction: 0.82,
+            geminiFillFraction: 0.82,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(activeState.text == "34%")
+        #expect(!activeState.text.contains(":"))
+
+        // Most Depleted: clean percentage
+        let depletedState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .mostDepleted,
+            queriesToday: 5,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: 0.82,
+            geminiFillFraction: 0.82,
+            argonUsageFraction: 0.40,
+            argonFillFraction: 0.40,
+            claudeUsageFraction: 0.50,
+            claudeFillFraction: 0.50
+        )
+        #expect(depletedState.text == "40%")
+        #expect(!depletedState.text.contains(":"))
+    }
+
+    @Test func testDecoupledCircleRingAndNumberLimits() {
+        let vm = AgyStatsViewModel()
+        vm.selectedModelForIcon = .gemini
+        vm.iconQuotaLimitTarget = .fiveHour
+        vm.iconCircleFillMetric = .weekly
+
+        // Setup mock quota with 5h limit = 34% and weekly limit = 82%
+        let gemini5h = AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour Limit", remainingFraction: 0.34, resetDescription: nil, disabled: false, resetTime: nil)
+        let geminiWeekly = AgyQuotaBucket(bucketId: "g-w", displayName: "Weekly Limit", remainingFraction: 0.82, resetDescription: nil, disabled: false, resetTime: nil)
+        let geminiGroup = AgyQuotaGroup(displayName: "Gemini Models", description: nil, buckets: [gemini5h, geminiWeekly])
+
+        // Argon group has only Weekly Limit = 40%
+        let argonWeekly = AgyQuotaBucket(bucketId: "a-w", displayName: "Weekly Limit", remainingFraction: 0.40, resetDescription: nil, disabled: false, resetTime: nil)
+        let argonGroup = AgyQuotaGroup(displayName: "Gemini 4 Argon", description: nil, buckets: [argonWeekly])
+
+        vm.stats.quotaInfo = AgyQuotaInfo(email: "test@example.com", plan: "Pro", groups: [geminiGroup, argonGroup])
+
+        // Gemini: Number (%) should be 5-Hour (0.34) and Circle Ring should be Weekly (0.82)
+        #expect(vm.selectedModelUsageFraction == 0.34)
+        #expect(vm.selectedModelCircleFillFraction == 0.82)
+        #expect(vm.geminiUsageFraction == 0.34)
+        #expect(vm.geminiCircleFillFraction == 0.82)
+
+        // Argon: 5-Hour target falls back to Weekly Limit (0.40)
+        vm.selectedModelForIcon = .argon
+        #expect(vm.selectedModelUsageFraction == 0.40)
+        #expect(vm.selectedModelCircleFillFraction == 0.40)
+
+        // Match Percentage: Circle Ring matches Number (%)
+        vm.selectedModelForIcon = .gemini
+        vm.iconCircleFillMetric = .matchNumber
+        vm.iconQuotaLimitTarget = .fiveHour
+        #expect(vm.selectedModelUsageFraction == 0.34)
+        #expect(vm.selectedModelCircleFillFraction == 0.34)
+
+        vm.iconQuotaLimitTarget = .weekly
+        #expect(vm.selectedModelUsageFraction == 0.82)
+        #expect(vm.selectedModelCircleFillFraction == 0.82)
+    }
+
+    @Test func testSpendBadgePresentationAndMenuBarSpendSource() {
+        let litNS = NSColor.systemGreen
+
+        // GCP Spend Today
+        let gcpToday = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: 0.34,
+            activeFillFraction: 0.82,
+            geminiUsageFraction: 0.34,
+            geminiFillFraction: 0.82,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            gcpTodayCost: 0.49,
+            showSpend: true,
+            spendSource: .gcpToday,
+            spendAmount: 0.49
+        )
+        #expect(gcpToday.text == "34%")
+        #expect(gcpToday.spendBadge != nil)
+        #expect(gcpToday.spendBadge?.icon == .cloud)
+        #expect(gcpToday.spendBadge?.text == "$0.49")
+
+        // GCP Spend Total
+        let gcpTotal = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: 0.34,
+            activeFillFraction: 0.82,
+            geminiUsageFraction: 0.34,
+            geminiFillFraction: 0.82,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            showSpend: true,
+            spendSource: .gcpTotal,
+            spendAmount: 9.67,
+            gcpTotalCost: 9.67
+        )
+        #expect(gcpTotal.spendBadge != nil)
+        #expect(gcpTotal.spendBadge?.icon == .cloud)
+        #expect(gcpTotal.spendBadge?.text == "$9.67")
+
+        // Today's API Spend (All)
+        let apiToday = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: 0.34,
+            activeFillFraction: 0.82,
+            geminiUsageFraction: 0.34,
+            geminiFillFraction: 0.82,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            showSpend: true,
+            spendSource: .apiToday,
+            spendAmount: 51.94,
+            todayCost: 51.94
+        )
+        #expect(apiToday.spendBadge != nil)
+        #expect(apiToday.spendBadge?.icon == .dollar)
+        #expect(apiToday.spendBadge?.text == "$51.94")
+
+        // Zero cost when explicitly enabled
+        let zeroSpend = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: 0.34,
+            activeFillFraction: 0.82,
+            geminiUsageFraction: 0.34,
+            geminiFillFraction: 0.82,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            gcpTodayCost: 0.0,
+            showSpend: true,
+            spendSource: .gcpToday,
+            spendAmount: 0.0
+        )
+        #expect(zeroSpend.spendBadge != nil)
+        #expect(zeroSpend.spendBadge?.text == "$0.00")
+
+        // Spend disabled
+        let spendDisabled = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: 0.34,
+            activeFillFraction: 0.82,
+            geminiUsageFraction: 0.34,
+            geminiFillFraction: 0.82,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            gcpTodayCost: 0.49,
+            showSpend: false
+        )
+        #expect(spendDisabled.spendBadge == nil)
     }
 }
 

@@ -6,11 +6,11 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
 
 1. **Kernel File Watching (`AgyFileWatcher`)**:
    - Never poll the filesystem by traversing `conversations/*.db` files (doing so previously pegged CPU at 90.4% across 500+ databases).
-   - Use macOS kernel kqueue event monitors (`DispatchSource.makeFileSystemObjectSource`) on `history.jsonl` and the `conversations/` directory with a debounced handler and lightweight fallback.
+   - Use macOS kernel kqueue event monitors (`DispatchSource.makeFileSystemObjectSource`) on both consumer (`~/.gemini/antigravity-cli`) and GCP (`~/.agy-gcp-home/.gemini/antigravity-cli`) `history.jsonl` and `conversations/` directories (`gcpConvDirSource`) with a debounced handler and lightweight fallback.
 
 2. **Stats In-Memory Caching (`AgyStatsService`)**:
    - A top-level signature cache check (`statsCache`) sits at the very entrance of `loadStats(cliDir:)`.
-   - Keyed on `(settings, startOfToday, histMod, histSize, convDirMod)`.
+   - Keyed on both consumer and GCP paths: `(settings, startOfToday, histMod, histSize, convDirMod, gcpHistoryModDate, gcpHistorySize, gcpConversationsDirModDate)`.
    - Returns in `< 1ms` on warm loads without re-parsing SQLite databases or JSON files.
 
 3. **Quota Service Optimization (`AgyQuotaService`)**:
@@ -51,10 +51,26 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
 8. **Multi-Box Ingestion & Account Switching (Direction 1 Capsule)**:
    - **Dual Data Ingestion**: Concurrently monitors and ingests usage and queries from both `~/.gemini/antigravity-cli` (Consumer Subscription box) and `~/.agy-gcp-home/.gemini/antigravity-cli` (Google Cloud Platform $300 credit box via `agy-gcp`).
    - **Segmented Header Capsule**: Uses Direction 1 (`[ All | ● Sub | ☁️ GCP ]`) in `OverviewTabView` header. Persists selection via `@AppStorage("agy_selectedAccountFilter")`.
-   - **GCP Credit Card**: When `GCP` or `All` is selected, renders a dedicated card detailing GCP Cloud Spend (today's spend, 7-day spend, total consumed). If a custom budget pool is configured in Settings (`gcpCreditPool > 0`), it dynamically renders the remaining balance and progress bar; when set to 0, it renders clean spend tracking.
-   - **Menu Bar Account Stability**: Menu bar presentation is controllable via `SettingsTabView` (`MenuBarAccountTarget`: `.subscription`, `.gcp`, `.auto`). Defaults strictly to `.subscription` so cloud background sessions never abruptly disrupt consumer quota gauges.
+   - **GCP Credit Card**: When `GCP` or `All` is selected, renders a dedicated card detailing GCP Cloud Spend (today's spend, 7-day spend, total consumed) whenever `gcpTotalCost > 0 || gcpTodayCost > 0`. If a custom budget pool is configured in Settings (`gcpCreditPool > 0`), it dynamically renders the remaining balance and progress bar; when set to 0, it renders clean spend tracking.
+   - **Unified CoreGraphics Menu Bar Canvas (`AgyMenuBarRenderer`)**: The entire menu bar status item (circle ring gauge + remaining percentage + optional spend badge) is rendered inside a single cohesive `NSImage` (`makeAntigravityImage`). Never append external SwiftUI `Text` or 3D emoji (`☁️`) next to the icon.
+   - **Zero Model Prefixes (`34%`, Never `G: 34%`)**: Regardless of which model is tracked (`Active`, `Most Depleted`, `Gemini`, `Gemini 4 Argon`, `Claude`), the menu bar always renders a clean remaining percentage (`34%`) without `G:`, `C:`, or `A:` prefixes.
+   - **Decoupled Circle Ring & Percentage Number**: Users can independently configure the **Percentage Number** (`iconQuotaLimitTarget`: `5-Hour Limit`, `Weekly Limit`, `Auto`) and the **Circle Ring Gauge** (`iconCircleFillMetric`: `Weekly Limit`, `5-Hour Limit`, `Match Percentage`)—e.g., showing the Weekly limit on the circle ring and the 5-Hour limit as the percentage number.
+   - **Crisp Spend Badge & Live Settings Preview**: `showMenuBarSpend` toggles a canvas-rendered spend badge (`MenuBarSpendSource`: `GCP Cloud Spend (Today)`, `Today's API Spend (All)`, `GCP Cloud Spend (Total)`) separated by a subtle 1px vertical divider and monochrome SF Symbol (`cloud.fill` or `dollarsign`) on the exact same 11pt bold rounded monospaced baseline. `SettingsTabView` includes a live **Menu Bar Preview** pill at the top.
    - **Hermetic Unit Tests**: View model unit tests must explicitly initialize `vm.selectedModelForIcon = .active` and target limits to prevent cross-test leakage via `UserDefaults.standard`.
-   - **Production App Integrity Invariant**: Never leave an ad-hoc Xcode DerivedData build running on Sam's machine. When testing or verifying changes, always restore and ensure the production app in `/Applications/agy-usage-stats.app` is running and matches the latest official GitHub release.
+   - **Production App Integrity Invariant**: Never leave an ad-hoc Xcode DerivedData build running on Sam's machine, and **never copy raw DerivedData builds into `/Applications/agy-usage-stats.app`**.
+     - *Why*: Ad-hoc DerivedData builds have `CFBundleShortVersionString = 1.1.0`. The official GitHub rolling release is tagged with CI build sequences (e.g., `1.1.68`). When an ad-hoc build is placed in `/Applications/agy-usage-stats.app`, `UpdateChecker.swift` compares the remote version against `1.1.0` and immediately flags "New build available", prompting to overwrite local code with an older remote DMG!
+     - *Proper Release Protocol*: Use `scripts/deploy_release.sh -m "<message>"`. This runs hermetic unit tests, commits, pushes to `main`, waits for GitHub Actions to build the official DMG and update the rolling `latest` release, downloads the signed/official release, terminates any running processes, installs into `/Applications/agy-usage-stats.app`, and verifies the running binary path and version.
+
+## Release & Deployment Workflow
+
+To publish updates and install the official build without triggering update banners:
+```bash
+./scripts/deploy_release.sh -m "feat(scope): description"
+```
+Options:
+- Default: runs unit tests, commits & pushes to `main`, monitors GitHub Actions CI, downloads official DMG, and installs into `/Applications`.
+- `--local-publish`: runs unit tests, builds DMG locally with `build-dmg.sh`, publishes to GitHub `latest` release via `gh`, and installs into `/Applications`.
+- `--install-latest`: skips building and installs the current GitHub `latest` release DMG into `/Applications`.
 
 ## Testing Guidelines
 
@@ -64,4 +80,5 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
   ```
 - **Do not run the full UI test suite (`agy_usage_statsUITests`) for routine validation** unless specifically benchmarking launch performance or visual UI regressions. UI tests repeatedly launch the app 7+ times, toggle macOS light/dark appearance, and take ~2 minutes.
 - `agy_usage_statsTests` uses Swift Testing (`import Testing`) with fast, deterministic fixture-only tests that do not hit live network ports or scan disk histories. It is annotated with `@Suite(.serialized)`.
+
 
