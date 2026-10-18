@@ -62,6 +62,11 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
      - *Why*: Ad-hoc DerivedData builds have `CFBundleShortVersionString = 1.1.0`. The official GitHub rolling release is tagged with CI build sequences (e.g., `1.1.68`). When an ad-hoc build is placed in `/Applications/agy-usage-stats.app`, `UpdateChecker.swift` compares the remote version against `1.1.0` and immediately flags "New build available", prompting to overwrite local code with an older remote DMG!
      - *Proper Release Protocol*: Use `scripts/deploy_release.sh -m "<message>"`. This runs hermetic unit tests, commits, pushes to `main`, waits for GitHub Actions to build the official DMG and update the rolling `latest` release, downloads the signed/official release, terminates any running processes, installs into `/Applications/agy-usage-stats.app`, and verifies the running binary path and version.
 
+6. **Single-Instance & Test-Host Suppression Invariant**:
+   - **Zero Test Host Status Items**: Whenever `xcodebuild test` runs, Xcode launches `agy-usage-stats.app` as a test runner host. `agy_usage_statsApp` binds `MenuBarExtra(isInserted: .constant(!isRunningTests))` so the test host NEVER creates a status item in the macOS menu bar during automated tests.
+   - **NSRunningApplication Mutex**: `agy_usage_statsApp.init()` enforces strict single-instance execution via `NSRunningApplication.runningApplications(withBundleIdentifier:)`. If another non-terminated instance is already running with a different PID, duplicate launches immediately `exit(0)` to prevent duplicate or ghost status items in the menu bar.
+   - **Release Deployment Cleanup**: [`deploy_release.sh`](file:///Users/sameerbajaj/PARA/Projects/dev/agy-usage-stats/scripts/deploy_release.sh) terminates all prior instances via `killall -9 agy-usage-stats` and explicitly targets `platform=macOS,arch=arm64` to avoid dual-architecture test runners.
+
 9. **Low-Latency Quota Pipeline & Adaptive Background Polling**:
    - **Sub-300ms File Watcher Reactivity (`AgyFileWatcher`)**: Debounce delay reduced from 1500ms to 300ms so prompts and tool completions trigger quota refresh almost immediately.
    - **Fast-Path `refreshQuotaOnly()`**: Directly polls language server quota over localhost (`< 1ms` execution) without scanning `ps`, `lsof`, or reparsing history databases.
