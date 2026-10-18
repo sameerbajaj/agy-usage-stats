@@ -55,7 +55,7 @@ if [[ "$MODE" != "install-latest" ]]; then
     xcodebuild test \
         -project "$PROJECT" \
         -scheme "$SCHEME" \
-        -destination 'platform=macOS' \
+        -destination 'platform=macOS,arch=arm64' \
         -only-testing:agy-usage-statsTests \
         CODE_SIGN_IDENTITY="-" \
         -quiet
@@ -174,10 +174,8 @@ fi
 
 # Step 5: Terminate any running agy-usage-stats processes
 echo "🛑 Terminating running agy-usage-stats processes..."
-pgrep -x "$APP_NAME" | while read -r pid; do
-    echo "Killing process PID $pid..."
-    kill -9 "$pid" 2>/dev/null || true
-done
+killall -9 "$APP_NAME" 2>/dev/null || true
+pkill -9 -f "$APP_NAME" 2>/dev/null || true
 sleep 1
 
 # Step 6: Install official release into /Applications

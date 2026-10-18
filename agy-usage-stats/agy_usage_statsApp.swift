@@ -13,8 +13,30 @@ import Combine
 struct agy_usage_statsApp: App {
     @State private var viewModel = AgyStatsViewModel()
 
+    private var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+        ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil ||
+        NSClassFromString("XCTestCase") != nil ||
+        ProcessInfo.processInfo.arguments.contains("-NSTreatUnknownArgumentsAsOpen")
+    }
+
+    public init() {
+        // 1. If running under Xcode unit tests, skip single-instance check and do not render MenuBarExtra
+        if isRunningTests {
+            return
+        }
+
+        // 2. Strict single-instance invariant: exit immediately if another instance is already running
+        let currentPid = ProcessInfo.processInfo.processIdentifier
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.sameerbajaj.agy-usage-stats"
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        if running.contains(where: { $0.processIdentifier != currentPid && !$0.isTerminated }) {
+            exit(0)
+        }
+    }
+
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: .constant(!isRunningTests)) {
             MenuBarPopover(viewModel: viewModel)
         } label: {
             MenuBarLabel(viewModel: viewModel)
