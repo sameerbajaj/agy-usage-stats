@@ -51,9 +51,10 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
 8. **Multi-Box Ingestion & Account Switching (Direction 1 Capsule)**:
    - **Dual Data Ingestion**: Concurrently monitors and ingests usage and queries from both `~/.gemini/antigravity-cli` (Consumer Subscription box) and `~/.agy-gcp-home/.gemini/antigravity-cli` (Google Cloud Platform $300 credit box via `agy-gcp`).
    - **Segmented Header Capsule**: Uses Direction 1 (`[ All | ● Sub | ☁️ GCP ]`) in `OverviewTabView` header. Persists selection via `@AppStorage("agy_selectedAccountFilter")`.
-   - **GCP Credit Card**: When `GCP` or `All` is selected, renders a dedicated card detailing `$300 Promo Credit Pool`, remaining balance, today's spend, total consumed percentage, and Herdr delegation guard status.
+   - **GCP Credit Card**: When `GCP` or `All` is selected, renders a dedicated card detailing GCP Cloud Spend (today's spend, 7-day spend, total consumed). If a custom budget pool is configured in Settings (`gcpCreditPool > 0`), it dynamically renders the remaining balance and progress bar; when set to 0, it renders clean spend tracking.
    - **Menu Bar Account Stability**: Menu bar presentation is controllable via `SettingsTabView` (`MenuBarAccountTarget`: `.subscription`, `.gcp`, `.auto`). Defaults strictly to `.subscription` so cloud background sessions never abruptly disrupt consumer quota gauges.
    - **Hermetic Unit Tests**: View model unit tests must explicitly initialize `vm.selectedModelForIcon = .active` and target limits to prevent cross-test leakage via `UserDefaults.standard`.
+   - **Production App Integrity Invariant**: Never leave an ad-hoc Xcode DerivedData build running on Sam's machine. When testing or verifying changes, always restore and ensure the production app in `/Applications/agy-usage-stats.app` is running and matches the latest official GitHub release.
 
 ## Testing Guidelines
 
