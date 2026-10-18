@@ -92,6 +92,14 @@ struct agy_usage_statsTests {
         )
         #expect(claudeOnlyText == "C:90%")
 
+        // All three models available, including equal fractions (e.g. both 100%)
+        let allThreeEqual = MenuBarPresentationResolver.resolveQuotaText(
+            geminiFraction: 1.00,
+            argonFraction: 1.00,
+            claudeFraction: 0.50
+        )
+        #expect(allThreeEqual == "G:100% A:100% C:50%")
+
         // Both missing: never "gcp direct" or false "100%"
         let missingText = MenuBarPresentationResolver.resolveQuotaText(
             geminiFraction: nil,
@@ -771,4 +779,132 @@ struct agy_usage_statsTests {
         let (_, _, modelCost) = model.estimateTokensAndCost(for: modelQuery)
         #expect(modelCost == 0.0)
     }
+
+    @Test func testHistoricalGcpAttributionAndCostAggregation() async throws {
+        AgyStatsService.clearCaches()
+        let cliDir = AgyStatsService.getDefaultCliDir()
+        if FileManager.default.fileExists(atPath: (cliDir as NSString).appendingPathComponent("history.jsonl")) {
+            let (stats, _) = await AgyStatsService.loadStats(cliDir: cliDir)
+            let gcpDays = stats.dailyUsage.filter { $0.gcpCost > 0 }.map { $0.periodKey }
+            #expect(gcpDays.contains("2026-09-02"))
+            #expect(gcpDays.contains("2026-09-03"))
+            #expect(gcpDays.contains("2026-09-15"))
+            #expect(stats.gcpTotalCost >= 13.0)
+            
+            let hasGcpAccount = stats.accountCostTotals.keys.contains { $0.contains("GCP") || $0.contains("clawdbot") }
+            #expect(hasGcpAccount)
+        }
+    }
+
+    @Test func testArgonGroupNilWhenNotPresent() {
+        let vm = AgyStatsViewModel()
+        let geminiBucket = AgyQuotaBucket(bucketId: "g-w", displayName: "Weekly Limit", remainingFraction: 0.8, resetDescription: nil, disabled: false, resetTime: nil)
+        let claudeBucket = AgyQuotaBucket(bucketId: "c-w", displayName: "Weekly Limit", remainingFraction: 0.5, resetDescription: nil, disabled: false, resetTime: nil)
+        let geminiGroup = AgyQuotaGroup(displayName: "Gemini Models", description: nil, buckets: [geminiBucket])
+        let claudeGroup = AgyQuotaGroup(displayName: "Claude and GPT models", description: nil, buckets: [claudeBucket])
+        
+        vm.stats.quotaInfo = AgyQuotaInfo(email: "test@example.com", plan: "Pro", groups: [geminiGroup, claudeGroup])
+        // Must return nil and not fall back to Gemini
+        #expect(vm.argonUsageFraction == nil)
+        #expect(vm.argonCircleFillFraction == nil)
+        
+        // When Argon group is added, it resolves cleanly
+        let argonBucket = AgyQuotaBucket(bucketId: "a-w", displayName: "Weekly Limit", remainingFraction: 0.95, resetDescription: nil, disabled: false, resetTime: nil)
+        let argonGroup = AgyQuotaGroup(displayName: "Gemini 4 Argon", description: nil, buckets: [argonBucket])
+        vm.stats.quotaInfo = AgyQuotaInfo(email: "test@example.com", plan: "Pro", groups: [geminiGroup, claudeGroup, argonGroup])
+        #expect(vm.argonUsageFraction == 0.95)
+    }
+
+    @Test func testAllThreeAndArgonIconPresentation() {
+        let litNS = NSColor.systemGreen
+
+        // Argon single presentation
+        let argonPresent = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .argon,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            argonUsageFraction: 0.75,
+            argonFillFraction: 0.75,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(argonPresent.text == "A:75%")
+        #expect(argonPresent.gaugeStyle == .single(fraction: 0.75, strokeColor: MenuBarPresentationResolver.argonColor))
+
+        // Argon missing presentation -> neutral chevron
+        let argonMissing = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .argon,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(argonMissing.text == "")
+        #expect(argonMissing.gaugeStyle == .none)
+
+        // All three present
+        let allThreePresent = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .allThree,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: 0.80,
+            geminiFillFraction: 0.80,
+            argonUsageFraction: 0.90,
+            argonFillFraction: 0.90,
+            claudeUsageFraction: 0.50,
+            claudeFillFraction: 0.50
+        )
+        #expect(allThreePresent.text == "G:80% A:90% C:50%")
+        #expect(allThreePresent.gaugeStyle == .three(geminiFraction: 0.80, argonFraction: 0.90, claudeFraction: 0.50))
+
+        // All three mode when Argon is nil: graceful fallback to .both
+        let allThreeArgonNil = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .allThree,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: 0.80,
+            geminiFillFraction: 0.80,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: 0.50,
+            claudeFillFraction: 0.50
+        )
+        #expect(allThreeArgonNil.text == "G:80% C:50%")
+        #expect(allThreeArgonNil.gaugeStyle == .both(geminiFraction: 0.80, claudeFraction: 0.50))
+    }
+
+    @Test func testGcpCreditPoolConfiguration() {
+        let vm = AgyStatsViewModel()
+        // Default pool for promo credit
+        #expect(vm.gcpCreditPool >= 0.0)
+
+        // Configure custom pool
+        vm.gcpCreditPool = 150.0
+        #expect(vm.gcpCreditPool == 150.0)
+
+        // Set to 0.0 for unlimited spend tracking
+        vm.gcpCreditPool = 0.0
+        #expect(vm.gcpCreditPool == 0.0)
+    }
 }
+
+
+

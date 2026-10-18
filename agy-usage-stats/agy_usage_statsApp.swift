@@ -101,6 +101,7 @@ struct MenuBarLabel: View {
         case .subscription:
             return MenuBarPresentationResolver.resolveQuotaText(
                 geminiFraction: viewModel.geminiUsageFraction,
+                argonFraction: viewModel.argonUsageFraction,
                 claudeFraction: viewModel.claudeUsageFraction
             )
         case .gcp:
@@ -111,6 +112,7 @@ struct MenuBarLabel: View {
             }
             return MenuBarPresentationResolver.resolveQuotaText(
                 geminiFraction: viewModel.geminiUsageFraction,
+                argonFraction: viewModel.argonUsageFraction,
                 claudeFraction: viewModel.claudeUsageFraction
             )
         }
@@ -126,9 +128,11 @@ struct MenuBarLabel: View {
                     selectedModelForIcon: viewModel.selectedModelForIcon,
                     activeUsageFraction: viewModel.selectedModelUsageFraction,
                     geminiUsageFraction: viewModel.geminiUsageFraction,
+                    argonUsageFraction: viewModel.argonUsageFraction,
                     claudeUsageFraction: viewModel.claudeUsageFraction,
                     activeFillFraction: viewModel.selectedModelCircleFillFraction,
                     geminiFillFraction: viewModel.geminiCircleFillFraction,
+                    argonFillFraction: viewModel.argonCircleFillFraction,
                     claudeFillFraction: viewModel.claudeCircleFillFraction
                 ))
             }
@@ -155,6 +159,9 @@ struct MenuBarLabel: View {
         if let g = viewModel.geminiUsageFraction {
             lines.append(String(format: "Gemini: %.0f%%", g * 100))
         }
+        if let a = viewModel.argonUsageFraction {
+            lines.append(String(format: "Argon: %.0f%%", a * 100))
+        }
         if let c = viewModel.claudeUsageFraction {
             lines.append(String(format: "Claude: %.0f%%", c * 100))
         }
@@ -170,6 +177,7 @@ public struct IconPresentationState: Equatable {
         case none
         case single(fraction: Double, strokeColor: NSColor)
         case both(geminiFraction: Double, claudeFraction: Double)
+        case three(geminiFraction: Double, argonFraction: Double, claudeFraction: Double)
     }
 
     public let text: String
@@ -187,15 +195,20 @@ public struct IconPresentationState: Equatable {
 
 public enum MenuBarPresentationResolver {
     public static let geminiColor = NSColor(red: 0.65, green: 0.45, blue: 1.0, alpha: 1.0)
+    public static let argonColor = NSColor(red: 0.0, green: 0.82, blue: 0.95, alpha: 1.0)
     public static let claudeColor = NSColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
 
     public static func resolveQuotaText(
         geminiFraction: Double?,
+        argonFraction: Double? = nil,
         claudeFraction: Double?
     ) -> String {
         var parts: [String] = []
         if let gf = geminiFraction {
             parts.append(String(format: "G:%.0f%%", gf * 100))
+        }
+        if let af = argonFraction {
+            parts.append(String(format: "A:%.0f%%", af * 100))
         }
         if let cf = claudeFraction {
             parts.append(String(format: "C:%.0f%%", cf * 100))
@@ -215,6 +228,8 @@ public enum MenuBarPresentationResolver {
         activeFillFraction: Double?,
         geminiUsageFraction: Double?,
         geminiFillFraction: Double?,
+        argonUsageFraction: Double? = nil,
+        argonFillFraction: Double? = nil,
         claudeUsageFraction: Double?,
         claudeFillFraction: Double?
     ) -> IconPresentationState {
@@ -236,20 +251,20 @@ public enum MenuBarPresentationResolver {
             }
 
         case .mostDepleted:
-            let depletedFraction: Double?
-            let depletedFill: Double?
-            if let gf = geminiUsageFraction, let cf = claudeUsageFraction {
-                if gf <= cf {
-                    depletedFraction = gf
-                    depletedFill = geminiFillFraction ?? gf
-                } else {
-                    depletedFraction = cf
-                    depletedFill = claudeFillFraction ?? cf
-                }
-            } else {
-                depletedFraction = geminiUsageFraction ?? claudeUsageFraction ?? activeUsageFraction
-                depletedFill = geminiFillFraction ?? claudeFillFraction ?? activeFillFraction ?? depletedFraction
+            var candidates: [(fraction: Double, fill: Double)] = []
+            if let gf = geminiUsageFraction {
+                candidates.append((fraction: gf, fill: geminiFillFraction ?? gf))
             }
+            if let af = argonUsageFraction {
+                candidates.append((fraction: af, fill: argonFillFraction ?? af))
+            }
+            if let cf = claudeUsageFraction {
+                candidates.append((fraction: cf, fill: claudeFillFraction ?? cf))
+            }
+
+            let minCandidate = candidates.min(by: { $0.fraction < $1.fraction })
+            let depletedFraction = minCandidate?.fraction ?? activeUsageFraction
+            let depletedFill = minCandidate?.fill ?? activeFillFraction ?? depletedFraction
 
             if let fraction = depletedFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
@@ -267,6 +282,15 @@ public enum MenuBarPresentationResolver {
                 let pctText = String(format: "G:%.0f%%", fraction * 100)
                 let fill = geminiFillFraction ?? fraction
                 return IconPresentationState(text: pctText, textColor: geminiColor, gaugeStyle: .single(fraction: fill, strokeColor: geminiColor))
+            } else {
+                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none)
+            }
+
+        case .argon:
+            if let fraction = argonUsageFraction {
+                let pctText = String(format: "A:%.0f%%", fraction * 100)
+                let fill = argonFillFraction ?? fraction
+                return IconPresentationState(text: pctText, textColor: argonColor, gaugeStyle: .single(fraction: fill, strokeColor: argonColor))
             } else {
                 return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none)
             }
@@ -297,6 +321,42 @@ public enum MenuBarPresentationResolver {
             } else {
                 return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none)
             }
+
+        case .allThree:
+            var parts: [String] = []
+            if let gf = geminiUsageFraction { parts.append(String(format: "G:%.0f%%", gf * 100)) }
+            if let af = argonUsageFraction { parts.append(String(format: "A:%.0f%%", af * 100)) }
+            if let cf = claudeUsageFraction { parts.append(String(format: "C:%.0f%%", cf * 100)) }
+
+            guard !parts.isEmpty else {
+                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none)
+            }
+
+            let pctText = parts.joined(separator: " ")
+            let gFill = geminiFillFraction ?? geminiUsageFraction
+            let aFill = argonFillFraction ?? argonUsageFraction
+            let cFill = claudeFillFraction ?? claudeUsageFraction
+
+            let gauge: IconPresentationState.GaugeStyle
+            if let gf = gFill, let af = aFill, let cf = cFill {
+                gauge = .three(geminiFraction: gf, argonFraction: af, claudeFraction: cf)
+            } else if let gf = gFill, let cf = cFill {
+                gauge = .both(geminiFraction: gf, claudeFraction: cf)
+            } else if let gf = gFill {
+                gauge = .single(fraction: gf, strokeColor: geminiColor)
+            } else if let af = aFill {
+                gauge = .single(fraction: af, strokeColor: argonColor)
+            } else if let cf = cFill {
+                gauge = .single(fraction: cf, strokeColor: claudeColor)
+            } else {
+                gauge = .none
+            }
+
+            return IconPresentationState(
+                text: pctText,
+                textColor: NSColor.textColor,
+                gaugeStyle: gauge
+            )
         }
     }
 }
@@ -313,9 +373,11 @@ private func makeAntigravityImage(
     selectedModelForIcon: IconModelSelection = .active,
     activeUsageFraction: Double? = nil,
     geminiUsageFraction: Double? = nil,
+    argonUsageFraction: Double? = nil,
     claudeUsageFraction: Double? = nil,
     activeFillFraction: Double? = nil,
     geminiFillFraction: Double? = nil,
+    argonFillFraction: Double? = nil,
     claudeFillFraction: Double? = nil
 ) -> NSImage {
     let litNS = NSColor(litColor)
@@ -328,6 +390,8 @@ private func makeAntigravityImage(
         activeFillFraction: activeFillFraction,
         geminiUsageFraction: geminiUsageFraction,
         geminiFillFraction: geminiFillFraction,
+        argonUsageFraction: argonUsageFraction,
+        argonFillFraction: argonFillFraction,
         claudeUsageFraction: claudeUsageFraction,
         claudeFillFraction: claudeFillFraction
     )
@@ -348,16 +412,24 @@ private func makeAntigravityImage(
         textSize = pctText.size(withAttributes: textAttributes)
     }
 
+    let isThreeGauges: Bool
     let isBothGauges: Bool
-    if case .both = presentation.gaugeStyle {
+    if case .three = presentation.gaugeStyle {
+        isThreeGauges = true
+        isBothGauges = false
+    } else if case .both = presentation.gaugeStyle {
+        isThreeGauges = false
         isBothGauges = true
     } else {
+        isThreeGauges = false
         isBothGauges = false
     }
 
     let w: CGFloat
     if presentation.hasText {
-        if isBothGauges {
+        if isThreeGauges {
+            w = 34.0 + textSize.width + 2.0
+        } else if isBothGauges {
             w = 26.0 + textSize.width + 2.0
         } else {
             w = 18.0 + textSize.width + 2.0
@@ -376,12 +448,23 @@ private func makeAntigravityImage(
             case .both(let geminiFraction, let claudeFraction):
                 drawGauge(center: NSPoint(x: 6.0, y: 7.0), radius: 4.2, fraction: geminiFraction, strokeColor: MenuBarPresentationResolver.geminiColor, chevronSize: 2.0)
                 drawGauge(center: NSPoint(x: 16.0, y: 7.0), radius: 4.2, fraction: claudeFraction, strokeColor: MenuBarPresentationResolver.claudeColor, chevronSize: 2.0)
+            case .three(let geminiFraction, let argonFraction, let claudeFraction):
+                drawGauge(center: NSPoint(x: 5.0, y: 7.0), radius: 3.8, fraction: geminiFraction, strokeColor: MenuBarPresentationResolver.geminiColor, chevronSize: 1.8)
+                drawGauge(center: NSPoint(x: 14.0, y: 7.0), radius: 3.8, fraction: argonFraction, strokeColor: MenuBarPresentationResolver.argonColor, chevronSize: 1.8)
+                drawGauge(center: NSPoint(x: 23.0, y: 7.0), radius: 3.8, fraction: claudeFraction, strokeColor: MenuBarPresentationResolver.claudeColor, chevronSize: 1.8)
             case .none:
                 break
             }
 
             // Draw text
-            let textX: CGFloat = isBothGauges ? 24.0 : 18.0
+            let textX: CGFloat
+            if isThreeGauges {
+                textX = 31.0
+            } else if isBothGauges {
+                textX = 24.0
+            } else {
+                textX = 18.0
+            }
             let textY = (14.0 - textSize.height) / 2.0 + 0.5
             pctText.draw(at: NSPoint(x: textX, y: textY), withAttributes: textAttributes)
         } else {

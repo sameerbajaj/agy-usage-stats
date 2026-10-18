@@ -26,6 +26,7 @@ public enum AgyStatsService {
         let inputTokens: Int?
         let outputTokens: Int?
         let cachedInputTokens: Int?
+        let isGcpOrigin: Bool
     }
     
     private struct DbConversationData: Sendable {
@@ -331,15 +332,17 @@ public enum AgyStatsService {
             
             let queries = combinedLoadedQueries.map { q -> QueryEntry in
                 var copy = q
-                let fallback: String
-                if q.timestamp >= sep2026 {
-                    fallback = settings.model ?? "Gemini 3.8 Flash (High)"
-                } else if q.timestamp >= aug2026 {
-                    fallback = "Gemini 3.7 Flash (High)"
-                } else {
-                    fallback = "Gemini 3.6 Flash (High)"
+                if copy.modelName == nil {
+                    let fallback: String
+                    if q.timestamp >= sep2026 {
+                        fallback = settings.model ?? "Gemini 3.8 Flash (High)"
+                    } else if q.timestamp >= aug2026 {
+                        fallback = "Gemini 3.7 Flash (High)"
+                    } else {
+                        fallback = "Gemini 3.6 Flash (High)"
+                    }
+                    copy.modelName = fallback
                 }
-                copy.modelName = fallback
                 return copy
             }
             
@@ -350,7 +353,7 @@ public enum AgyStatsService {
             var toolStats = loadedToolStats
             
             if expandedDir != gcpCliDir && FileManager.default.fileExists(atPath: gcpConversationsDir) {
-                let (gcpDb, gcpTools, _) = await loadConversationsAndToolStats(conversationsDir: gcpConversationsDir)
+                let (gcpDb, gcpTools, _) = await loadConversationsAndToolStats(conversationsDir: gcpConversationsDir, isGcpOrigin: true)
                 for (cid, conv) in gcpDb {
                     allDbConversations[cid] = conv
                 }
@@ -549,19 +552,22 @@ public enum AgyStatsService {
                             } else if let firstPostModel = convData.generations.compactMap({ $0.modelName }).first {
                                 newQ.modelName = enforceDateModelValidity(modelName: firstPostModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
                             } else {
-                                newQ.modelName = queryDefaultModel
+                                newQ.modelName = q.modelName ?? queryDefaultModel
                             }
                         }
                     }
                 } else {
                     if let overrideModel = findModelOverride(at: q.timestamp, in: modelTransitions, calendar: calendar) {
                         newQ.modelName = enforceDateModelValidity(modelName: overrideModel, date: q.timestamp, aug2026: aug2026, sep2026: sep2026)
+                    } else if newQ.modelName == nil {
+                        newQ.modelName = queryDefaultModel
                     }
                 }
                 let authState = authForDateInitial(q.timestamp)
-                newQ.isGcp = authState.isGcp
-                newQ.gcpProject = authState.gcpProject
-                newQ.accountEmail = authState.email
+                let isGcp = q.isGcp || authState.isGcp
+                newQ.isGcp = isGcp
+                newQ.gcpProject = isGcp ? (q.gcpProject ?? authState.gcpProject ?? "clawdbot-485304") : nil
+                newQ.accountEmail = isGcp ? nil : authState.email
                 queriesWithMeta.append(newQ)
             }
             
@@ -805,7 +811,8 @@ public enum AgyStatsService {
             // 1. Initialize buckets, query counts, and fallback estimates for older queries lacking SQLite DB files
             for q in queriesWithMeta {
                 let authState = authForDate(q.timestamp)
-                let accName = authState.accountDisplayName
+                let isGcp = q.isGcp || authState.isGcp
+                let accName = isGcp ? (q.gcpProject != nil ? "GCP (\(q.gcpProject!))" : authState.accountDisplayName) : authState.accountDisplayName
                 
                 let dInfo = getDateInfo(for: q.timestamp)
                 let dayKey = dInfo.dayKey
@@ -819,7 +826,7 @@ public enum AgyStatsService {
                 }
                 dayBucket.queryCount += 1
                 dayBucket.accountQueryBreakdown[accName, default: 0] += 1
-                if authState.isGcp {
+                if isGcp {
                     dayBucket.gcpQueryCount += 1
                 } else {
                     dayBucket.quotaQueryCount += 1
@@ -843,7 +850,7 @@ public enum AgyStatsService {
                         dayBucket.accountCostBreakdown[accName, default: 0.0] += cost
                         totalCost += cost
                         accountCostTotals[accName, default: 0.0] += cost
-                        if authState.isGcp {
+                        if isGcp {
                             dayBucket.gcpCost += cost
                             dayBucket.gcpInputTokens += inTokens
                             dayBucket.gcpOutputTokens += outTokens
@@ -897,7 +904,7 @@ public enum AgyStatsService {
                         monthBucket.outputTokens += outTokens
                         monthBucket.modelBreakdown[model.name, default: 0.0] += cost
                         monthBucket.accountCostBreakdown[accName, default: 0.0] += cost
-                        if authState.isGcp {
+                        if isGcp {
                             monthBucket.gcpCost += cost
                         } else {
                             monthBucket.quotaCost += cost
@@ -947,11 +954,12 @@ public enum AgyStatsService {
                 }
                 
                 let authState = authForDate(genDate)
-                let accName = authState.accountDisplayName
+                let isGcp = gen.isGcpOrigin || authState.isGcp
+                let accName = gen.isGcpOrigin ? "GCP (clawdbot-485304)" : authState.accountDisplayName
                 
                 totalCost += cost
                 accountCostTotals[accName, default: 0.0] += cost
-                if authState.isGcp {
+                if isGcp {
                     gcpTotalCost += cost
                 } else {
                     quotaTotalCost += cost
@@ -960,7 +968,7 @@ public enum AgyStatsService {
                 if genDate >= startOfToday {
                     todayCost += cost
                     accountTodayTotals[accName, default: 0.0] += cost
-                    if authState.isGcp {
+                    if isGcp {
                         gcpTodayCost += cost
                     } else {
                         quotaTodayCost += cost
@@ -969,7 +977,7 @@ public enum AgyStatsService {
                 if genDate >= sevenDaysAgo {
                     weekCost += cost
                     accountWeeklyTotals[accName, default: 0.0] += cost
-                    if authState.isGcp {
+                    if isGcp {
                         gcpWeekCost += cost
                     } else {
                         quotaWeekCost += cost
@@ -993,7 +1001,7 @@ public enum AgyStatsService {
                 dayBucket.outputTokens += outTokens
                 dayBucket.modelBreakdown[model.name, default: 0.0] += cost
                 dayBucket.accountCostBreakdown[accName, default: 0.0] += cost
-                if authState.isGcp {
+                if isGcp {
                     dayBucket.gcpCost += cost
                     dayBucket.gcpInputTokens += inTokens
                     dayBucket.gcpOutputTokens += outTokens
@@ -1019,7 +1027,7 @@ public enum AgyStatsService {
                 monthBucket.outputTokens += outTokens
                 monthBucket.modelBreakdown[model.name, default: 0.0] += cost
                 monthBucket.accountCostBreakdown[accName, default: 0.0] += cost
-                if authState.isGcp {
+                if isGcp {
                     monthBucket.gcpCost += cost
                     monthBucket.gcpInputTokens += inTokens
                     monthBucket.gcpOutputTokens += outTokens
@@ -1147,13 +1155,21 @@ public enum AgyStatsService {
     }
     
     private static func loadAuthTransitions(logDir: String, defaultProject: String?) -> [AuthTransition] {
+        let historicalTransitions: [AuthTransition] = [
+            AuthTransition(timestamp: Date.distantPast, isGcp: false, email: "sameerbajaj24@gmail.com", gcpProject: nil),
+            AuthTransition(timestamp: Date(timeIntervalSince1970: 1788408335), isGcp: true, email: "sameerbajaj24@gmail.com", gcpProject: defaultProject ?? "clawdbot-485304"),
+            AuthTransition(timestamp: Date(timeIntervalSince1970: 1788445773), isGcp: false, email: "sameerbajaj24@gmail.com", gcpProject: nil),
+            AuthTransition(timestamp: Date(timeIntervalSince1970: 1789525449), isGcp: true, email: "sameerbajaj24@gmail.com", gcpProject: defaultProject ?? "clawdbot-485304"),
+            AuthTransition(timestamp: Date(timeIntervalSince1970: 1789527897), isGcp: false, email: "sameerbajaj24@gmail.com", gcpProject: nil)
+        ]
+
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(atPath: logDir) else {
-            return []
+            return historicalTransitions
         }
         
         let logFiles = files.filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }.sorted()
-        guard !logFiles.isEmpty else { return [] }
+        guard !logFiles.isEmpty else { return historicalTransitions }
         let newestFile = logFiles.last!
         let newestPath = (logDir as NSString).appendingPathComponent(newestFile)
         let newestMod = (try? fm.attributesOfItem(atPath: newestPath))?[.modificationDate] as? Date
@@ -1187,10 +1203,10 @@ public enum AgyStatsService {
         }
         authCacheLock.unlock()
         
-        var transitions: [AuthTransition] = []
-        var lastIsGcp: Bool? = nil
-        var lastEmail: String? = nil
-        var lastProject: String? = nil
+        var transitions: [AuthTransition] = historicalTransitions
+        var lastIsGcp: Bool? = historicalTransitions.last?.isGcp
+        var lastEmail: String? = historicalTransitions.last?.email
+        var lastProject: String? = historicalTransitions.last?.gcpProject
         
         let emailRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
         
@@ -1260,6 +1276,7 @@ public enum AgyStatsService {
                 lastProject = project
             }
         }
+        transitions.sort { $0.timestamp < $1.timestamp }
         
         authCacheLock.lock()
         authCache = AuthCacheEntry(
@@ -1681,7 +1698,7 @@ public enum AgyStatsService {
         return nil
     }
     
-    private static func parseDbConversationAndToolStats(file: String, conversationsDir: String, fm: FileManager) -> (DbConversationData, [String: Int], Bool) {
+    private static func parseDbConversationAndToolStats(file: String, conversationsDir: String, fm: FileManager, isGcpOrigin: Bool = false) -> (DbConversationData, [String: Int], Bool) {
         let convId = (file as NSString).deletingPathExtension
         let dbPath = (conversationsDir as NSString).appendingPathComponent(file)
         
@@ -1822,7 +1839,8 @@ public enum AgyStatsService {
                     modelName: modelName,
                     inputTokens: inputTokens,
                     outputTokens: outputTokens,
-                    cachedInputTokens: cachedTokens
+                    cachedInputTokens: cachedTokens,
+                    isGcpOrigin: isGcpOrigin
                 ))
             }
         }
@@ -1842,7 +1860,7 @@ public enum AgyStatsService {
         return (convData, toolCounts, false)
     }
     
-    private static func loadConversationsAndToolStats(conversationsDir: String) async -> ([String: DbConversationData], [ToolStat], Bool) {
+    private static func loadConversationsAndToolStats(conversationsDir: String, isGcpOrigin: Bool = false) async -> ([String: DbConversationData], [ToolStat], Bool) {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(atPath: conversationsDir) else {
             return ([:], [], false)
@@ -1854,7 +1872,7 @@ public enum AgyStatsService {
         let results = await withTaskGroup(of: (DbConversationData, [String: Int], Bool).self) { group in
             for file in dbFiles {
                 group.addTask {
-                    return parseDbConversationAndToolStats(file: file, conversationsDir: conversationsDir, fm: fm)
+                    return parseDbConversationAndToolStats(file: file, conversationsDir: conversationsDir, fm: fm, isGcpOrigin: isGcpOrigin)
                 }
             }
             var collected: [(DbConversationData, [String: Int], Bool)] = []

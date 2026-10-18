@@ -24,8 +24,10 @@ public enum IconModelSelection: String, Codable, CaseIterable, Identifiable {
     case active = "Active Model"
     case mostDepleted = "Most Depleted"
     case gemini = "Gemini Only"
+    case argon = "Gemini 4 Argon"
     case claude = "Claude Only"
     case both = "Both (G & C)"
+    case allThree = "All Three (G, A, C)"
     
     public var id: String { rawValue }
 }
@@ -122,6 +124,12 @@ public final class AgyStatsViewModel {
         }
     }
     
+    public var gcpCreditPool: Double {
+        didSet {
+            UserDefaults.standard.set(gcpCreditPool, forKey: "agy_gcpCreditPool")
+        }
+    }
+    
     // UI States
     public var stats: AgyUsageStats = .empty
     public var settings: AgySettings = .default
@@ -193,6 +201,12 @@ public final class AgyStatsViewModel {
             self.menuBarAccountTarget = target
         } else {
             self.menuBarAccountTarget = .subscription
+        }
+        
+        if let savedPool = UserDefaults.standard.object(forKey: "agy_gcpCreditPool") as? Double {
+            self.gcpCreditPool = savedPool
+        } else {
+            self.gcpCreditPool = 300.0
         }
         
         let expanded = self.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
@@ -338,10 +352,21 @@ public final class AgyStatsViewModel {
 
     private func getGeminiGroup() -> AgyQuotaGroup? {
         guard let quota = stats.quotaInfo else { return nil }
+        if let flashGroup = quota.groups.first(where: {
+            let name = $0.displayName.lowercased()
+            return (name.contains("gemini") || name.contains("flash")) && !name.contains("argon")
+        }) {
+            return flashGroup
+        }
         return quota.groups.first {
             let name = $0.displayName.lowercased()
-            return name.contains("gemini") || name.contains("argon")
+            return name.contains("gemini")
         }
+    }
+
+    private func getArgonGroup() -> AgyQuotaGroup? {
+        guard let quota = stats.quotaInfo else { return nil }
+        return quota.groups.first(where: { $0.displayName.lowercased().contains("argon") })
     }
 
     private func getClaudeGroup() -> AgyQuotaGroup? {
@@ -437,9 +462,11 @@ public final class AgyStatsViewModel {
             group = getMostDepletedGroup()
         case .gemini:
             group = getGeminiGroup()
+        case .argon:
+            group = getArgonGroup()
         case .claude:
             group = getClaudeGroup()
-        case .both:
+        case .both, .allThree:
             group = getActiveGroup()
         }
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
@@ -448,6 +475,12 @@ public final class AgyStatsViewModel {
 
     public var geminiUsageFraction: Double? {
         let group = getGeminiGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getUsageFraction(for: bucket)
+    }
+
+    public var argonUsageFraction: Double? {
+        let group = getArgonGroup()
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
         return getUsageFraction(for: bucket)
     }
@@ -468,9 +501,11 @@ public final class AgyStatsViewModel {
             group = getMostDepletedGroup()
         case .gemini:
             group = getGeminiGroup()
+        case .argon:
+            group = getArgonGroup()
         case .claude:
             group = getClaudeGroup()
-        case .both:
+        case .both, .allThree:
             group = getActiveGroup()
         }
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
@@ -479,6 +514,12 @@ public final class AgyStatsViewModel {
 
     public var geminiCircleFillFraction: Double? {
         let group = getGeminiGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getCircleFillFraction(for: bucket)
+    }
+
+    public var argonCircleFillFraction: Double? {
+        let group = getArgonGroup()
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
         return getCircleFillFraction(for: bucket)
     }

@@ -101,6 +101,26 @@ struct SettingsTabView: View {
                 Rectangle().fill(theme.divider).frame(height: 0.75)
                 
                 HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Credit / Budget Pool ($)")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("0 = unlimited spend tracking (no pool bar)")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    TextField("0", value: $viewModel.gcpCreditPool, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .frame(width: 70)
+                        .multilineTextAlignment(.trailing)
+                        .controlSize(.small)
+                }
+                
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+                
+                HStack {
                     Text("Display Mode")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(theme.textPrimary.opacity(0.85))

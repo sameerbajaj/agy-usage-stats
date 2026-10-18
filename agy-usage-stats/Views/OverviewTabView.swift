@@ -265,7 +265,7 @@ public struct OverviewTabView: View {
                     Image(systemName: "cloud.fill")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(Color.blue)
-                    Text("GOOGLE CLOUD PLATFORM")
+                    Text("GCP CLOUD SPEND")
                         .font(.system(size: 10.5, weight: .black, design: .monospaced))
                         .foregroundStyle(Color.blue)
                 }
@@ -293,45 +293,79 @@ public struct OverviewTabView: View {
             
             Rectangle().fill(theme.divider).frame(height: 0.5)
             
-            // $300 Promo Credit Balance & Burn
-            let poolTotal = 300.0
             let gcpTotalSpend = viewModel.stats.gcpTotalCost
             let gcpTodaySpend = viewModel.stats.gcpTodayCost
-            let creditRemaining = max(0.0, poolTotal - gcpTotalSpend)
-            let consumedFraction = min(1.0, gcpTotalSpend / poolTotal)
+            let gcpWeekSpend = viewModel.stats.gcpWeeklyCost
+            let poolTotal = viewModel.gcpCreditPool
             
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("$300 PROMO CREDIT POOL")
-                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
-                    Spacer()
-                    Text(String(format: "$%.2f remaining", creditRemaining))
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.costGreen)
-                }
+            if poolTotal > 0.0 {
+                let creditRemaining = max(0.0, poolTotal - gcpTotalSpend)
+                let consumedFraction = min(1.0, gcpTotalSpend / poolTotal)
                 
-                // Progress Bar
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.primary.opacity(0.08))
-                        
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.blue)
-                            .frame(width: max(0, geo.size.width * CGFloat(consumedFraction)))
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(String(format: "$%.0f CREDIT POOL", poolTotal))
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                        Spacer()
+                        Text(String(format: "$%.2f remaining", creditRemaining))
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(theme.costGreen)
+                    }
+                    
+                    // Progress Bar
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.primary.opacity(0.08))
+                            
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.blue)
+                                .frame(width: max(0, geo.size.width * CGFloat(consumedFraction)))
+                        }
+                    }
+                    .frame(height: 5.5)
+                    
+                    HStack {
+                        Text(String(format: "$%.2f spent today", gcpTodaySpend))
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textPrimary)
+                        Spacer()
+                        Text(String(format: "$%.2f total consumed (%.1f%%)", gcpTotalSpend, consumedFraction * 100))
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
                     }
                 }
-                .frame(height: 5.5)
-                
-                HStack {
-                    Text(String(format: "$%.2f spent today", gcpTodaySpend))
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textPrimary)
-                    Spacer()
-                    Text(String(format: "$%.2f total consumed (%.1f%%)", gcpTotalSpend, consumedFraction * 100))
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textTertiary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("SPENT TODAY")
+                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary)
+                            Text(String(format: "$%.2f", gcpTodaySpend))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.textPrimary)
+                        }
+                        Spacer()
+                        VStack(alignment: .center, spacing: 2) {
+                            Text("SPENT THIS WEEK")
+                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary)
+                            Text(String(format: "$%.2f", gcpWeekSpend))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.textPrimary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("TOTAL GCP SPEND")
+                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary)
+                            Text(String(format: "$%.2f", gcpTotalSpend))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.blue)
+                        }
+                    }
                 }
             }
             
