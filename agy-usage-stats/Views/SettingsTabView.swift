@@ -79,6 +79,28 @@ struct SettingsTabView: View {
             
             VStack(spacing: 8) {
                 HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Account Target")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Lock to subscription quotas or GCP cloud credit")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Picker("", selection: $viewModel.menuBarAccountTarget) {
+                        ForEach(MenuBarAccountTarget.allCases) { target in
+                            Text(target.rawValue).tag(target)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+                
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+                
+                HStack {
                     Text("Display Mode")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(theme.textPrimary.opacity(0.85))

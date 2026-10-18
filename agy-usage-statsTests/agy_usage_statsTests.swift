@@ -327,6 +327,8 @@ struct agy_usage_statsTests {
 
     @Test func testDynamicModelSwitchingToDepletedModel() {
         let vm = AgyStatsViewModel()
+        vm.selectedModelForIcon = .active
+        vm.iconQuotaLimitTarget = .fiveHour
         vm.settings.model = "Claude Sonnet 4.6 (Thinking)"
 
         let geminiBucket = AgyQuotaBucket(
@@ -380,6 +382,8 @@ struct agy_usage_statsTests {
 
     @Test func testMultiTerminalActiveDepletionPriority() {
         let vm = AgyStatsViewModel()
+        vm.selectedModelForIcon = .active
+        vm.iconQuotaLimitTarget = .fiveHour
         vm.settings.model = "Claude Sonnet 4.6 (Thinking)"
 
         let geminiBucket = AgyQuotaBucket(

@@ -220,6 +220,14 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     public var quotaCost: Double
     public var accountCostBreakdown: [String: Double]
     public var accountQueryBreakdown: [String: Int]
+    public var gcpModelBreakdown: [String: Double]
+    public var quotaModelBreakdown: [String: Double]
+    public var gcpInputTokens: Int
+    public var gcpOutputTokens: Int
+    public var quotaInputTokens: Int
+    public var quotaOutputTokens: Int
+    public var gcpQueryCount: Int
+    public var quotaQueryCount: Int
     
     public init(
         periodKey: String,
@@ -235,7 +243,15 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         gcpCost: Double = 0.0,
         quotaCost: Double = 0.0,
         accountCostBreakdown: [String: Double] = [:],
-        accountQueryBreakdown: [String: Int] = [:]
+        accountQueryBreakdown: [String: Int] = [:],
+        gcpModelBreakdown: [String: Double] = [:],
+        quotaModelBreakdown: [String: Double] = [:],
+        gcpInputTokens: Int = 0,
+        gcpOutputTokens: Int = 0,
+        quotaInputTokens: Int = 0,
+        quotaOutputTokens: Int = 0,
+        gcpQueryCount: Int = 0,
+        quotaQueryCount: Int = 0
     ) {
         self.periodKey = periodKey
         self.label = label
@@ -251,6 +267,14 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         self.quotaCost = quotaCost
         self.accountCostBreakdown = accountCostBreakdown
         self.accountQueryBreakdown = accountQueryBreakdown
+        self.gcpModelBreakdown = gcpModelBreakdown
+        self.quotaModelBreakdown = quotaModelBreakdown
+        self.gcpInputTokens = gcpInputTokens
+        self.gcpOutputTokens = gcpOutputTokens
+        self.quotaInputTokens = quotaInputTokens
+        self.quotaOutputTokens = quotaOutputTokens
+        self.gcpQueryCount = gcpQueryCount
+        self.quotaQueryCount = quotaQueryCount
     }
 }
 
@@ -543,6 +567,24 @@ public extension UsageTimeBucket {
         }
         return result
     }
+    
+    var consolidatedGcpModelBreakdown: [String: Double] {
+        var result: [String: Double] = [:]
+        for (rawModel, cost) in gcpModelBreakdown where cost > 0 {
+            let canonical = canonicalModelDisplayName(from: rawModel)
+            result[canonical, default: 0.0] += cost
+        }
+        return result
+    }
+    
+    var consolidatedQuotaModelBreakdown: [String: Double] {
+        var result: [String: Double] = [:]
+        for (rawModel, cost) in quotaModelBreakdown where cost > 0 {
+            let canonical = canonicalModelDisplayName(from: rawModel)
+            result[canonical, default: 0.0] += cost
+        }
+        return result
+    }
 }
 
 public extension Sequence where Element == UsageTimeBucket {
@@ -556,8 +598,36 @@ public extension Sequence where Element == UsageTimeBucket {
         return result
     }
     
+    var aggregatedGcpModelBreakdown: [String: Double] {
+        var result: [String: Double] = [:]
+        for bucket in self {
+            for (model, cost) in bucket.consolidatedGcpModelBreakdown {
+                result[model, default: 0.0] += cost
+            }
+        }
+        return result
+    }
+    
+    var aggregatedQuotaModelBreakdown: [String: Double] {
+        var result: [String: Double] = [:]
+        for bucket in self {
+            for (model, cost) in bucket.consolidatedQuotaModelBreakdown {
+                result[model, default: 0.0] += cost
+            }
+        }
+        return result
+    }
+    
     var aggregatedTotalCost: Double {
         reduce(0.0) { $0 + $1.totalCost }
+    }
+    
+    var aggregatedGcpCost: Double {
+        reduce(0.0) { $0 + $1.gcpCost }
+    }
+    
+    var aggregatedQuotaCost: Double {
+        reduce(0.0) { $0 + $1.quotaCost }
     }
     
     var aggregatedInputTokens: Int {
@@ -568,8 +638,41 @@ public extension Sequence where Element == UsageTimeBucket {
         reduce(0) { $0 + $1.outputTokens }
     }
     
+    var aggregatedGcpTokens: Int {
+        reduce(0) { $0 + ($1.gcpInputTokens + $1.gcpOutputTokens) }
+    }
+    
+    var aggregatedQuotaTokens: Int {
+        reduce(0) { $0 + ($1.quotaInputTokens + $1.quotaOutputTokens) }
+    }
+    
     var aggregatedQueryCount: Int {
         reduce(0) { $0 + $1.queryCount }
     }
+    
+    var aggregatedGcpQueryCount: Int {
+        reduce(0) { $0 + $1.gcpQueryCount }
+    }
+    
+    var aggregatedQuotaQueryCount: Int {
+        reduce(0) { $0 + $1.quotaQueryCount }
+    }
 }
+
+public enum AccountFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case subscription = "Sub"
+    case gcp = "GCP"
+    
+    public var id: String { rawValue }
+}
+
+public enum MenuBarAccountTarget: String, Codable, CaseIterable, Identifiable {
+    case subscription = "Subscription Quota"
+    case gcp = "GCP Cloud Credit"
+    case auto = "Dynamic (Active Session)"
+    
+    public var id: String { rawValue }
+}
+
 

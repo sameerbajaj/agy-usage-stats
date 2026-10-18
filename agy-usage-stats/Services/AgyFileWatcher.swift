@@ -18,13 +18,17 @@ public final class AgyFileWatcher {
         let histMod: Date?
         let histSize: Int64?
         let dirMod: Date?
+        let gcpHistMod: Date?
+        let gcpHistSize: Int64?
     }
     
     private let queue = DispatchQueue(label: "com.antigravity.agy-usage-stats.filewatcher", qos: .utility)
     private var timerSource: DispatchSourceTimer?
     private var historySource: DispatchSourceFileSystemObject?
+    private var gcpHistorySource: DispatchSourceFileSystemObject?
     private var convDirSource: DispatchSourceFileSystemObject?
     private var historyFd: Int32 = -1
+    private var gcpHistoryFd: Int32 = -1
     private var convDirFd: Int32 = -1
     private var lastSignature: FileWatcherSignature?
     private var debounceWorkItem: DispatchWorkItem?
@@ -33,6 +37,10 @@ public final class AgyFileWatcher {
         let cliDir = cliDirOverride ?? AgyStatsService.getDefaultCliDir()
         let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         return (expanded as NSString).appendingPathComponent("history.jsonl")
+    }
+    
+    public var gcpHistoryFilePath: String {
+        return "\(NSHomeDirectory())/.agy-gcp-home/.gemini/antigravity-cli/history.jsonl"
     }
     
     public var conversationsDirPath: String {
@@ -67,7 +75,23 @@ public final class AgyFileWatcher {
                 hSource.resume()
             }
             
-            // 2. Kernel-level kqueue notifications for conversations directory
+            // 2. Kernel-level kqueue notifications for GCP box history.jsonl
+            let gcpPath = self.gcpHistoryFilePath
+            let gFd = open(gcpPath, O_EVTONLY)
+            if gFd >= 0 {
+                self.gcpHistoryFd = gFd
+                let gSource = DispatchSource.makeFileSystemObjectSource(fileDescriptor: gFd, eventMask: [.write, .extend, .attrib], queue: self.queue)
+                gSource.setEventHandler { [weak self] in
+                    self?.checkFile()
+                }
+                gSource.setCancelHandler {
+                    close(gFd)
+                }
+                self.gcpHistorySource = gSource
+                gSource.resume()
+            }
+            
+            // 3. Kernel-level kqueue notifications for conversations directory
             let dirPath = self.conversationsDirPath
             let dFd = open(dirPath, O_EVTONLY)
             if dFd >= 0 {
@@ -83,7 +107,7 @@ public final class AgyFileWatcher {
                 dSource.resume()
             }
             
-            // 3. Low-overhead background fallback timer (4.0s)
+            // 4. Low-overhead background fallback timer (4.0s)
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
             timer.schedule(deadline: .now() + 4.0, repeating: 4.0)
             timer.setEventHandler { [weak self] in
@@ -101,9 +125,12 @@ public final class AgyFileWatcher {
             self?.timerSource = nil
             self?.historySource?.cancel()
             self?.historySource = nil
+            self?.gcpHistorySource?.cancel()
+            self?.gcpHistorySource = nil
             self?.convDirSource?.cancel()
             self?.convDirSource = nil
             self?.historyFd = -1
+            self?.gcpHistoryFd = -1
             self?.convDirFd = -1
             self?.debounceWorkItem?.cancel()
             self?.debounceWorkItem = nil
@@ -134,6 +161,10 @@ public final class AgyFileWatcher {
         let dirAttrs = try? fm.attributesOfItem(atPath: conversationsDirPath)
         let dirMod = dirAttrs?[.modificationDate] as? Date
         
-        return FileWatcherSignature(histMod: histMod, histSize: histSize, dirMod: dirMod)
+        let gcpAttrs = try? fm.attributesOfItem(atPath: gcpHistoryFilePath)
+        let gcpMod = gcpAttrs?[.modificationDate] as? Date
+        let gcpSize = (gcpAttrs?[.size] as? NSNumber)?.int64Value
+        
+        return FileWatcherSignature(histMod: histMod, histSize: histSize, dirMod: dirMod, gcpHistMod: gcpMod, gcpHistSize: gcpSize)
     }
 }

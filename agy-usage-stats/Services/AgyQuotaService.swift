@@ -192,6 +192,12 @@ public actor AgyQuotaService {
                 quotaLock.unlock()
                 return info
             } else {
+                if let prevInfo = cachedQuota?.info, !prevInfo.groups.isEmpty {
+                    // Retain previously verified subscription quota so the menu bar doesn't abruptly drop to empty
+                    cachedQuota = CachedQuota(info: prevInfo, timestamp: Date())
+                    quotaLock.unlock()
+                    return prevInfo
+                }
                 lastActivePort = nil
                 cachedQuota = CachedQuota(info: nil, timestamp: Date())
                 quotaLock.unlock()

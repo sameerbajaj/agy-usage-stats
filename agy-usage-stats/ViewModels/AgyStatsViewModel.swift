@@ -116,6 +116,12 @@ public final class AgyStatsViewModel {
         }
     }
     
+    public var menuBarAccountTarget: MenuBarAccountTarget {
+        didSet {
+            UserDefaults.standard.set(menuBarAccountTarget.rawValue, forKey: "agy_menuBarAccountTarget")
+        }
+    }
+    
     // UI States
     public var stats: AgyUsageStats = .empty
     public var settings: AgySettings = .default
@@ -180,6 +186,13 @@ public final class AgyStatsViewModel {
             self.selectedTheme = theme
         } else {
             self.selectedTheme = .midnight
+        }
+        
+        let savedAccountTarget = UserDefaults.standard.string(forKey: "agy_menuBarAccountTarget")
+        if let savedAccountTarget, let target = MenuBarAccountTarget(rawValue: savedAccountTarget) {
+            self.menuBarAccountTarget = target
+        } else {
+            self.menuBarAccountTarget = .subscription
         }
         
         let expanded = self.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())

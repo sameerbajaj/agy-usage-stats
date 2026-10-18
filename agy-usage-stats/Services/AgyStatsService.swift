@@ -274,7 +274,8 @@ public enum AgyStatsService {
             async let quotaTask = AgyQuotaService.fetchQuota()
             
             // Load Settings & Auth Transitions
-            let currentIsGcp = settings.gcp?.project != nil && !(settings.gcp?.project?.isEmpty ?? true)
+            let tokenAuth = loadActiveAuthMethod(cliDir: expandedDir)
+            let currentIsGcp = tokenAuth.isGcp || (settings.gcp?.project != nil && !(settings.gcp?.project?.isEmpty ?? true) && tokenAuth.email == nil)
             let authTransitions = loadAuthTransitions(logDir: logDir, defaultProject: settings.gcp?.project)
             let modelTransitions = loadModelTransitions(logDir: logDir)
             
@@ -282,11 +283,53 @@ public enum AgyStatsService {
             // Load History Lines
             let (loadedQueries, workspaces, lastQuery, _) = loadHistory(at: historyPath)
             
+            // Ingest GCP box history if available in ~/.agy-gcp-home
+            let gcpCliDir = "\(NSHomeDirectory())/.agy-gcp-home/.gemini/antigravity-cli"
+            let gcpHistoryPath = (gcpCliDir as NSString).appendingPathComponent("history.jsonl")
+            let gcpConversationsDir = (gcpCliDir as NSString).appendingPathComponent("conversations")
+            
+            var combinedLoadedQueries = loadedQueries
+            var combinedWorkspaces = workspaces
+            var combinedLastQuery = lastQuery
+            
+            if expandedDir != gcpCliDir && FileManager.default.fileExists(atPath: gcpHistoryPath) {
+                let (gcpLoaded, gcpWs, gcpLast, _) = loadHistory(at: gcpHistoryPath)
+                if !gcpLoaded.isEmpty {
+                    let gcpMapped = gcpLoaded.map { q -> QueryEntry in
+                        var copy = q
+                        copy.isGcp = true
+                        copy.gcpProject = "clawdbot-485304"
+                        copy.accountEmail = nil
+                        if copy.modelName == nil {
+                            copy.modelName = "Gemini 4 Argon (High)"
+                        }
+                        return copy
+                    }
+                    combinedLoadedQueries.append(contentsOf: gcpMapped)
+                    combinedLoadedQueries.sort { $0.timestamp < $1.timestamp }
+                    if let gcpLast, combinedLastQuery == nil || gcpLast > combinedLastQuery! {
+                        combinedLastQuery = gcpLast
+                    }
+                    for ws in gcpWs {
+                        if let idx = combinedWorkspaces.firstIndex(where: { $0.path == ws.path }) {
+                            var existing = combinedWorkspaces[idx]
+                            existing.queryCount += ws.queryCount
+                            if ws.lastActiveAt > existing.lastActiveAt {
+                                existing.lastActiveAt = ws.lastActiveAt
+                            }
+                            combinedWorkspaces[idx] = existing
+                        } else {
+                            combinedWorkspaces.append(ws)
+                        }
+                    }
+                }
+            }
+            
             // Date-aware fallback thresholds: Gemini 3.7 Flash on August 1, 2026; Gemini 3.8 Flash on September 2, 2026
             let aug2026 = calendar.date(from: DateComponents(year: 2026, month: 8, day: 1)) ?? Date.distantFuture
             let sep2026 = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2)) ?? Date.distantFuture
             
-            let queries = loadedQueries.map { q -> QueryEntry in
+            let queries = combinedLoadedQueries.map { q -> QueryEntry in
                 var copy = q
                 let fallback: String
                 if q.timestamp >= sep2026 {
@@ -302,7 +345,25 @@ public enum AgyStatsService {
             
             let tDb = ContinuousClock.now
             // Load all SQLite conversation databases and tool stats in a single parallel pass
-            let (allDbConversations, toolStats, _) = await loadConversationsAndToolStats(conversationsDir: conversationsDir)
+            let (loadedDbConversations, loadedToolStats, _) = await loadConversationsAndToolStats(conversationsDir: conversationsDir)
+            var allDbConversations = loadedDbConversations
+            var toolStats = loadedToolStats
+            
+            if expandedDir != gcpCliDir && FileManager.default.fileExists(atPath: gcpConversationsDir) {
+                let (gcpDb, gcpTools, _) = await loadConversationsAndToolStats(conversationsDir: gcpConversationsDir)
+                for (cid, conv) in gcpDb {
+                    allDbConversations[cid] = conv
+                }
+                for tool in gcpTools {
+                    if let idx = toolStats.firstIndex(where: { $0.toolName == tool.toolName }) {
+                        var existing = toolStats[idx]
+                        existing.count += tool.count
+                        toolStats[idx] = existing
+                    } else {
+                        toolStats.append(tool)
+                    }
+                }
+            }
             let totalToolCalls = toolStats.reduce(0) { $0 + $1.count }
             
             var convStartMap: [Int: String] = [:]
@@ -685,6 +746,14 @@ public enum AgyStatsService {
                 var modelQueryBreakdown: [String: Int] = [:]
                 var accountCostBreakdown: [String: Double] = [:]
                 var accountQueryBreakdown: [String: Int] = [:]
+                var gcpModelBreakdown: [String: Double] = [:]
+                var quotaModelBreakdown: [String: Double] = [:]
+                var gcpInputTokens: Int = 0
+                var gcpOutputTokens: Int = 0
+                var quotaInputTokens: Int = 0
+                var quotaOutputTokens: Int = 0
+                var gcpQueryCount: Int = 0
+                var quotaQueryCount: Int = 0
                 
                 init(periodKey: String, label: String, shortLabel: String, date: Date) {
                     self.periodKey = periodKey
@@ -708,7 +777,15 @@ public enum AgyStatsService {
                         gcpCost: gcpCost,
                         quotaCost: quotaCost,
                         accountCostBreakdown: accountCostBreakdown,
-                        accountQueryBreakdown: accountQueryBreakdown
+                        accountQueryBreakdown: accountQueryBreakdown,
+                        gcpModelBreakdown: gcpModelBreakdown,
+                        quotaModelBreakdown: quotaModelBreakdown,
+                        gcpInputTokens: gcpInputTokens,
+                        gcpOutputTokens: gcpOutputTokens,
+                        quotaInputTokens: quotaInputTokens,
+                        quotaOutputTokens: quotaOutputTokens,
+                        gcpQueryCount: gcpQueryCount,
+                        quotaQueryCount: quotaQueryCount
                     )
                 }
             }
@@ -742,6 +819,11 @@ public enum AgyStatsService {
                 }
                 dayBucket.queryCount += 1
                 dayBucket.accountQueryBreakdown[accName, default: 0] += 1
+                if authState.isGcp {
+                    dayBucket.gcpQueryCount += 1
+                } else {
+                    dayBucket.quotaQueryCount += 1
+                }
                 if let mName = q.modelName {
                     dayBucket.modelQueryBreakdown[mName, default: 0] += 1
                 }
@@ -763,11 +845,17 @@ public enum AgyStatsService {
                         accountCostTotals[accName, default: 0.0] += cost
                         if authState.isGcp {
                             dayBucket.gcpCost += cost
+                            dayBucket.gcpInputTokens += inTokens
+                            dayBucket.gcpOutputTokens += outTokens
+                            dayBucket.gcpModelBreakdown[model.name, default: 0.0] += cost
                             gcpTotalCost += cost
                             if q.timestamp >= startOfToday { gcpTodayCost += cost }
                             if q.timestamp >= sevenDaysAgo { gcpWeekCost += cost }
                         } else {
                             dayBucket.quotaCost += cost
+                            dayBucket.quotaInputTokens += inTokens
+                            dayBucket.quotaOutputTokens += outTokens
+                            dayBucket.quotaModelBreakdown[model.name, default: 0.0] += cost
                             quotaTotalCost += cost
                             if q.timestamp >= startOfToday { quotaTodayCost += cost }
                             if q.timestamp >= sevenDaysAgo { quotaWeekCost += cost }
@@ -907,8 +995,14 @@ public enum AgyStatsService {
                 dayBucket.accountCostBreakdown[accName, default: 0.0] += cost
                 if authState.isGcp {
                     dayBucket.gcpCost += cost
+                    dayBucket.gcpInputTokens += inTokens
+                    dayBucket.gcpOutputTokens += outTokens
+                    dayBucket.gcpModelBreakdown[model.name, default: 0.0] += cost
                 } else {
                     dayBucket.quotaCost += cost
+                    dayBucket.quotaInputTokens += inTokens
+                    dayBucket.quotaOutputTokens += outTokens
+                    dayBucket.quotaModelBreakdown[model.name, default: 0.0] += cost
                 }
                 
                 let monthKey = dInfo.monthKey
@@ -927,8 +1021,14 @@ public enum AgyStatsService {
                 monthBucket.accountCostBreakdown[accName, default: 0.0] += cost
                 if authState.isGcp {
                     monthBucket.gcpCost += cost
+                    monthBucket.gcpInputTokens += inTokens
+                    monthBucket.gcpOutputTokens += outTokens
+                    monthBucket.gcpModelBreakdown[model.name, default: 0.0] += cost
                 } else {
                     monthBucket.quotaCost += cost
+                    monthBucket.quotaInputTokens += inTokens
+                    monthBucket.quotaOutputTokens += outTokens
+                    monthBucket.quotaModelBreakdown[model.name, default: 0.0] += cost
                 }
             }
             
@@ -964,8 +1064,8 @@ public enum AgyStatsService {
                 totalQueries: queries.count,
                 queriesToday: queriesToday,
                 queriesThisWeek: queriesThisWeek,
-                lastQueryAt: lastQuery,
-                workspaces: workspaces,
+                lastQueryAt: combinedLastQuery ?? lastQuery,
+                workspaces: combinedWorkspaces,
                 modelDistribution: modelDist,
                 recentQueries: queriesWithMeta,
                 toolStats: toolStats,
@@ -976,8 +1076,8 @@ public enum AgyStatsService {
                 todayCostEstimate: todayCost,
                 dailyUsage: sortedDaily,
                 monthlyUsage: sortedMonthly,
-                gcpProject: settings.gcp?.project,
-                gcpLocation: settings.gcp?.location,
+                gcpProject: (gcpTotalCost > 0 || currentIsGcp) ? (settings.gcp?.project ?? "clawdbot-485304") : settings.gcp?.project,
+                gcpLocation: settings.gcp?.location ?? "us",
                 gcpTotalCost: gcpTotalCost,
                 gcpTodayCost: gcpTodayCost,
                 gcpWeeklyCost: gcpWeekCost,
@@ -1377,6 +1477,22 @@ public enum AgyStatsService {
             print("AgyStatsService: Failed to decode settings: \(error)")
             return .default
         }
+    }
+    
+    private static func loadActiveAuthMethod(cliDir: String) -> (isGcp: Bool, email: String?, project: String?) {
+        let tokenPath = (cliDir as NSString).appendingPathComponent("antigravity-oauth-token")
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: tokenPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let authMethod = json["auth_method"] as? String
+            let email = json["email"] as? String
+            let project = json["project_id"] as? String
+            if authMethod == "gcp" {
+                return (true, email, project)
+            } else if authMethod == "consumer" {
+                return (false, email, nil)
+            }
+        }
+        return (false, nil, nil)
     }
     
     private static func loadHistory(at path: String) -> ([QueryEntry], [WorkspaceStats], Date?, Bool) {

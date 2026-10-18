@@ -30,6 +30,10 @@ struct MenuBarLabel: View {
     @State private var refreshTrigger = false
 
     private var statusColor: Color {
+        if viewModel.menuBarAccountTarget == .gcp {
+            return Color.blue
+        }
+        
         var fractions: [Double] = []
         if let gf = viewModel.geminiUsageFraction {
             fractions.append(gf)
@@ -93,10 +97,23 @@ struct MenuBarLabel: View {
     }
 
     private var quotaText: String {
-        MenuBarPresentationResolver.resolveQuotaText(
-            geminiFraction: viewModel.geminiUsageFraction,
-            claudeFraction: viewModel.claudeUsageFraction
-        )
+        switch viewModel.menuBarAccountTarget {
+        case .subscription:
+            return MenuBarPresentationResolver.resolveQuotaText(
+                geminiFraction: viewModel.geminiUsageFraction,
+                claudeFraction: viewModel.claudeUsageFraction
+            )
+        case .gcp:
+            return String(format: "GCP:$%.2f", viewModel.stats.gcpTodayCost)
+        case .auto:
+            if viewModel.stats.gcpTodayCost > 0 && viewModel.stats.quotaTodayCost == 0 {
+                return String(format: "GCP:$%.2f", viewModel.stats.gcpTodayCost)
+            }
+            return MenuBarPresentationResolver.resolveQuotaText(
+                geminiFraction: viewModel.geminiUsageFraction,
+                claudeFraction: viewModel.claudeUsageFraction
+            )
+        }
     }
 
     var body: some View {
