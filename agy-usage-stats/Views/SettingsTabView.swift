@@ -228,7 +228,7 @@ struct SettingsTabView: View {
 
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("GCP Credit Pool ($)")
+                        Text("GCP Remaining Credit ($)")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(theme.textPrimary.opacity(0.85))
                         Text("0 = unlimited spend tracking (no pool bar)")

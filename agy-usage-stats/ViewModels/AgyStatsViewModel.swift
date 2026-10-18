@@ -192,7 +192,55 @@ public final class AgyStatsViewModel {
     public var gcpCreditPool: Double {
         didSet {
             userDefaults.set(gcpCreditPool, forKey: "agy_gcpCreditPool")
+            resetGcpCreditBaseline()
         }
+    }
+    
+    public var gcpCreditBaselineCost: Double {
+        didSet {
+            userDefaults.set(gcpCreditBaselineCost, forKey: "agy_gcpCreditBaselineCost")
+        }
+    }
+    
+    public var gcpCreditBaselineTimestamp: Double {
+        didSet {
+            userDefaults.set(gcpCreditBaselineTimestamp, forKey: "agy_gcpCreditBaselineTimestamp")
+        }
+    }
+    
+    private var gcpCreditBaselineNeedsMigration: Bool = false
+    
+    public func resetGcpCreditBaseline() {
+        if gcpCreditPool > 0.0 {
+            let currentTotal = stats.gcpTotalCost
+            self.gcpCreditBaselineCost = currentTotal
+            self.gcpCreditBaselineTimestamp = Date().timeIntervalSince1970
+            userDefaults.set(currentTotal, forKey: "agy_gcpCreditBaselineCost")
+            userDefaults.set(self.gcpCreditBaselineTimestamp, forKey: "agy_gcpCreditBaselineTimestamp")
+            self.gcpCreditBaselineNeedsMigration = false
+        } else {
+            self.gcpCreditBaselineCost = 0.0
+            self.gcpCreditBaselineTimestamp = 0.0
+            userDefaults.removeObject(forKey: "agy_gcpCreditBaselineCost")
+            userDefaults.removeObject(forKey: "agy_gcpCreditBaselineTimestamp")
+            self.gcpCreditBaselineNeedsMigration = false
+        }
+    }
+    
+    // GCP Credit remaining & consumed calculations based on baseline snapshot
+    public var gcpCostSinceBaseline: Double {
+        guard gcpCreditPool > 0.0 else { return 0.0 }
+        return max(0.0, stats.gcpTotalCost - gcpCreditBaselineCost)
+    }
+    
+    public var gcpCreditRemaining: Double {
+        guard gcpCreditPool > 0.0 else { return 0.0 }
+        return max(0.0, gcpCreditPool - gcpCostSinceBaseline)
+    }
+    
+    public var gcpCreditConsumedFraction: Double {
+        guard gcpCreditPool > 0.0 else { return 0.0 }
+        return min(1.0, gcpCostSinceBaseline / gcpCreditPool)
     }
     
     // UI States
@@ -295,6 +343,28 @@ public final class AgyStatsViewModel {
             }
         } else {
             self.gcpCreditPool = 300.0
+        }
+        
+        if let rawBaselineCost = userDefaults.object(forKey: "agy_gcpCreditBaselineCost") as? Double {
+            self.gcpCreditBaselineCost = rawBaselineCost
+        } else if let num = userDefaults.object(forKey: "agy_gcpCreditBaselineCost") as? NSNumber {
+            self.gcpCreditBaselineCost = num.doubleValue
+        } else if let str = userDefaults.string(forKey: "agy_gcpCreditBaselineCost"), let parsed = Double(str.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            self.gcpCreditBaselineCost = parsed
+        } else {
+            self.gcpCreditBaselineCost = 0.0
+        }
+        
+        if let rawBaselineTs = userDefaults.object(forKey: "agy_gcpCreditBaselineTimestamp") as? Double {
+            self.gcpCreditBaselineTimestamp = rawBaselineTs
+        } else if let num = userDefaults.object(forKey: "agy_gcpCreditBaselineTimestamp") as? NSNumber {
+            self.gcpCreditBaselineTimestamp = num.doubleValue
+        } else {
+            self.gcpCreditBaselineTimestamp = 0.0
+        }
+        
+        if userDefaults.object(forKey: "agy_gcpCreditBaselineCost") == nil && userDefaults.object(forKey: "agy_gcpCreditPool") != nil && self.gcpCreditPool > 0.0 && self.gcpCreditPool != 300.0 {
+            self.gcpCreditBaselineNeedsMigration = true
         }
         
         let expanded = self.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
@@ -549,8 +619,7 @@ public final class AgyStatsViewModel {
     public var selectedModelUsageFraction: Double? {
         if selectedModelForIcon == .gcp {
             guard gcpCreditPool > 0.0 else { return nil }
-            let total = stats.gcpTotalCost
-            return max(0.0, 1.0 - (total / gcpCreditPool))
+            return max(0.0, gcpCreditRemaining / gcpCreditPool)
         }
         let group: AgyQuotaGroup?
         switch selectedModelForIcon {
@@ -593,8 +662,7 @@ public final class AgyStatsViewModel {
     public var selectedModelCircleFillFraction: Double? {
         if selectedModelForIcon == .gcp {
             guard gcpCreditPool > 0.0 else { return nil }
-            let total = stats.gcpTotalCost
-            return max(0.0, 1.0 - (total / gcpCreditPool))
+            return max(0.0, gcpCreditRemaining / gcpCreditPool)
         }
         let group: AgyQuotaGroup?
         switch selectedModelForIcon {
@@ -814,6 +882,16 @@ public final class AgyStatsViewModel {
             }
             if self.isConnected != connected {
                 self.isConnected = connected
+            }
+            if self.gcpCreditBaselineNeedsMigration && loadedStats.gcpTotalCost > 0.0 {
+                self.gcpCreditBaselineCost = loadedStats.gcpTotalCost
+                self.gcpCreditBaselineTimestamp = Date().timeIntervalSince1970
+                self.userDefaults.set(loadedStats.gcpTotalCost, forKey: "agy_gcpCreditBaselineCost")
+                self.userDefaults.set(self.gcpCreditBaselineTimestamp, forKey: "agy_gcpCreditBaselineTimestamp")
+                self.gcpCreditBaselineNeedsMigration = false
+            } else if self.gcpCreditBaselineTimestamp > 0.0 && self.gcpCreditBaselineCost == 0.0 && loadedStats.gcpTotalCost > 0.0 && self.gcpCreditPool > 0.0 && self.gcpCreditPool != 300.0 {
+                self.gcpCreditBaselineCost = loadedStats.gcpTotalCost
+                self.userDefaults.set(loadedStats.gcpTotalCost, forKey: "agy_gcpCreditBaselineCost")
             }
             self.isRefreshing = false
         }

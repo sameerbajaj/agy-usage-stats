@@ -471,12 +471,14 @@ public struct OverviewTabView: View {
             let poolTotal = viewModel.gcpCreditPool
             
             if poolTotal > 0.0 {
-                let creditRemaining = max(0.0, poolTotal - gcpTotalSpend)
-                let consumedFraction = min(1.0, gcpTotalSpend / poolTotal)
+                let creditRemaining = viewModel.gcpCreditRemaining
+                let consumedFraction = viewModel.gcpCreditConsumedFraction
+                let poolConsumed = viewModel.gcpCostSinceBaseline
                 
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
-                        Text(String(format: "$%.0f CREDIT POOL", poolTotal))
+                        let poolTitle = poolTotal.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "$%.0f CREDIT POOL", poolTotal) : String(format: "$%.2f CREDIT POOL", poolTotal)
+                        Text(poolTitle)
                             .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                             .foregroundStyle(theme.textSecondary)
                         Spacer()
@@ -503,9 +505,15 @@ public struct OverviewTabView: View {
                             .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                             .foregroundStyle(theme.textPrimary)
                         Spacer()
-                        Text(String(format: "$%.2f total consumed (%.1f%%)", gcpTotalSpend, consumedFraction * 100))
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textTertiary)
+                        if viewModel.gcpCreditBaselineCost > 0.0 {
+                            Text(String(format: "$%.2f spent ($%.2f lifetime)", poolConsumed, gcpTotalSpend))
+                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(theme.textTertiary)
+                        } else {
+                            Text(String(format: "$%.2f total consumed (%.1f%%)", poolConsumed, consumedFraction * 100))
+                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(theme.textTertiary)
+                        }
                     }
                 }
             } else {
