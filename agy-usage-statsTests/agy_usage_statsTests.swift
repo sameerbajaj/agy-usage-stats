@@ -11,6 +11,11 @@ import AppKit
 
 @Suite(.serialized)
 struct agy_usage_statsTests {
+    private static func makeIsolatedViewModel() -> AgyStatsViewModel {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        return AgyStatsViewModel(userDefaults: defaults)
+    }
 
     // MARK: - Quota Probing Tests
 
@@ -390,7 +395,7 @@ struct agy_usage_statsTests {
     // MARK: - Multi-Session Dynamic Model Tracking Tests
 
     @Test func testDynamicModelSwitchingToDepletedModel() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         vm.selectedModelForIcon = .active
         vm.iconQuotaLimitTarget = .fiveHour
         vm.settings.model = "Claude Sonnet 4.6 (Thinking)"
@@ -445,7 +450,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testMultiTerminalActiveDepletionPriority() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         vm.selectedModelForIcon = .active
         vm.iconQuotaLimitTarget = .fiveHour
         vm.settings.model = "Claude Sonnet 4.6 (Thinking)"
@@ -510,7 +515,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testMostDepletedSelection() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         vm.selectedModelForIcon = .mostDepleted
 
         let geminiBucket = AgyQuotaBucket(
@@ -669,7 +674,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testArgonAndClaude55QuotaGroupMatching() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         let geminiBucket = AgyQuotaBucket(
             bucketId: "gemini-weekly",
             displayName: "Weekly Limit",
@@ -793,7 +798,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testExhaustedWeeklyQuotaOverridesDisabledFiveHourBucket() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         vm.selectedModelForIcon = .claude
         vm.iconQuotaLimitTarget = .fiveHour
 
@@ -874,7 +879,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testArgonGroupNilWhenNotPresent() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         let geminiBucket = AgyQuotaBucket(bucketId: "g-w", displayName: "Weekly Limit", remainingFraction: 0.8, resetDescription: nil, disabled: false, resetTime: nil)
         let claudeBucket = AgyQuotaBucket(bucketId: "c-w", displayName: "Weekly Limit", remainingFraction: 0.5, resetDescription: nil, disabled: false, resetTime: nil)
         let geminiGroup = AgyQuotaGroup(displayName: "Gemini Models", description: nil, buckets: [geminiBucket])
@@ -970,7 +975,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testGcpCreditPoolConfiguration() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         // Default pool for promo credit
         #expect(vm.gcpCreditPool >= 0.0)
 
@@ -981,6 +986,26 @@ struct agy_usage_statsTests {
         // Set to 0.0 for unlimited spend tracking
         vm.gcpCreditPool = 0.0
         #expect(vm.gcpCreditPool == 0.0)
+    }
+
+    @Test func testGcpCreditPoolStringAndTypeDeserialization() {
+        let suiteName = "test-deserialization-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        
+        // String formatted value (e.g. from defaults write without -float)
+        defaults.set("200.55", forKey: "agy_gcpCreditPool")
+        let vmString = AgyStatsViewModel(userDefaults: defaults)
+        #expect(vmString.gcpCreditPool == 200.55)
+
+        // Explicit 0.0 for unlimited tracking
+        defaults.set(0.0, forKey: "agy_gcpCreditPool")
+        let vmZero = AgyStatsViewModel(userDefaults: defaults)
+        #expect(vmZero.gcpCreditPool == 0.0)
+
+        // Missing key defaults to 300.0 promo budget
+        defaults.removeObject(forKey: "agy_gcpCreditPool")
+        let vmDefault = AgyStatsViewModel(userDefaults: defaults)
+        #expect(vmDefault.gcpCreditPool == 300.0)
     }
 
     @Test func testGcpIconPresentation() {
@@ -1066,7 +1091,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testViewModelGcpActiveModelTracking() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         vm.selectedModelForIcon = .active
         
         let claudeBucket = AgyQuotaBucket(bucketId: "c-w", displayName: "Weekly Limit", remainingFraction: 0.5, resetDescription: nil, disabled: false, resetTime: nil)
@@ -1182,7 +1207,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testDecoupledCircleRingAndNumberLimits() {
-        let vm = AgyStatsViewModel()
+        let vm = Self.makeIsolatedViewModel()
         vm.selectedModelForIcon = .gemini
         vm.iconQuotaLimitTarget = .fiveHour
         vm.iconCircleFillMetric = .weekly
@@ -1375,7 +1400,7 @@ struct agy_usage_statsTests {
     }
 
     @Test func testViewModelRefreshQuotaOnlyMainActorExecution() async {
-        let viewModel = AgyStatsViewModel()
+        let viewModel = Self.makeIsolatedViewModel()
         #expect(viewModel.stats.quotaInfo == nil)
         
         // Calling refreshQuotaOnly runs safely without crash or race

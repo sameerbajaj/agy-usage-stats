@@ -105,10 +105,12 @@ public struct WeeklyLimitInfo {
 
 @Observable
 public final class AgyStatsViewModel {
+    private let userDefaults: UserDefaults
+
     // Persistent settings using UserDefaults stored properties
     public var cliDir: String {
         didSet {
-            UserDefaults.standard.set(cliDir, forKey: "agy_cliDir")
+            userDefaults.set(cliDir, forKey: "agy_cliDir")
             AgyStatsService.clearCaches()
             restartWatcher()
             Task { await refresh() }
@@ -117,79 +119,79 @@ public final class AgyStatsViewModel {
     
     public var menuBarDisplayMode: MenuBarDisplayMode {
         didSet {
-            UserDefaults.standard.set(menuBarDisplayMode.rawValue, forKey: "agy_menuBarDisplayMode")
+            userDefaults.set(menuBarDisplayMode.rawValue, forKey: "agy_menuBarDisplayMode")
         }
     }
     
     public var showModelUsageInIcon: Bool {
         didSet {
-            UserDefaults.standard.set(showModelUsageInIcon, forKey: "agy_showModelUsageInIcon")
+            userDefaults.set(showModelUsageInIcon, forKey: "agy_showModelUsageInIcon")
         }
     }
     
     public var selectedModelForIcon: IconModelSelection {
         didSet {
-            UserDefaults.standard.set(selectedModelForIcon.rawValue, forKey: "agy_selectedModelForIcon")
+            userDefaults.set(selectedModelForIcon.rawValue, forKey: "agy_selectedModelForIcon")
         }
     }
 
     public var iconQuotaLimitTarget: IconQuotaLimitTarget {
         didSet {
-            UserDefaults.standard.set(iconQuotaLimitTarget.rawValue, forKey: "agy_iconQuotaLimitTarget")
+            userDefaults.set(iconQuotaLimitTarget.rawValue, forKey: "agy_iconQuotaLimitTarget")
         }
     }
 
     public var iconCircleFillMetric: IconCircleFillMetric {
         didSet {
-            UserDefaults.standard.set(iconCircleFillMetric.rawValue, forKey: "agy_iconCircleFillMetric")
+            userDefaults.set(iconCircleFillMetric.rawValue, forKey: "agy_iconCircleFillMetric")
         }
     }
     
     public var showWeeklyLimitAndReset: Bool {
         didSet {
-            UserDefaults.standard.set(showWeeklyLimitAndReset, forKey: "agy_showWeeklyLimitAndReset")
+            userDefaults.set(showWeeklyLimitAndReset, forKey: "agy_showWeeklyLimitAndReset")
         }
     }
 
     public var showMenuBarSpend: Bool {
         didSet {
-            UserDefaults.standard.set(showMenuBarSpend, forKey: "agy_showMenuBarSpend")
+            userDefaults.set(showMenuBarSpend, forKey: "agy_showMenuBarSpend")
         }
     }
 
     public var menuBarSpendSource: MenuBarSpendSource {
         didSet {
-            UserDefaults.standard.set(menuBarSpendSource.rawValue, forKey: "agy_menuBarSpendSource")
+            userDefaults.set(menuBarSpendSource.rawValue, forKey: "agy_menuBarSpendSource")
         }
     }
     
     public var showToolBreakdown: Bool {
         didSet {
-            UserDefaults.standard.set(showToolBreakdown, forKey: "agy_showToolBreakdown")
+            userDefaults.set(showToolBreakdown, forKey: "agy_showToolBreakdown")
         }
     }
     
     public var showCostSummary: Bool {
         didSet {
-            UserDefaults.standard.set(showCostSummary, forKey: "agy_showCostSummary")
+            userDefaults.set(showCostSummary, forKey: "agy_showCostSummary")
         }
     }
     
     public var selectedTheme: AppTheme {
         didSet {
-            UserDefaults.standard.set(selectedTheme.rawValue, forKey: "agy_selectedTheme")
+            userDefaults.set(selectedTheme.rawValue, forKey: "agy_selectedTheme")
         }
     }
     
     public var menuBarAccountTarget: MenuBarAccountTarget {
         didSet {
-            UserDefaults.standard.set(menuBarAccountTarget.rawValue, forKey: "agy_menuBarAccountTarget")
+            userDefaults.set(menuBarAccountTarget.rawValue, forKey: "agy_menuBarAccountTarget")
         }
     }
     
     public var gcpCreditPool: Double {
         didSet {
-            UserDefaults.standard.set(gcpCreditPool, forKey: "agy_gcpCreditPool")
+            userDefaults.set(gcpCreditPool, forKey: "agy_gcpCreditPool")
         }
     }
     
@@ -209,78 +211,88 @@ public final class AgyStatsViewModel {
     // File Watcher
     private let watcher = AgyFileWatcher()
     
-    public init() {
+    public init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+
         // Load default values or fallback
-        let savedCliDir = UserDefaults.standard.string(forKey: "agy_cliDir")
+        let savedCliDir = userDefaults.string(forKey: "agy_cliDir")
         self.cliDir = savedCliDir ?? AgyStatsService.getDefaultCliDir()
         
-        let savedModeStr = UserDefaults.standard.string(forKey: "agy_menuBarDisplayMode")
+        let savedModeStr = userDefaults.string(forKey: "agy_menuBarDisplayMode")
         if let savedModeStr, let mode = MenuBarDisplayMode(rawValue: savedModeStr) {
             self.menuBarDisplayMode = mode
         } else {
             self.menuBarDisplayMode = .iconOnly
         }
         
-        self.showModelUsageInIcon = UserDefaults.standard.bool(forKey: "agy_showModelUsageInIcon")
+        self.showModelUsageInIcon = userDefaults.bool(forKey: "agy_showModelUsageInIcon")
         
-        let savedModelForIcon = UserDefaults.standard.string(forKey: "agy_selectedModelForIcon")
+        let savedModelForIcon = userDefaults.string(forKey: "agy_selectedModelForIcon")
         if let savedModelForIcon, let modelSel = IconModelSelection(rawValue: savedModelForIcon) {
             self.selectedModelForIcon = modelSel
         } else {
             self.selectedModelForIcon = .active
         }
 
-        let savedLimitTarget = UserDefaults.standard.string(forKey: "agy_iconQuotaLimitTarget")
+        let savedLimitTarget = userDefaults.string(forKey: "agy_iconQuotaLimitTarget")
         if let savedLimitTarget, let limitTarget = IconQuotaLimitTarget(rawValue: savedLimitTarget) {
             self.iconQuotaLimitTarget = limitTarget
         } else {
             self.iconQuotaLimitTarget = .auto
         }
 
-        let savedFillMetric = UserDefaults.standard.string(forKey: "agy_iconCircleFillMetric")
+        let savedFillMetric = userDefaults.string(forKey: "agy_iconCircleFillMetric")
         if let savedFillMetric, let fillMetric = IconCircleFillMetric(rawValue: savedFillMetric) {
             self.iconCircleFillMetric = fillMetric
         } else {
             self.iconCircleFillMetric = .weekly
         }
 
-        if UserDefaults.standard.object(forKey: "agy_showMenuBarSpend") != nil {
-            self.showMenuBarSpend = UserDefaults.standard.bool(forKey: "agy_showMenuBarSpend")
+        if userDefaults.object(forKey: "agy_showMenuBarSpend") != nil {
+            self.showMenuBarSpend = userDefaults.bool(forKey: "agy_showMenuBarSpend")
         } else {
             self.showMenuBarSpend = true
         }
 
-        let savedSpendSource = UserDefaults.standard.string(forKey: "agy_menuBarSpendSource")
+        let savedSpendSource = userDefaults.string(forKey: "agy_menuBarSpendSource")
         if let savedSpendSource, let spendSource = MenuBarSpendSource(rawValue: savedSpendSource) {
             self.menuBarSpendSource = spendSource
         } else {
             self.menuBarSpendSource = .gcpToday
         }
         
-        self.showWeeklyLimitAndReset = UserDefaults.standard.bool(forKey: "agy_showWeeklyLimitAndReset")
-        self.showToolBreakdown = UserDefaults.standard.bool(forKey: "agy_showToolBreakdown")
-        if UserDefaults.standard.object(forKey: "agy_showCostSummary") != nil {
-            self.showCostSummary = UserDefaults.standard.bool(forKey: "agy_showCostSummary")
+        self.showWeeklyLimitAndReset = userDefaults.bool(forKey: "agy_showWeeklyLimitAndReset")
+        self.showToolBreakdown = userDefaults.bool(forKey: "agy_showToolBreakdown")
+        if userDefaults.object(forKey: "agy_showCostSummary") != nil {
+            self.showCostSummary = userDefaults.bool(forKey: "agy_showCostSummary")
         } else {
             self.showCostSummary = true
         }
         
-        let savedTheme = UserDefaults.standard.string(forKey: "agy_selectedTheme")
+        let savedTheme = userDefaults.string(forKey: "agy_selectedTheme")
         if let savedTheme, let theme = AppTheme(rawValue: savedTheme) {
             self.selectedTheme = theme
         } else {
             self.selectedTheme = .midnight
         }
         
-        let savedAccountTarget = UserDefaults.standard.string(forKey: "agy_menuBarAccountTarget")
+        let savedAccountTarget = userDefaults.string(forKey: "agy_menuBarAccountTarget")
         if let savedAccountTarget, let target = MenuBarAccountTarget(rawValue: savedAccountTarget) {
             self.menuBarAccountTarget = target
         } else {
             self.menuBarAccountTarget = .subscription
         }
         
-        if let savedPool = UserDefaults.standard.object(forKey: "agy_gcpCreditPool") as? Double {
-            self.gcpCreditPool = savedPool
+        if let rawPoolObj = userDefaults.object(forKey: "agy_gcpCreditPool") {
+            if let d = rawPoolObj as? Double {
+                self.gcpCreditPool = d
+            } else if let num = rawPoolObj as? NSNumber {
+                self.gcpCreditPool = num.doubleValue
+            } else if let str = rawPoolObj as? String, let parsed = Double(str.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                self.gcpCreditPool = parsed
+            } else {
+                self.gcpCreditPool = userDefaults.double(forKey: "agy_gcpCreditPool")
+            }
         } else {
             self.gcpCreditPool = 300.0
         }
@@ -536,9 +548,9 @@ public final class AgyStatsViewModel {
     // The usage remaining fractions (always 0.0 to 1.0) for the models
     public var selectedModelUsageFraction: Double? {
         if selectedModelForIcon == .gcp {
+            guard gcpCreditPool > 0.0 else { return nil }
             let total = stats.gcpTotalCost
-            let pool = gcpCreditPool > 0 ? gcpCreditPool : 300.0
-            return max(0.0, 1.0 - (total / pool))
+            return max(0.0, 1.0 - (total / gcpCreditPool))
         }
         let group: AgyQuotaGroup?
         switch selectedModelForIcon {
@@ -580,9 +592,9 @@ public final class AgyStatsViewModel {
     // The circle fill fractions for the models (respects the circle fill metric setting)
     public var selectedModelCircleFillFraction: Double? {
         if selectedModelForIcon == .gcp {
+            guard gcpCreditPool > 0.0 else { return nil }
             let total = stats.gcpTotalCost
-            let pool = gcpCreditPool > 0 ? gcpCreditPool : 300.0
-            return max(0.0, 1.0 - (total / pool))
+            return max(0.0, 1.0 - (total / gcpCreditPool))
         }
         let group: AgyQuotaGroup?
         switch selectedModelForIcon {
