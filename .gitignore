@@ -35,4 +35,5 @@ xcuserdata/
 tmp/
 *.log
 *.profraw
+.agents/
 
