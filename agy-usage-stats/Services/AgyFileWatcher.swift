@@ -18,9 +18,11 @@ public final class AgyFileWatcher {
         let histMod: Date?
         let histSize: Int64?
         let dirMod: Date?
+        let convContentSig: AgyStatsService.DirectoryContentSignature
         let gcpHistMod: Date?
         let gcpHistSize: Int64?
         let gcpDirMod: Date?
+        let gcpConvContentSig: AgyStatsService.DirectoryContentSignature
     }
     
     private let queue = DispatchQueue(label: "com.antigravity.agy-usage-stats.filewatcher", qos: .utility)
@@ -186,6 +188,7 @@ public final class AgyFileWatcher {
         
         let dirAttrs = try? fm.attributesOfItem(atPath: conversationsDirPath)
         let dirMod = dirAttrs?[.modificationDate] as? Date
+        let convContentSig = AgyStatsService.directoryContentSignature(atPath: conversationsDirPath)
         
         let gcpAttrs = try? fm.attributesOfItem(atPath: gcpHistoryFilePath)
         let gcpMod = gcpAttrs?[.modificationDate] as? Date
@@ -193,7 +196,17 @@ public final class AgyFileWatcher {
         
         let gcpDirAttrs = try? fm.attributesOfItem(atPath: gcpConversationsDirPath)
         let gcpDirMod = gcpDirAttrs?[.modificationDate] as? Date
+        let gcpConvContentSig = AgyStatsService.directoryContentSignature(atPath: gcpConversationsDirPath)
         
-        return FileWatcherSignature(histMod: histMod, histSize: histSize, dirMod: dirMod, gcpHistMod: gcpMod, gcpHistSize: gcpSize, gcpDirMod: gcpDirMod)
+        return FileWatcherSignature(
+            histMod: histMod,
+            histSize: histSize,
+            dirMod: dirMod,
+            convContentSig: convContentSig,
+            gcpHistMod: gcpMod,
+            gcpHistSize: gcpSize,
+            gcpDirMod: gcpDirMod,
+            gcpConvContentSig: gcpConvContentSig
+        )
     }
 }

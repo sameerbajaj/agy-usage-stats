@@ -39,6 +39,8 @@ public enum AgyStatsService {
     private struct ConversationCacheEntry: Sendable {
         let modificationDate: Date
         let fileSize: Int64
+        let walModificationDate: Date?
+        let walFileSize: Int64?
         let conversationData: DbConversationData
         let toolCounts: [String: Int]
     }
@@ -114,15 +116,29 @@ public enum AgyStatsService {
     private static var modelLogFileCache: [String: ModelLogFileEntry] = [:]
     private static let modelLogFileCacheLock = NSLock()
     
+    public struct DirectoryContentSignature: Equatable, Sendable {
+        public let latestModDate: Date
+        public let totalSize: Int64
+        
+        public init(latestModDate: Date = Date.distantPast, totalSize: Int64 = 0) {
+            self.latestModDate = latestModDate
+            self.totalSize = totalSize
+        }
+    }
+    
     private struct StatsCacheEntry {
+        let cliDir: String
+        let gcpCliDir: String
         let settings: AgySettings
         let startOfToday: Date
         let historyModDate: Date
         let historySize: Int64
         let conversationsDirModDate: Date
+        let conversationsSig: DirectoryContentSignature
         let gcpHistoryModDate: Date
         let gcpHistorySize: Int64
         let gcpConversationsDirModDate: Date
+        let gcpConversationsSig: DirectoryContentSignature
         let stats: AgyUsageStats
     }
     
@@ -232,7 +248,34 @@ public enum AgyStatsService {
         return "\(NSHomeDirectory())/.gemini/antigravity-cli"
     }
     
-    public static func loadStats(cliDir: String) async -> (AgyUsageStats, AgySettings) {
+    public static func directoryContentSignature(atPath dirPath: String) -> DirectoryContentSignature {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: dirPath) else {
+            return DirectoryContentSignature(latestModDate: .distantPast, totalSize: 0)
+        }
+        
+        var maxModDate = Date.distantPast
+        var totalSize: Int64 = 0
+        
+        for file in files {
+            if file.hasSuffix(".db") || file.hasSuffix(".db-wal") {
+                let fullPath = (dirPath as NSString).appendingPathComponent(file)
+                if let attrs = try? fm.attributesOfItem(atPath: fullPath) {
+                    if let modDate = attrs[.modificationDate] as? Date {
+                        if modDate > maxModDate {
+                            maxModDate = modDate
+                        }
+                    }
+                    if let size = (attrs[.size] as? NSNumber)?.int64Value {
+                        totalSize += size
+                    }
+                }
+            }
+        }
+        return DirectoryContentSignature(latestModDate: maxModDate, totalSize: totalSize)
+    }
+    
+    public static func loadStats(cliDir: String, gcpCliDir: String? = nil) async -> (AgyUsageStats, AgySettings) {
         return await Task.detached(priority: .userInitiated) {
             let expandedDir = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
             let historyPath = (expandedDir as NSString).appendingPathComponent("history.jsonl")
@@ -240,9 +283,9 @@ public enum AgyStatsService {
             let conversationsDir = (expandedDir as NSString).appendingPathComponent("conversations")
             let logDir = (expandedDir as NSString).appendingPathComponent("log")
             
-            let gcpCliDir = "\(NSHomeDirectory())/.agy-gcp-home/.gemini/antigravity-cli"
-            let gcpHistoryPath = (gcpCliDir as NSString).appendingPathComponent("history.jsonl")
-            let gcpConversationsDir = (gcpCliDir as NSString).appendingPathComponent("conversations")
+            let resolvedGcpCliDir = (gcpCliDir ?? "\(NSHomeDirectory())/.agy-gcp-home/.gemini/antigravity-cli").replacingOccurrences(of: "~", with: NSHomeDirectory())
+            let gcpHistoryPath = (resolvedGcpCliDir as NSString).appendingPathComponent("history.jsonl")
+            let gcpConversationsDir = (resolvedGcpCliDir as NSString).appendingPathComponent("conversations")
             
             let fm = FileManager.default
             let calendar = Calendar.current
@@ -255,6 +298,7 @@ public enum AgyStatsService {
             
             let convDirAttrs = try? fm.attributesOfItem(atPath: conversationsDir)
             let convDirMod = convDirAttrs?[.modificationDate] as? Date ?? Date.distantPast
+            let convSig = directoryContentSignature(atPath: conversationsDir)
             
             let gcpHistAttrs = try? fm.attributesOfItem(atPath: gcpHistoryPath)
             let gcpHistMod = gcpHistAttrs?[.modificationDate] as? Date ?? Date.distantPast
@@ -262,20 +306,25 @@ public enum AgyStatsService {
             
             let gcpConvDirAttrs = try? fm.attributesOfItem(atPath: gcpConversationsDir)
             let gcpConvDirMod = gcpConvDirAttrs?[.modificationDate] as? Date ?? Date.distantPast
+            let gcpConvSig = directoryContentSignature(atPath: gcpConversationsDir)
             
             let settings = loadSettings(at: settingsPath)
             
             // Fast cache check: if history.jsonl, conversations dir, GCP dual-box files, and settings haven't changed today, return immediately
             statsCacheLock.lock()
             if let cached = statsCache,
+               cached.cliDir == expandedDir,
+               cached.gcpCliDir == resolvedGcpCliDir,
                cached.settings == settings,
                cached.startOfToday == startOfToday,
                cached.historyModDate == histMod,
                cached.historySize == histSize,
                cached.conversationsDirModDate == convDirMod,
+               cached.conversationsSig == convSig,
                cached.gcpHistoryModDate == gcpHistMod,
                cached.gcpHistorySize == gcpHistSize,
-               cached.gcpConversationsDirModDate == gcpConvDirMod {
+               cached.gcpConversationsDirModDate == gcpConvDirMod,
+               cached.gcpConversationsSig == gcpConvSig {
                 var cachedStats = cached.stats
                 statsCacheLock.unlock()
                 
@@ -302,14 +351,14 @@ public enum AgyStatsService {
             let (loadedQueries, workspaces, lastQuery, _) = loadHistory(at: historyPath)
             
             // Ingest GCP box history if available in ~/.agy-gcp-home
-            let gcpAuth = loadActiveAuthMethod(cliDir: gcpCliDir)
+            let gcpAuth = loadActiveAuthMethod(cliDir: resolvedGcpCliDir)
             let resolvedGcpProject = gcpAuth.project ?? settings.gcp?.project ?? "clawdbot-485304"
             
             var combinedLoadedQueries = loadedQueries
             var combinedWorkspaces = workspaces
             var combinedLastQuery = lastQuery
             
-            if expandedDir != gcpCliDir && FileManager.default.fileExists(atPath: gcpHistoryPath) {
+            if expandedDir != resolvedGcpCliDir && FileManager.default.fileExists(atPath: gcpHistoryPath) {
                 let (gcpLoaded, gcpWs, gcpLast, _) = loadHistory(at: gcpHistoryPath)
                 if !gcpLoaded.isEmpty {
                     let gcpMapped = gcpLoaded.map { q -> QueryEntry in
@@ -368,7 +417,7 @@ public enum AgyStatsService {
             var allDbConversations = loadedDbConversations
             var toolStats = loadedToolStats
             
-            if expandedDir != gcpCliDir && FileManager.default.fileExists(atPath: gcpConversationsDir) {
+            if expandedDir != resolvedGcpCliDir && FileManager.default.fileExists(atPath: gcpConversationsDir) {
                 let (gcpDb, gcpTools, _) = await loadConversationsAndToolStats(conversationsDir: gcpConversationsDir, isGcpOrigin: true)
                 for (cid, conv) in gcpDb {
                     allDbConversations[cid] = conv
@@ -1116,14 +1165,18 @@ public enum AgyStatsService {
             
             statsCacheLock.lock()
             statsCache = StatsCacheEntry(
+                cliDir: expandedDir,
+                gcpCliDir: resolvedGcpCliDir,
                 settings: settings,
                 startOfToday: startOfToday,
                 historyModDate: histMod,
                 historySize: histSize,
                 conversationsDirModDate: convDirMod,
+                conversationsSig: convSig,
                 gcpHistoryModDate: gcpHistMod,
                 gcpHistorySize: gcpHistSize,
                 gcpConversationsDirModDate: gcpConvDirMod,
+                gcpConversationsSig: gcpConvSig,
                 stats: stats
             )
             statsCacheLock.unlock()
@@ -1720,24 +1773,34 @@ public enum AgyStatsService {
     private static func parseDbConversationAndToolStats(file: String, conversationsDir: String, fm: FileManager, isGcpOrigin: Bool = false) -> (DbConversationData, [String: Int], Bool) {
         let convId = (file as NSString).deletingPathExtension
         let dbPath = (conversationsDir as NSString).appendingPathComponent(file)
+        let walPath = dbPath + "-wal"
         
         let attrs = try? fm.attributesOfItem(atPath: dbPath)
         let modDate = attrs?[.modificationDate] as? Date ?? Date.distantPast
         let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
         
+        let walAttrs = try? fm.attributesOfItem(atPath: walPath)
+        let walModDate = walAttrs?[.modificationDate] as? Date
+        let walFileSize = (walAttrs?[.size] as? NSNumber)?.int64Value
+        
         conversationCacheLock.lock()
-        if let cached = conversationCache[file],
+        if let cached = conversationCache[dbPath],
            cached.modificationDate == modDate,
-           cached.fileSize == fileSize {
+           cached.fileSize == fileSize,
+           cached.walModificationDate == walModDate,
+           cached.walFileSize == walFileSize {
             let res = (cached.conversationData, cached.toolCounts, true)
             conversationCacheLock.unlock()
             return res
         }
         conversationCacheLock.unlock()
         
+        let walExists = fm.fileExists(atPath: walPath)
+        let uri = walExists ? "file:\(dbPath)?mode=ro" : "file:\(dbPath)?immutable=1"
+        
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
-        guard sqlite3_open_v2("file:\(dbPath)?immutable=1", &db, flags, nil) == SQLITE_OK else {
+        guard sqlite3_open_v2(uri, &db, flags, nil) == SQLITE_OK else {
             sqlite3_close(db)
             let emptyData = DbConversationData(conversationId: convId, startTime: nil, generations: [])
             return (emptyData, [:], false)
@@ -1868,9 +1931,11 @@ public enum AgyStatsService {
         let convData = DbConversationData(conversationId: convId, startTime: startTime, generations: generations)
         
         conversationCacheLock.lock()
-        conversationCache[file] = ConversationCacheEntry(
+        conversationCache[dbPath] = ConversationCacheEntry(
             modificationDate: modDate,
             fileSize: fileSize,
+            walModificationDate: walModDate,
+            walFileSize: walFileSize,
             conversationData: convData,
             toolCounts: toolCounts
         )
