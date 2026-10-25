@@ -900,9 +900,8 @@ public enum AgyStatsService {
                     dayBucket.modelQueryBreakdown[mName, default: 0] += 1
                 }
                 
-                // Fallback for days with no SQLite DBs (e.g. May/June 2026) or rewound/orphaned queries lacking DB generations
-                let hasDbGensForQuery = (q.conversationMeta?.llmCalls ?? 0) > 0 || (q.conversationMeta?.totalOutputBytes ?? 0) > 0
-                if !daysWithDbGens.contains(dayKey) || !hasDbGensForQuery {
+                // Fallback only for historical days with no SQLite DB files (e.g. May/June 2026 prior to SQLite storage)
+                if !daysWithDbGens.contains(dayKey) {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let model = resolveModel(name: name, fallback: defaultGeminiModel)
                     
@@ -958,7 +957,7 @@ public enum AgyStatsService {
                 if let mName = q.modelName {
                     monthBucket.modelQueryBreakdown[mName, default: 0] += 1
                 }
-                if !daysWithDbGens.contains(dayKey) || !hasDbGensForQuery {
+                if !daysWithDbGens.contains(dayKey) {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let model = resolveModel(name: name, fallback: defaultGeminiModel)
                     
@@ -1310,7 +1309,14 @@ public enum AgyStatsService {
                 try? handle.close()
                 
                 guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { continue }
-                isGcp = text.contains("aiplatform") || text.contains("clawdbot") || text.contains("EnterProject") || text.contains("GCP setup completed")
+                isGcp = false
+                for line in text.components(separatedBy: .newlines) {
+                    if line.contains("HandleUserInput") { continue }
+                    if line.contains("gcp_setup.go") || line.contains("[Auth State Transition]") || line.contains("GCP setup completed") || line.contains("aiplatform.googleapis.com") {
+                        isGcp = true
+                        break
+                    }
+                }
                 project = isGcp ? (defaultProject ?? "clawdbot-485304") : nil
                 
                 if let regex = emailRegex {

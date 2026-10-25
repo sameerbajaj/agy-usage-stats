@@ -227,4 +227,43 @@ struct AgyStatsServiceTests {
         // Clean up open writer connection
         sqlite3_close(writerDb)
     }
+    
+    @Test
+    func testConsumerUserPromptContainingGcpKeywordsDoesNotTriggerGcpAuthTransition() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let logDir = tempDir.appendingPathComponent("log")
+        let convDir = tempDir.appendingPathComponent("conversations")
+        try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: convDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let now = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let logDateStr = dateFormatter.string(from: now)
+        let logFile = logDir.appendingPathComponent("cli-\(logDateStr).log")
+        
+        // Log file where user prompt mentions GCP project and aiplatform, but NOT actual GCP auth setup
+        let logContent = """
+        I1022 09:25:24.123456    1000 input_loop.go:106] HandleUserInput called with text: "inspect clawdbot-485304 and aiplatform credentials"
+        I1022 09:25:25.123456    1000 runner.go:200] Step completed
+        """
+        try logContent.write(to: logFile, atomically: true, encoding: .utf8)
+        
+        let historyFile = tempDir.appendingPathComponent("history.jsonl")
+        let historyJson = """
+        {"display":"inspect clawdbot-485304 and aiplatform credentials","timestamp":\(Int64(now.timeIntervalSince1970 * 1000)),"workspace":"/tmp","conversationId":"test-conv-1","type":"user"}
+        """
+        try historyJson.write(to: historyFile, atomically: true, encoding: .utf8)
+        
+        let isolatedGcpDir = tempDir.appendingPathComponent("empty_gcp").path
+        AgyStatsService.clearCaches()
+        let (stats, _) = await AgyStatsService.loadStats(cliDir: tempDir.path, gcpCliDir: isolatedGcpDir)
+        
+        // Query and cost must NOT be attributed to GCP
+        #expect(stats.gcpTotalCost == 0.0)
+        let q = stats.recentQueries.first(where: { $0.conversationId == "test-conv-1" })
+        #expect(q != nil)
+        #expect(q?.isGcp == false)
+    }
 }
