@@ -102,6 +102,8 @@ if [[ "$MODE" == "ci" ]]; then
             gh run watch "$LATEST_RUN_ID" --exit-status
         fi
     fi
+fi
+
 # Step 3: Download official GitHub release DMG
 TMP_DIR="$(mktemp -d /tmp/agy-release-download.XXXXXX)"
 echo "⬇️ Downloading official GitHub release DMG to $TMP_DIR..."
