@@ -1564,6 +1564,47 @@ struct agy_usage_statsTests {
         // Calling refreshQuotaOnly runs safely without crash or race
         await viewModel.refreshQuotaOnly(forceRefresh: false)
     }
+
+    // MARK: - Update Checker Anti-Loop Tests
+
+    @Test func testUpdateCheckerIsNewerSemanticComparison() {
+        // Standard semantic version comparisons
+        #expect(UpdateChecker.isNewer("1.1.85", than: "1.1.84") == true)
+        #expect(UpdateChecker.isNewer("1.2.0", than: "1.1.84") == true)
+        #expect(UpdateChecker.isNewer("2.0.0", than: "1.9.99") == true)
+        #expect(UpdateChecker.isNewer("1.1.84", than: "1.1.84") == false)
+        #expect(UpdateChecker.isNewer("1.1.83", than: "1.1.84") == false)
+        #expect(UpdateChecker.isNewer("1.1.0", than: "1.1.84") == false)
+
+        // Non-numeric versions must NEVER be treated as older (prevents infinite update loop)
+        #expect(UpdateChecker.isNewer("1.1.84", than: "latest") == false)
+        #expect(UpdateChecker.isNewer("latest", than: "1.1.84") == false)
+        #expect(UpdateChecker.isNewer("latest", than: "latest") == false)
+        #expect(UpdateChecker.isNewer("1.1.84", than: "") == false)
+        #expect(UpdateChecker.isNewer("", than: "1.1.84") == false)
+        #expect(UpdateChecker.isNewer("unknown", than: "unknown") == false)
+    }
+
+    @Test func testUpdateCheckerVersionExtractionAndNormalisation() {
+        #expect(UpdateChecker.version(from: "agy-usage-stats 1.1.84") == "1.1.84")
+        #expect(UpdateChecker.version(from: "Release v1.2.34 notes") == "1.2.34")
+        #expect(UpdateChecker.version(from: "v1.0.0") == "1.0.0")
+        #expect(UpdateChecker.version(from: "latest build") == nil)
+
+        #expect(UpdateChecker.normalise("v1.1.84") == "1.1.84")
+        #expect(UpdateChecker.normalise("V2.0.1") == "2.0.1")
+        #expect(UpdateChecker.normalise("1.1.84") == "1.1.84")
+        #expect(UpdateChecker.normalise("latest") == "latest")
+    }
+
+    @Test func testUpdateCheckerRollingTimestampRecording() {
+        let testTs: TimeInterval = 1793156761
+        let testVer = "1.1.84"
+        UpdateChecker.recordInstalledRollingTimestamp(testTs, version: testVer)
+
+        #expect(UpdateChecker.lastInstalledRollingTimestamp == testTs)
+        #expect(UserDefaults.standard.string(forKey: UpdateChecker.lastInstalledVersionKey) == testVer)
+    }
 }
 
 

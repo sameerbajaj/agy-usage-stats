@@ -58,9 +58,13 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - **Health Color-Coded Number & Ring Gauge**: Both the percentage number and circle ring gauge are independently color-coded using a 3-tier health status: Healthy (>50%: Emerald Green `0.15, 0.85, 0.55`), Warning (20%–50%: Amber/Orange `1.0, 0.60, 0.15`), and Low (≤20%: Ruby Red `1.0, 0.35, 0.35`). Because the Percentage Number and Circle Ring Gauge metrics are decoupled, their colors independently reflect their respective quota fractions (e.g. Red 15% number with a Green 85% ring). Applies across all model selections (Active, Most Depleted, Gemini, Argon, Claude).
    - **Crisp Spend Badge & Live Settings Preview**: `showMenuBarSpend` toggles a canvas-rendered spend badge (`MenuBarSpendSource`: `GCP Cloud Spend (Today)`, `Today's API Spend (All)`, `GCP Cloud Spend (Total)`) separated by a subtle 1px vertical divider and monochrome SF Symbol (`cloud.fill` or `dollarsign`) on the exact same 11pt bold rounded monospaced baseline. `SettingsTabView` includes a live **Menu Bar Preview** pill at the top.
    - **Hermetic Unit Tests & UserDefaults Isolation**: `AgyStatsViewModel` accepts dependency-injected `UserDefaults` (`init(userDefaults:)`). All unit tests must use isolated ephemeral suites (`UserDefaults(suiteName: "test-suite-\(UUID().uuidString)")`) via `makeIsolatedViewModel()` so tests never mutate or wipe live user preferences (`agy_gcpCreditPool`, active model, limits) during release builds.
-   - **Production App Integrity Invariant**: Never leave an ad-hoc Xcode DerivedData build running on Sam's machine, and **never copy raw DerivedData builds into `/Applications/agy-usage-stats.app`**.
-     - *Why*: Ad-hoc DerivedData builds have `CFBundleShortVersionString = 1.1.0`. The official GitHub rolling release is tagged with CI build sequences (e.g., `1.1.68`). When an ad-hoc build is placed in `/Applications/agy-usage-stats.app`, `UpdateChecker.swift` compares the remote version against `1.1.0` and immediately flags "New build available", prompting to overwrite local code with an older remote DMG!
-     - *Proper Release Protocol*: Use `scripts/deploy_release.sh -m "<message>"`. This runs hermetic unit tests, commits, pushes to `main`, waits for GitHub Actions to build the official DMG and update the rolling `latest` release, downloads the signed/official release, terminates any running processes, installs into `/Applications/agy-usage-stats.app`, and verifies the running binary path and version.
+   - **Production App Integrity Invariant**: Never leave an ad-hoc Xcode DerivedData build running on Sam's machine, and **never copy raw DerivedData builds into `/Applications/agy-usage-stats.app`**. Never use local builds to publish releases.
+     - *Why*: Ad-hoc DerivedData builds have `CFBundleShortVersionString = 1.1.0`. The official GitHub rolling release is tagged with CI build sequences (e.g., `1.1.85`). When an ad-hoc or unstamped build is placed in `/Applications/agy-usage-stats.app`, `UpdateChecker.swift` would flag "New build available" in an infinite loop.
+     - *Proper Release Protocol*: Use `scripts/deploy_release.sh -m "<message>"`. This runs hermetic unit tests, commits, pushes to `main`, waits for GitHub Actions to build the official DMG and update the rolling `latest` release, downloads the signed/official release, terminates any running processes, installs into `/Applications/agy-usage-stats.app`, records release metadata in UserDefaults, and verifies the running binary path and version.
+     - *CI & Anti-Loop Safeguards*:
+       1. `.github/workflows/release-dmg.yml` guards against recursive execution on rolling `latest` releases (`if: github.event_name != 'release' || (github.event.release.tag_name != 'latest' && startsWith(github.event.release.tag_name, 'v'))`), preventing duplicate runs from clobbering the DMG with `MARKETING_VERSION=latest`.
+       2. `scripts/build-dmg.sh` sanitizes `MARKETING_VERSION` so it can never stamp the literal string `"latest"` into `Info.plist`.
+       3. `UpdateChecker.swift` guards `isNewer` against non-numeric strings, checks `lastInstalledRollingTimestamp` ceiling even when semantic release names exist, and `SelfUpdater.swift` persists metadata immediately upon bundle replacement.
 
 6. **Single-Instance & Test-Host Suppression Invariant**:
    - **Zero Test Host Status Items**: Whenever `xcodebuild test` runs, Xcode launches `agy-usage-stats.app` as a test runner host. `agy_usage_statsApp` binds `MenuBarExtra(isInserted: .constant(!isRunningTests))` so the test host NEVER creates a status item in the macOS menu bar during automated tests.
@@ -82,8 +86,8 @@ To publish updates and install the official build without triggering update bann
 ```
 Options:
 - Default: runs unit tests, commits & pushes to `main`, monitors GitHub Actions CI, downloads official DMG, and installs into `/Applications`.
-- `--local-publish`: runs unit tests, builds DMG locally with `build-dmg.sh`, publishes to GitHub `latest` release via `gh`, and installs into `/Applications`.
 - `--install-latest`: skips building and installs the current GitHub `latest` release DMG into `/Applications`.
+- Note: `--local-publish` is strictly disallowed to prevent local unstamped builds. All production releases must go through GitHub Actions CI.
 
 ## Testing Guidelines
 

@@ -26,6 +26,8 @@ enum SelfUpdater {
     /// Perform a full self-update cycle. `onProgress` is called on MainActor.
     static func update(
         dmgURL: URL,
+        publishedAt: TimeInterval? = nil,
+        version: String? = nil,
         onStateChange: @escaping @MainActor (SelfUpdateState) -> Void
     ) async -> Bool {
         do {
@@ -45,6 +47,14 @@ enum SelfUpdater {
             // 4 — Replace the running .app
             let runningAppURL = Bundle.main.bundleURL
             try replaceApp(old: runningAppURL, with: newAppURL)
+
+            // Immediately persist installed rolling timestamp and version BEFORE relaunching
+            if let publishedAt {
+                UpdateChecker.recordInstalledRollingTimestamp(publishedAt, version: version)
+            } else if let version {
+                UserDefaults.standard.set(version, forKey: UpdateChecker.lastInstalledVersionKey)
+                UserDefaults.standard.synchronize()
+            }
 
             // 5 — Unmount (best-effort)
             unmountDMG(mountPoint: mountPoint)

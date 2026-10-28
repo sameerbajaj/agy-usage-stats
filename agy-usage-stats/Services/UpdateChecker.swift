@@ -62,9 +62,26 @@ public enum UpdateChecker {
         if let latest = releases.first(where: { $0.tagName == "latest" && !$0.draft }) {
             let localVersion = normalise(currentVersion)
             let releaseVersion = version(from: latest.name) ?? version(from: latest.body)
+            let publishedAt = latest.publishedAt ?? 0
+            let baseline = max(buildTimestamp, lastInstalledRollingTimestamp)
+            
+            // Hard invariant: if the rolling release was published at or before our installed baseline,
+            // we are already running this build (or a newer build). NEVER prompt!
+            if publishedAt > 0 && baseline > 0 && publishedAt <= baseline + 60 {
+                return nil
+            }
+            
+            // If remote release has a version and matches our local version exactly:
+            if let remoteVersion = releaseVersion, remoteVersion == localVersion {
+                return nil
+            }
             
             if let remoteVersion = releaseVersion {
                 if isNewer(remoteVersion, than: localVersion) {
+                    // Suppress if the release timestamp is already accounted for
+                    if publishedAt > 0 && baseline > 0 && publishedAt <= baseline + 60 {
+                        return nil
+                    }
                     return UpdateInfo(
                         version: remoteVersion,
                         tagName: "latest",
@@ -75,8 +92,7 @@ public enum UpdateChecker {
                         publishedAt: latest.publishedAt
                     )
                 }
-            } else if let publishedAt = latest.publishedAt {
-                let baseline = max(buildTimestamp, lastInstalledRollingTimestamp)
+            } else if publishedAt > 0 {
                 if baseline > 0 && publishedAt > baseline + 300 {
                     return UpdateInfo(
                         version: "latest",
@@ -96,12 +112,24 @@ public enum UpdateChecker {
 
     // MARK: - Helpers
 
-    static var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    public static let lastInstalledKey = "lastInstalledRollingTimestamp"
+    public static let lastInstalledVersionKey = "lastInstalledReleaseVersion"
+
+    public static var currentVersion: String {
+        let plistVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        if !plistVer.isEmpty && plistVer != "latest" && plistVer != "0" {
+            return plistVer
+        }
+        // Fall back to recorded version in UserDefaults if plist is "latest" or missing
+        let recordedVer = UserDefaults.standard.string(forKey: lastInstalledVersionKey) ?? ""
+        if !recordedVer.isEmpty {
+            return recordedVer
+        }
+        return plistVer.isEmpty ? "0" : plistVer
     }
 
     /// CFBundleVersion is stamped as a Unix timestamp by build-dmg.sh
-    static var buildTimestamp: TimeInterval {
+    public static var buildTimestamp: TimeInterval {
         guard let s = Bundle.main.infoDictionary?["CFBundleVersion"] as? String,
               let ts = TimeInterval(s) else { return 0 }
         return ts
@@ -109,39 +137,46 @@ public enum UpdateChecker {
 
     // MARK: - Last-installed rolling timestamp
 
-    private static let lastInstalledKey = "lastInstalledRollingTimestamp"
-
     /// The `published_at` of the rolling release we last self-updated to.
     /// Persisted in UserDefaults so it survives relaunch.
-    static var lastInstalledRollingTimestamp: TimeInterval {
+    public static var lastInstalledRollingTimestamp: TimeInterval {
         UserDefaults.standard.double(forKey: lastInstalledKey)
     }
 
     /// Call after a successful self-update from a rolling release to prevent
     /// the checker from re-detecting the same build as an update.
-    static func recordInstalledRollingTimestamp(_ publishedAt: TimeInterval) {
+    public static func recordInstalledRollingTimestamp(_ publishedAt: TimeInterval, version: String? = nil) {
         UserDefaults.standard.set(publishedAt, forKey: lastInstalledKey)
+        if let version, !version.isEmpty {
+            UserDefaults.standard.set(version, forKey: lastInstalledVersionKey)
+        }
+        UserDefaults.standard.synchronize()
     }
 
-    private static func normalise(_ tag: String) -> String {
-        var s = tag
-        if s.hasPrefix("v") { s = String(s.dropFirst()) }
+    public static func normalise(_ tag: String) -> String {
+        var s = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("v") || s.hasPrefix("V") { s = String(s.dropFirst()) }
         return s
     }
 
-    private static func version(from text: String?) -> String? {
+    public static func version(from text: String?) -> String? {
         guard let text else { return nil }
-        let pattern = #"\b(\d+)\.(\d+)\.(\d+)\b"#
+        let pattern = #"(?:^|[\svV])(\d+\.\d+\.\d+)\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let range = Range(match.range, in: text)
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: text)
         else { return nil }
         return String(text[range])
     }
 
-    private static func isNewer(_ a: String, than b: String) -> Bool {
+    public static func isNewer(_ a: String, than b: String) -> Bool {
         let av = a.split(separator: ".").compactMap { Int($0) }
         let bv = b.split(separator: ".").compactMap { Int($0) }
+        // CRITICAL GUARD: Both must have parsed integers.
+        // If either is empty (e.g. "latest", "unknown", or invalid string),
+        // we cannot do semantic comparison.
+        guard !av.isEmpty, !bv.isEmpty else { return false }
         let count = max(av.count, bv.count)
         for i in 0..<count {
             let ai = i < av.count ? av[i] : 0

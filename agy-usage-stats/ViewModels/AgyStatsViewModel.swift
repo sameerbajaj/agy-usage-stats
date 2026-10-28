@@ -988,13 +988,17 @@ public final class AgyStatsViewModel {
         guard let update = availableUpdate, let dmgURL = update.downloadURL else { return }
         
         Task {
-            let didInstall = await SelfUpdater.update(dmgURL: dmgURL) { [weak self] state in
+            let didInstall = await SelfUpdater.update(
+                dmgURL: dmgURL,
+                publishedAt: update.publishedAt,
+                version: update.version
+            ) { [weak self] state in
                 Task { @MainActor in
                     self?.selfUpdateState = state
                 }
             }
             if didInstall, update.isRolling, let ts = update.publishedAt {
-                UpdateChecker.recordInstalledRollingTimestamp(ts)
+                UpdateChecker.recordInstalledRollingTimestamp(ts, version: update.version)
             }
         }
     }

@@ -27,10 +27,24 @@ XCBUILD_EXTRA_ARGS=()
 BUILD_TIMESTAMP=$(date +%s)
 XCBUILD_EXTRA_ARGS+=("CURRENT_PROJECT_VERSION=$BUILD_TIMESTAMP")
 
-if [[ -n "$MARKETING_VERSION" ]]; then
-    XCBUILD_EXTRA_ARGS+=("MARKETING_VERSION=$MARKETING_VERSION")
-    echo "Stamping version: $MARKETING_VERSION"
+# Sanitize MARKETING_VERSION: Never allow literal 'latest' or empty version strings in Info.plist
+if [[ "$MARKETING_VERSION" == "latest" || -z "$MARKETING_VERSION" ]]; then
+    git fetch --force --tags >/dev/null 2>&1 || true
+    LATEST_STABLE_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)"
+    if [[ -n "$LATEST_STABLE_TAG" ]]; then
+        BASE="${LATEST_STABLE_TAG#v}"
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+    else
+        MAJOR=1
+        MINOR=0
+    fi
+    COMMIT_COUNT="$(git rev-list --count HEAD 2>/dev/null || echo "1")"
+    MARKETING_VERSION="${MAJOR}.${MINOR}.${COMMIT_COUNT}"
+    echo "⚠️ Sanitized MARKETING_VERSION to semantic version: $MARKETING_VERSION"
 fi
+
+XCBUILD_EXTRA_ARGS+=("MARKETING_VERSION=$MARKETING_VERSION")
+echo "Stamping version: $MARKETING_VERSION (Build: $BUILD_TIMESTAMP)"
 
 # ── Detect signing identity ──────────────────────────────────────────────────
 SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}"

@@ -27,8 +27,9 @@ COMMIT_MSG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --local-publish)
-            MODE="local-publish"
-            shift
+            echo "❌ Error: --local-publish is strictly disallowed by the Production App Integrity Invariant."
+            echo "All production DMG releases must be built, verified, and published via GitHub Actions CI."
+            exit 1
             ;;
         --install-latest)
             MODE="install-latest"
@@ -101,49 +102,6 @@ if [[ "$MODE" == "ci" ]]; then
             gh run watch "$LATEST_RUN_ID" --exit-status
         fi
     fi
-elif [[ "$MODE" == "local-publish" ]]; then
-    echo "🔨 Building release DMG locally and publishing directly to GitHub..."
-    git fetch --force --tags >/dev/null 2>&1 || true
-    LATEST_STABLE_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)"
-    if [[ -n "$LATEST_STABLE_TAG" ]]; then
-        BASE="${LATEST_STABLE_TAG#v}"
-        IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-    else
-        MAJOR=1
-        MINOR=0
-    fi
-    
-    # Fetch latest release to compute next sequence
-    LATEST_NAME="$(gh release view latest --json name -q '.name' 2>/dev/null || echo "")"
-    CURRENT_SEQ="$(echo "$LATEST_NAME" | grep -o '[0-9]*$' || echo "1")"
-    NEXT_SEQ=$((CURRENT_SEQ + 1))
-    TARGET_VERSION="${MAJOR}.${MINOR}.${NEXT_SEQ}"
-    
-    echo "Stamping target version: $TARGET_VERSION"
-    "$ROOT_DIR/scripts/build-dmg.sh" "latest" "$TARGET_VERSION"
-
-    echo "Recreating rolling release 'latest'..."
-    gh release delete latest --cleanup-tag --yes 2>/dev/null || true
-    sleep 2
-
-    CHANGELOG="$(git log --pretty=format:"- %s (%h)" -10)"
-    NOTES=$(cat <<EOF
-### Highlights
-${CHANGELOG}
-
----
-**Commit:** \`$(git rev-parse --short HEAD)\` · **Built from:** \`main\`
-EOF
-)
-
-    gh release create latest \
-        --title "$APP_NAME $TARGET_VERSION" \
-        --latest \
-        --notes "$NOTES"
-
-    gh release upload latest "dist/$APP_NAME-latest.dmg" --clobber
-fi
-
 # Step 3: Download official GitHub release DMG
 TMP_DIR="$(mktemp -d /tmp/agy-release-download.XXXXXX)"
 echo "⬇️ Downloading official GitHub release DMG to $TMP_DIR..."
@@ -183,16 +141,32 @@ echo "🚚 Installing $MOUNT_POINT/$APP_NAME.app into /Applications/$APP_NAME.ap
 rm -rf "/Applications/$APP_NAME.app"
 cp -R "$MOUNT_POINT/$APP_NAME.app" "/Applications/"
 
-# Step 7: Clean up DMG mount and temp dir
+# Step 7: Record release metadata in UserDefaults to guarantee zero false update loops
+RELEASE_META="$(gh release view latest --json publishedAt,name 2>/dev/null || echo "{}")"
+PUBLISHED_ISO="$(echo "$RELEASE_META" | jq -r '.publishedAt // empty' 2>/dev/null || echo "")"
+RELEASE_TITLE="$(echo "$RELEASE_META" | jq -r '.name // empty' 2>/dev/null || echo "")"
+
+if [[ -n "$PUBLISHED_ISO" ]]; then
+    PUBLISHED_TS="$(python3 -c "import datetime; print(int(datetime.datetime.fromisoformat('$PUBLISHED_ISO'.replace('Z', '+00:00')).timestamp()))" 2>/dev/null || echo "")"
+    if [[ -n "$PUBLISHED_TS" ]]; then
+        echo "📌 Recording lastInstalledRollingTimestamp=$PUBLISHED_TS in UserDefaults..."
+        defaults write luminoslabs.agy-usage-stats lastInstalledRollingTimestamp -float "$PUBLISHED_TS"
+    fi
+fi
+if [[ -n "$RELEASE_TITLE" ]]; then
+    defaults write luminoslabs.agy-usage-stats lastInstalledReleaseVersion "$RELEASE_TITLE"
+fi
+
+# Step 8: Clean up DMG mount and temp dir
 hdiutil detach "$MOUNT_POINT" -quiet
 rm -rf "$TMP_DIR"
 
-# Step 8: Launch official production app
+# Step 9: Launch official production app
 echo "🚀 Launching /Applications/$APP_NAME.app..."
 open "/Applications/$APP_NAME.app"
 sleep 2
 
-# Step 9: Verify running process and version
+# Step 10: Verify running process and version
 RUNNING_BIN="$(ps aux | grep -i "/Applications/$APP_NAME.app/Contents/MacOS/$APP_NAME" | grep -v grep | awk '{print $NF}' || true)"
 INSTALLED_VER="$(defaults read "/Applications/$APP_NAME.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "unknown")"
 LATEST_GH_VER="$(gh release view latest --json name -q '.name' 2>/dev/null || echo "unknown")"

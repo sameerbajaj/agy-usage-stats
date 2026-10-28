@@ -27,6 +27,7 @@ public enum AgyStatsService {
         let outputTokens: Int?
         let cachedInputTokens: Int?
         let isGcpOrigin: Bool
+        let isExplicitConsumer: Bool
     }
     
     private struct DbConversationData: Sendable {
@@ -342,7 +343,7 @@ public enum AgyStatsService {
             
             // Load Settings & Auth Transitions
             let tokenAuth = loadActiveAuthMethod(cliDir: expandedDir)
-            let currentIsGcp = tokenAuth.isGcp || (settings.gcp?.project != nil && !(settings.gcp?.project?.isEmpty ?? true) && tokenAuth.email == nil)
+            let currentIsGcp = !tokenAuth.explicitConsumer && (tokenAuth.isGcp || (settings.gcp?.project != nil && !(settings.gcp?.project?.isEmpty ?? true) && tokenAuth.email == nil))
             let authTransitions = loadAuthTransitions(logDir: logDir, defaultProject: settings.gcp?.project)
             let modelTransitions = loadModelTransitions(logDir: logDir)
             
@@ -353,6 +354,7 @@ public enum AgyStatsService {
             // Ingest GCP box history if available in ~/.agy-gcp-home
             let gcpAuth = loadActiveAuthMethod(cliDir: resolvedGcpCliDir)
             let resolvedGcpProject = gcpAuth.project ?? settings.gcp?.project ?? "clawdbot-485304"
+            let gcpConsumerConvIds = loadGcpBoxConsumerConvIds(gcpCliDir: resolvedGcpCliDir)
             
             var combinedLoadedQueries = loadedQueries
             var combinedWorkspaces = workspaces
@@ -363,9 +365,16 @@ public enum AgyStatsService {
                 if !gcpLoaded.isEmpty {
                     let gcpMapped = gcpLoaded.map { q -> QueryEntry in
                         var copy = q
-                        copy.isGcp = true
-                        copy.gcpProject = resolvedGcpProject
-                        copy.accountEmail = nil
+                        let isConsumer = q.conversationId != nil && gcpConsumerConvIds.contains(q.conversationId!)
+                        if isConsumer {
+                            copy.isGcp = false
+                            copy.gcpProject = nil
+                            copy.accountEmail = "sameerbajaj24@gmail.com"
+                        } else {
+                            copy.isGcp = true
+                            copy.gcpProject = resolvedGcpProject
+                            copy.accountEmail = nil
+                        }
                         if copy.modelName == nil {
                             copy.modelName = "Gemini 4 Argon (High)"
                         }
@@ -420,7 +429,29 @@ public enum AgyStatsService {
             if expandedDir != resolvedGcpCliDir && FileManager.default.fileExists(atPath: gcpConversationsDir) {
                 let (gcpDb, gcpTools, _) = await loadConversationsAndToolStats(conversationsDir: gcpConversationsDir, isGcpOrigin: true)
                 for (cid, conv) in gcpDb {
-                    allDbConversations[cid] = conv
+                    let isConsumer = gcpConsumerConvIds.contains(cid)
+                    if isConsumer {
+                        let remappedGens = conv.generations.map { g in
+                            DbGeneration(
+                                idx: g.idx,
+                                size: g.size,
+                                timestamp: g.timestamp,
+                                modelName: g.modelName,
+                                inputTokens: g.inputTokens,
+                                outputTokens: g.outputTokens,
+                                cachedInputTokens: g.cachedInputTokens,
+                                isGcpOrigin: false,
+                                isExplicitConsumer: true
+                            )
+                        }
+                        allDbConversations[cid] = DbConversationData(
+                            conversationId: conv.conversationId,
+                            startTime: conv.startTime,
+                            generations: remappedGens
+                        )
+                    } else {
+                        allDbConversations[cid] = conv
+                    }
                 }
                 for tool in gcpTools {
                     if let idx = toolStats.firstIndex(where: { $0.toolName == tool.toolName }) {
@@ -629,10 +660,11 @@ public enum AgyStatsService {
                     }
                 }
                 let authState = authForDateInitial(q.timestamp)
-                let isGcp = q.isGcp || authState.isGcp
+                let isConsumerConv = (resolvedConvId != nil && gcpConsumerConvIds.contains(resolvedConvId!)) || (q.conversationId != nil && gcpConsumerConvIds.contains(q.conversationId!))
+                let isGcp = !isConsumerConv && (q.isGcp || authState.isGcp)
                 newQ.isGcp = isGcp
                 newQ.gcpProject = isGcp ? (q.gcpProject ?? authState.gcpProject ?? "clawdbot-485304") : nil
-                newQ.accountEmail = isGcp ? nil : authState.email
+                newQ.accountEmail = isGcp ? nil : (authState.email ?? "sameerbajaj24@gmail.com")
                 queriesWithMeta.append(newQ)
             }
             
@@ -877,7 +909,7 @@ public enum AgyStatsService {
             // 1. Initialize buckets, query counts, and fallback estimates for older queries lacking SQLite DB files
             for q in queriesWithMeta {
                 let authState = authForDate(q.timestamp)
-                let isGcp = q.isGcp || authState.isGcp
+                let isGcp = q.isGcp
                 let accName = isGcp ? (q.gcpProject != nil ? "GCP (\(q.gcpProject!))" : authState.accountDisplayName) : authState.accountDisplayName
                 
                 let dInfo = getDateInfo(for: q.timestamp)
@@ -1020,8 +1052,8 @@ public enum AgyStatsService {
                 }
                 
                 let authState = authForDate(genDate)
-                let isGcp = gen.isGcpOrigin || authState.isGcp
-                let accName = gen.isGcpOrigin ? "GCP (\(resolvedGcpProject))" : authState.accountDisplayName
+                let isGcp = !gen.isExplicitConsumer && (gen.isGcpOrigin || authState.isGcp)
+                let accName = isGcp ? (gen.isGcpOrigin ? "GCP (\(resolvedGcpProject))" : authState.accountDisplayName) : (authState.email ?? "sameerbajaj24@gmail.com")
                 
                 totalCost += cost
                 accountCostTotals[accName, default: 0.0] += cost
@@ -1151,7 +1183,7 @@ public enum AgyStatsService {
                 todayCostEstimate: todayCost,
                 dailyUsage: sortedDaily,
                 monthlyUsage: sortedMonthly,
-                gcpProject: (gcpTotalCost > 0 || currentIsGcp) ? resolvedGcpProject : settings.gcp?.project,
+                gcpProject: currentIsGcp ? resolvedGcpProject : nil,
                 gcpLocation: settings.gcp?.location ?? "us",
                 gcpTotalCost: gcpTotalCost,
                 gcpTodayCost: gcpTodayCost,
@@ -1316,7 +1348,11 @@ public enum AgyStatsService {
                 isGcp = false
                 for line in text.components(separatedBy: .newlines) {
                     if line.contains("HandleUserInput") { continue }
-                    if line.contains("gcp_setup.go") || line.contains("[Auth State Transition]") || line.contains("GCP setup completed") || line.contains("aiplatform.googleapis.com") {
+                    if line.contains("authMethod=consumer") || line.contains("daily-cloudcode-pa.googleapis.com") {
+                        isGcp = false
+                        break
+                    }
+                    if line.contains("authMethod=gcp") || line.contains("gcp_setup.go") || line.contains("[Auth State Transition]") || line.contains("GCP setup completed") || line.contains("aiplatform.googleapis.com") || line.contains("aiplatform.us.rep.googleapis.com") {
                         isGcp = true
                         break
                     }
@@ -1578,20 +1614,84 @@ public enum AgyStatsService {
         }
     }
     
-    private static func loadActiveAuthMethod(cliDir: String) -> (isGcp: Bool, email: String?, project: String?) {
+    private static func loadActiveAuthMethod(cliDir: String) -> (isGcp: Bool, email: String?, project: String?, explicitConsumer: Bool) {
         let tokenPath = (cliDir as NSString).appendingPathComponent("antigravity-oauth-token")
         if let data = try? Data(contentsOf: URL(fileURLWithPath: tokenPath)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let authMethod = json["auth_method"] as? String
-            let email = json["email"] as? String
-            let project = json["project_id"] as? String
+            let email = (json["id_token_email"] as? String) ?? (json["email"] as? String)
+            let project = (json["project_id"] as? String) ?? (json["quota_project"] as? String)
             if authMethod == "gcp" {
-                return (true, email, project)
+                return (true, email, project, false)
             } else if authMethod == "consumer" {
-                return (false, email, nil)
+                return (false, email ?? "sameerbajaj24@gmail.com", nil, true)
             }
         }
-        return (false, nil, nil)
+        
+        let logDir = (cliDir as NSString).appendingPathComponent("log")
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: logDir) {
+            let logFiles = files.filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }.sorted()
+            if let newest = logFiles.last {
+                let p = (logDir as NSString).appendingPathComponent(newest)
+                if let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: p)) {
+                    let d = handle.readData(ofLength: 65536)
+                    try? handle.close()
+                    if let text = String(data: d, encoding: .utf8) ?? String(data: d, encoding: .ascii) {
+                        var detectedEmail: String?
+                        if let emailRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}") {
+                            let matches = emailRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+                            for m in matches {
+                                if let r = Range(m.range, in: text) {
+                                    let cand = String(text[r])
+                                    if cand.contains("sameer") || cand.contains("gmail") {
+                                        detectedEmail = cand
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                        if text.contains("authMethod=gcp") || text.contains("aiplatform") {
+                            return (true, detectedEmail, nil, false)
+                        } else if text.contains("authMethod=consumer") || text.contains("daily-cloudcode-pa.googleapis.com") {
+                            return (false, detectedEmail ?? "sameerbajaj24@gmail.com", nil, true)
+                        }
+                    }
+                }
+            }
+        }
+        
+        return (false, nil, nil, false)
+    }
+
+    private static func loadGcpBoxConsumerConvIds(gcpCliDir: String) -> Set<String> {
+        let logDir = (gcpCliDir as NSString).appendingPathComponent("log")
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: logDir) else { return [] }
+        let logFiles = files.filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }
+        guard !logFiles.isEmpty else { return [] }
+        
+        var consumerConvs = Set<String>()
+        let uuidRegex = try? NSRegularExpression(pattern: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+        
+        for file in logFiles {
+            let fullPath = (logDir as NSString).appendingPathComponent(file)
+            guard let text = try? String(contentsOfFile: fullPath, encoding: .utf8) ?? String(contentsOfFile: fullPath, encoding: .ascii) else { continue }
+            
+            let isConsumer = text.contains("authMethod=consumer") || text.contains("daily-cloudcode-pa.googleapis.com")
+            let isGcp = text.contains("authMethod=gcp") || text.contains("aiplatform")
+            
+            if isConsumer && !isGcp {
+                if let regex = uuidRegex {
+                    let range = NSRange(text.startIndex..., in: text)
+                    let matches = regex.matches(in: text, range: range)
+                    for match in matches {
+                        if let r = Range(match.range, in: text) {
+                            consumerConvs.insert(String(text[r]))
+                        }
+                    }
+                }
+            }
+        }
+        return consumerConvs
     }
     
     private static func loadHistory(at path: String) -> ([QueryEntry], [WorkspaceStats], Date?, Bool) {
@@ -1932,7 +2032,8 @@ public enum AgyStatsService {
                     inputTokens: inputTokens,
                     outputTokens: outputTokens,
                     cachedInputTokens: cachedTokens,
-                    isGcpOrigin: isGcpOrigin
+                    isGcpOrigin: isGcpOrigin,
+                    isExplicitConsumer: false
                 ))
             }
         }

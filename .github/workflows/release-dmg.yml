@@ -13,6 +13,8 @@ permissions:
 jobs:
   build-dmg:
     runs-on: macos-latest
+    # Prevent infinite recursive workflow execution and DMG clobbering when publishing rolling 'latest'
+    if: github.event_name != 'release' || (github.event.release.tag_name != 'latest' && startsWith(github.event.release.tag_name, 'v'))
 
     env:
       APP_NAME: agy-usage-stats
@@ -29,6 +31,19 @@ jobs:
           if [[ "${{ github.event_name }}" == "release" ]]; then
             TAG="${{ github.event.release.tag_name }}"
             VERSION="${TAG#v}"
+            # Ensure marketing_version is never stamped as 'latest'
+            if [[ "$VERSION" == "latest" || -z "$VERSION" ]]; then
+              git fetch --force --tags >/dev/null 2>&1 || true
+              LATEST_STABLE_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)"
+              if [[ -n "$LATEST_STABLE_TAG" ]]; then
+                BASE="${LATEST_STABLE_TAG#v}"
+                IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+              else
+                MAJOR=1
+                MINOR=0
+              fi
+              VERSION="${MAJOR}.${MINOR}.${GITHUB_RUN_NUMBER}"
+            fi
             echo "version_suffix=$TAG" >> "$GITHUB_OUTPUT"
             echo "target_tag=$TAG" >> "$GITHUB_OUTPUT"
             echo "marketing_version=$VERSION" >> "$GITHUB_OUTPUT"
