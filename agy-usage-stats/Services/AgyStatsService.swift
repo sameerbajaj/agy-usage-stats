@@ -672,6 +672,7 @@ public enum AgyStatsService {
             var gcpTotalCost = 0.0
             var gcpTodayCost = 0.0
             var gcpWeekCost = 0.0
+            var gcpSpendEntries: [GcpSpendEntry] = []
             var quotaTotalCost = 0.0
             var quotaTodayCost = 0.0
             var quotaWeekCost = 0.0
@@ -920,6 +921,7 @@ public enum AgyStatsService {
                             dayBucket.gcpOutputTokens += outTokens
                             dayBucket.gcpModelBreakdown[model.name, default: 0.0] += cost
                             gcpTotalCost += cost
+                            gcpSpendEntries.append(GcpSpendEntry(timestamp: q.timestamp.timeIntervalSince1970, cost: cost))
                             if q.timestamp >= startOfToday { gcpTodayCost += cost }
                             if q.timestamp >= sevenDaysAgo { gcpWeekCost += cost }
                         } else {
@@ -1025,6 +1027,7 @@ public enum AgyStatsService {
                 accountCostTotals[accName, default: 0.0] += cost
                 if isGcp {
                     gcpTotalCost += cost
+                    gcpSpendEntries.append(GcpSpendEntry(timestamp: genDate.timeIntervalSince1970, cost: cost))
                 } else {
                     quotaTotalCost += cost
                 }
@@ -1153,6 +1156,7 @@ public enum AgyStatsService {
                 gcpTotalCost: gcpTotalCost,
                 gcpTodayCost: gcpTodayCost,
                 gcpWeeklyCost: gcpWeekCost,
+                gcpSpendEntries: gcpSpendEntries,
                 quotaTotalCost: quotaTotalCost,
                 quotaTodayCost: quotaTodayCost,
                 quotaWeeklyCost: quotaWeekCost,

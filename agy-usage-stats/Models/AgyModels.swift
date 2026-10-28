@@ -278,6 +278,16 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+public struct GcpSpendEntry: Codable, Equatable, Hashable, Sendable {
+    public let timestamp: Double
+    public let cost: Double
+    
+    public init(timestamp: Double, cost: Double) {
+        self.timestamp = timestamp
+        self.cost = cost
+    }
+}
+
 public struct AgyUsageStats: Codable, Equatable {
     public var totalQueries: Int
     public var queriesToday: Int
@@ -303,6 +313,7 @@ public struct AgyUsageStats: Codable, Equatable {
     public var gcpTotalCost: Double
     public var gcpTodayCost: Double
     public var gcpWeeklyCost: Double
+    public var gcpSpendEntries: [GcpSpendEntry] = []
     
     public var quotaTotalCost: Double
     public var quotaTodayCost: Double
@@ -481,9 +492,9 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
 
 public let knownModels = [
     // Frontier / Gemini 4
-    ModelCostInfo(name: "Gemini 4 Argon (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.10, tier: .low),
-    ModelCostInfo(name: "Gemini 4 Argon (Medium)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.10, tier: .medium),
-    ModelCostInfo(name: "Gemini 4 Argon (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.10, tier: .high),
+    ModelCostInfo(name: "Gemini 4 Argon (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.50, tier: .low),
+    ModelCostInfo(name: "Gemini 4 Argon (Medium)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.50, tier: .medium),
+    ModelCostInfo(name: "Gemini 4 Argon (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.50, tier: .high),
 
     // Claude 5.5 Series
     ModelCostInfo(name: "Claude Sonnet 5.5 (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.20, tier: .low),

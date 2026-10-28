@@ -192,6 +192,7 @@ public final class AgyStatsViewModel {
     public var gcpCreditPool: Double {
         didSet {
             userDefaults.set(gcpCreditPool, forKey: "agy_gcpCreditPool")
+            guard abs(gcpCreditPool - oldValue) > 0.001 else { return }
             resetGcpCreditBaseline()
         }
     }
@@ -212,9 +213,17 @@ public final class AgyStatsViewModel {
     
     public func resetGcpCreditBaseline() {
         if gcpCreditPool > 0.0 {
-            let currentTotal = stats.gcpTotalCost
+            let nowTs = Date().timeIntervalSince1970
+            let currentTotal: Double
+            if !stats.gcpSpendEntries.isEmpty {
+                currentTotal = stats.gcpSpendEntries
+                    .filter { $0.timestamp <= nowTs }
+                    .reduce(0.0) { $0 + $1.cost }
+            } else {
+                currentTotal = stats.gcpTotalCost
+            }
             self.gcpCreditBaselineCost = currentTotal
-            self.gcpCreditBaselineTimestamp = Date().timeIntervalSince1970
+            self.gcpCreditBaselineTimestamp = nowTs
             userDefaults.set(currentTotal, forKey: "agy_gcpCreditBaselineCost")
             userDefaults.set(self.gcpCreditBaselineTimestamp, forKey: "agy_gcpCreditBaselineTimestamp")
             self.gcpCreditBaselineNeedsMigration = false
@@ -227,9 +236,37 @@ public final class AgyStatsViewModel {
         }
     }
     
-    // GCP Credit remaining & consumed calculations based on baseline snapshot
+    public func reconcileGcpBaseline(with loadedStats: AgyUsageStats) {
+        if self.gcpCreditBaselineNeedsMigration && loadedStats.gcpTotalCost > 0.0 {
+            self.gcpCreditBaselineCost = loadedStats.gcpTotalCost
+            self.gcpCreditBaselineTimestamp = Date().timeIntervalSince1970
+            self.userDefaults.set(loadedStats.gcpTotalCost, forKey: "agy_gcpCreditBaselineCost")
+            self.userDefaults.set(self.gcpCreditBaselineTimestamp, forKey: "agy_gcpCreditBaselineTimestamp")
+            self.gcpCreditBaselineNeedsMigration = false
+        } else if self.gcpCreditPool > 0.0 && self.gcpCreditBaselineTimestamp > 0.0 {
+            if !loadedStats.gcpSpendEntries.isEmpty {
+                let truePreBaselineCost = loadedStats.gcpSpendEntries
+                    .filter { $0.timestamp <= self.gcpCreditBaselineTimestamp }
+                    .reduce(0.0) { $0 + $1.cost }
+                if abs(self.gcpCreditBaselineCost - truePreBaselineCost) > 0.0001 {
+                    self.gcpCreditBaselineCost = truePreBaselineCost
+                    self.userDefaults.set(truePreBaselineCost, forKey: "agy_gcpCreditBaselineCost")
+                }
+            } else if loadedStats.gcpTotalCost > 0.0 && (self.gcpCreditBaselineCost == 0.0 || self.gcpCreditBaselineCost > loadedStats.gcpTotalCost) && self.gcpCreditPool != 300.0 {
+                self.gcpCreditBaselineCost = loadedStats.gcpTotalCost
+                self.userDefaults.set(loadedStats.gcpTotalCost, forKey: "agy_gcpCreditBaselineCost")
+            }
+        }
+    }
+    
+    // GCP Credit remaining & consumed calculations based on timestamp-anchored baseline snapshot
     public var gcpCostSinceBaseline: Double {
         guard gcpCreditPool > 0.0 else { return 0.0 }
+        if !stats.gcpSpendEntries.isEmpty && gcpCreditBaselineTimestamp > 0.0 {
+            return stats.gcpSpendEntries
+                .filter { $0.timestamp > gcpCreditBaselineTimestamp }
+                .reduce(0.0) { $0 + $1.cost }
+        }
         return max(0.0, stats.gcpTotalCost - gcpCreditBaselineCost)
     }
     
@@ -332,15 +369,17 @@ public final class AgyStatsViewModel {
         }
         
         if let rawPoolObj = userDefaults.object(forKey: "agy_gcpCreditPool") {
+            let rawVal: Double
             if let d = rawPoolObj as? Double {
-                self.gcpCreditPool = d
+                rawVal = d
             } else if let num = rawPoolObj as? NSNumber {
-                self.gcpCreditPool = num.doubleValue
+                rawVal = num.doubleValue
             } else if let str = rawPoolObj as? String, let parsed = Double(str.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                self.gcpCreditPool = parsed
+                rawVal = parsed
             } else {
-                self.gcpCreditPool = userDefaults.double(forKey: "agy_gcpCreditPool")
+                rawVal = userDefaults.double(forKey: "agy_gcpCreditPool")
             }
+            self.gcpCreditPool = (rawVal * 100.0).rounded() / 100.0
         } else {
             self.gcpCreditPool = 300.0
         }
@@ -883,16 +922,7 @@ public final class AgyStatsViewModel {
             if self.isConnected != connected {
                 self.isConnected = connected
             }
-            if self.gcpCreditBaselineNeedsMigration && loadedStats.gcpTotalCost > 0.0 {
-                self.gcpCreditBaselineCost = loadedStats.gcpTotalCost
-                self.gcpCreditBaselineTimestamp = Date().timeIntervalSince1970
-                self.userDefaults.set(loadedStats.gcpTotalCost, forKey: "agy_gcpCreditBaselineCost")
-                self.userDefaults.set(self.gcpCreditBaselineTimestamp, forKey: "agy_gcpCreditBaselineTimestamp")
-                self.gcpCreditBaselineNeedsMigration = false
-            } else if self.gcpCreditBaselineTimestamp > 0.0 && self.gcpCreditBaselineCost == 0.0 && loadedStats.gcpTotalCost > 0.0 && self.gcpCreditPool > 0.0 && self.gcpCreditPool != 300.0 {
-                self.gcpCreditBaselineCost = loadedStats.gcpTotalCost
-                self.userDefaults.set(loadedStats.gcpTotalCost, forKey: "agy_gcpCreditBaselineCost")
-            }
+            self.reconcileGcpBaseline(with: loadedStats)
             self.isRefreshing = false
         }
     }

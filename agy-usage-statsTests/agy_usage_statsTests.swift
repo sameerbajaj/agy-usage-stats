@@ -595,13 +595,13 @@ struct agy_usage_statsTests {
         let argonHigh = knownModels.first { $0.name == "Gemini 4 Argon (High)" }
         #expect(argonHigh != nil)
         #expect(argonHigh?.inputPricePerMillion == 2.00)
-        #expect(argonHigh?.outputPricePerMillion == 10.00)
-        #expect(argonHigh?.cachedInputPricePerMillion == 0.10)
+        #expect(argonHigh?.outputPricePerMillion == 12.00)
+        #expect(argonHigh?.cachedInputPricePerMillion == 0.50)
 
         let argonLow = knownModels.first { $0.name == "Gemini 4 Argon (Low)" }
         #expect(argonLow != nil)
         #expect(argonLow?.inputPricePerMillion == 2.00)
-        #expect(argonLow?.outputPricePerMillion == 10.00)
+        #expect(argonLow?.outputPricePerMillion == 12.00)
 
         // Claude Sonnet 5.5
         let sonnet55High = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }
@@ -636,12 +636,12 @@ struct agy_usage_statsTests {
             modelName: nil
         )
 
-        // Argon: 100k * $2/M ($0.20) + 50k * $0.10/M ($0.005) + 10k * $10/M ($0.10) = $0.305
+        // Argon: 100k * $2/M ($0.20) + 50k * $0.50/M ($0.025) + 10k * $12/M ($0.12) = $0.345
         let argon = knownModels.first { $0.name == "Gemini 4 Argon (High)" }!
         let argonResult = argon.estimateTokensAndCost(for: query)
         #expect(argonResult.inputTokens == 150_000)
         #expect(argonResult.outputTokens == 10_000)
-        #expect(abs(argonResult.cost - 0.305) < 0.0001)
+        #expect(abs(argonResult.cost - 0.345) < 0.0001)
 
         // Sonnet 5.5: 100k * $2/M ($0.20) + 50k * $0.20/M ($0.010) + 10k * $10/M ($0.10) = $0.310
         let sonnet55 = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }!
@@ -1105,6 +1105,65 @@ struct agy_usage_statsTests {
 
         #expect(vm.gcpCreditBaselineCost == 5.78)
         #expect(vm.gcpCreditRemaining == 199.86)
+    }
+
+    @Test func testGcpCreditPoolTimestampAnchoredDeductionImmuneToHistoricalBaselineShift() {
+        let suiteName = "test-timestamp-baseline-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+
+        // Simulate stale inflated baseline cost ($17.40) recorded before historical attribution bugfix
+        let baselineTs: Double = 1792954228.0
+        defaults.set(179.56, forKey: "agy_gcpCreditPool")
+        defaults.set(17.40, forKey: "agy_gcpCreditBaselineCost")
+        defaults.set(baselineTs, forKey: "agy_gcpCreditBaselineTimestamp")
+
+        let vm = AgyStatsViewModel(userDefaults: defaults)
+        #expect(vm.gcpCreditPool == 179.56)
+        #expect(vm.gcpCreditBaselineCost == 17.40)
+        #expect(vm.gcpCreditBaselineTimestamp == baselineTs)
+
+        // True pre-baseline GCP cost is $13.11, plus $0.09 spent after baselineTs ($13.20 total)
+        var loadedStats = AgyUsageStats.empty
+        loadedStats.gcpTotalCost = 13.20
+        loadedStats.gcpTodayCost = 0.09
+        loadedStats.gcpSpendEntries = [
+            GcpSpendEntry(timestamp: baselineTs - 86400.0, cost: 13.11),
+            GcpSpendEntry(timestamp: baselineTs + 3600.0, cost: 0.09)
+        ]
+
+        vm.stats = loadedStats
+        vm.reconcileGcpBaseline(with: loadedStats)
+
+        // Baseline self-heals to $13.11 and $0.09 post-baseline spend is accurately deducted from $179.56
+        #expect(abs(vm.gcpCreditBaselineCost - 13.11) < 0.001)
+        #expect(abs(vm.gcpCostSinceBaseline - 0.09) < 0.001)
+        #expect(abs(vm.gcpCreditRemaining - 179.47) < 0.001)
+    }
+
+    @Test func testGcpCreditPoolNoOpReassignmentDoesNotWipeBaseline() {
+        let suiteName = "test-noop-pool-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+
+        // Simulate 32-bit float precision stored in plist ("179.559998")
+        let baselineTs: Double = 1792954228.0
+        defaults.set("179.559998", forKey: "agy_gcpCreditPool")
+        defaults.set(13.11, forKey: "agy_gcpCreditBaselineCost")
+        defaults.set(baselineTs, forKey: "agy_gcpCreditBaselineTimestamp")
+
+        let vm = AgyStatsViewModel(userDefaults: defaults)
+        #expect(vm.gcpCreditPool == 179.56)
+
+        vm.stats.gcpTotalCost = 13.20
+        vm.stats.gcpSpendEntries = [
+            GcpSpendEntry(timestamp: baselineTs - 86400.0, cost: 13.11),
+            GcpSpendEntry(timestamp: baselineTs + 3600.0, cost: 0.09)
+        ]
+
+        // Re-assigning the same value (e.g. when Settings TextField loses focus) must NOT reset baseline
+        vm.gcpCreditPool = 179.56
+        #expect(vm.gcpCreditBaselineTimestamp == baselineTs)
+        #expect(abs(vm.gcpCostSinceBaseline - 0.09) < 0.001)
+        #expect(abs(vm.gcpCreditRemaining - 179.47) < 0.001)
     }
 
     @Test func testGcpIconPresentation() {

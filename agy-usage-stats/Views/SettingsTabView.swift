@@ -231,9 +231,15 @@ struct SettingsTabView: View {
                         Text("GCP Remaining Credit ($)")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("0 = unlimited spend tracking (no pool bar)")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
+                        if viewModel.gcpCreditPool > 0 && viewModel.gcpCostSinceBaseline > 0 {
+                            Text(String(format: "$%.2f left ($%.2f used since baseline)", viewModel.gcpCreditRemaining, viewModel.gcpCostSinceBaseline))
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.costGreen)
+                        } else {
+                            Text("0 = unlimited spend tracking (no pool bar)")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
                     }
                     Spacer()
                     TextField("0", value: $viewModel.gcpCreditPool, format: .number)
