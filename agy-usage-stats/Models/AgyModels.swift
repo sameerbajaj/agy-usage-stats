@@ -143,7 +143,10 @@ public struct ToolStat: Identifiable, Codable, Hashable {
     }
 }
 
-public struct AgyQuotaBucket: Identifiable, Codable, Hashable, Sendable {
+public typealias ModelQuotaBucket = AgyQuotaBucket
+public typealias ModelQuotaGroup = AgyQuotaGroup
+
+public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hashable, Sendable {
     public var id: String { bucketId }
     public let bucketId: String
     public let displayName: String
@@ -151,13 +154,70 @@ public struct AgyQuotaBucket: Identifiable, Codable, Hashable, Sendable {
     public let resetDescription: String?
     public let disabled: Bool
     public let resetTime: String?
+
+    public init(
+        bucketId: String,
+        displayName: String,
+        remainingFraction: Double? = nil,
+        resetDescription: String? = nil,
+        disabled: Bool = false,
+        resetTime: String? = nil
+    ) {
+        self.bucketId = bucketId
+        self.displayName = displayName
+        self.remainingFraction = remainingFraction
+        self.resetDescription = resetDescription
+        self.disabled = disabled
+        self.resetTime = resetTime
+    }
+
+    public var parsedResetDate: Date? {
+        guard let resetTime = resetTime else { return nil }
+        return AgyQuotaInfo.parseResetTime(resetTime)
+    }
+
+    public func normalizedForCurrentTime(now: Date = Date()) -> AgyQuotaBucket {
+        guard let resetDate = parsedResetDate, resetDate <= now else {
+            return self
+        }
+        if (remainingFraction ?? 0.0) < 1.0 {
+            return AgyQuotaBucket(
+                bucketId: bucketId,
+                displayName: displayName,
+                remainingFraction: 1.0,
+                resetDescription: resetDescription,
+                disabled: disabled,
+                resetTime: nil
+            )
+        }
+        return self
+    }
 }
 
-public struct AgyQuotaGroup: Identifiable, Codable, Hashable, Sendable {
+public struct AgyQuotaGroup: Identifiable, Codable, Equatable, Hashable, Sendable {
     public var id: String { displayName }
     public let displayName: String
     public let description: String?
     public let buckets: [AgyQuotaBucket]
+
+    public init(
+        displayName: String,
+        description: String? = nil,
+        buckets: [AgyQuotaBucket]
+    ) {
+        self.displayName = displayName
+        self.description = description
+        self.buckets = buckets
+    }
+
+    public func normalizedForCurrentTime(now: Date = Date()) -> AgyQuotaGroup {
+        let updatedBuckets = buckets.map { $0.normalizedForCurrentTime(now: now) }
+        return AgyQuotaGroup(
+            displayName: displayName,
+            description: description,
+            buckets: updatedBuckets
+        )
+    }
     
     public var sortedBuckets: [AgyQuotaBucket] {
         buckets.sorted { a, b in
@@ -198,10 +258,52 @@ public struct AgyQuotaGroup: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-public struct AgyQuotaInfo: Codable, Hashable, Sendable {
+public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
     public let email: String?
     public let plan: String?
     public let groups: [AgyQuotaGroup]
+
+    public init(
+        email: String? = nil,
+        plan: String? = nil,
+        groups: [AgyQuotaGroup]
+    ) {
+        self.email = email
+        self.plan = plan
+        self.groups = groups
+    }
+
+    private static let iso8601Formatter = ISO8601DateFormatter()
+    private static let iso8601FractionalFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    public static func parseResetTime(_ resetTime: String) -> Date? {
+        if let date = iso8601Formatter.date(from: resetTime) {
+            return date
+        }
+        if let date = iso8601FractionalFormatter.date(from: resetTime) {
+            return date
+        }
+        if let epoch = Double(resetTime) {
+            if epoch > 100_000_000_000 {
+                return Date(timeIntervalSince1970: epoch / 1000.0)
+            }
+            return Date(timeIntervalSince1970: epoch)
+        }
+        return nil
+    }
+
+    public func normalizedForCurrentTime(now: Date = Date()) -> AgyQuotaInfo {
+        let updatedGroups = groups.map { $0.normalizedForCurrentTime(now: now) }
+        return AgyQuotaInfo(
+            email: email,
+            plan: plan,
+            groups: updatedGroups
+        )
+    }
 }
 
 public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {

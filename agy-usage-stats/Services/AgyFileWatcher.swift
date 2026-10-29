@@ -132,9 +132,9 @@ public final class AgyFileWatcher {
                 gdSource.resume()
             }
             
-            // 5. Low-overhead background fallback timer (4.0s)
+            // 5. Low-overhead background fallback timer (15.0s with 3s leeway)
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
-            timer.schedule(deadline: .now() + 4.0, repeating: 4.0)
+            timer.schedule(deadline: .now() + 15.0, repeating: 15.0, leeway: .seconds(3))
             timer.setEventHandler { [weak self] in
                 self?.checkFile()
             }

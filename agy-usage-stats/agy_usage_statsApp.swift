@@ -48,8 +48,7 @@ struct agy_usage_statsApp: App {
 // MARK: - Menu Bar Label
 
 struct MenuBarLabel: View {
-    let viewModel: AgyStatsViewModel
-    @State private var refreshTrigger = false
+    var viewModel: AgyStatsViewModel
 
     private var statusColor: Color {
         var fractions: [Double] = []
@@ -83,16 +82,9 @@ struct MenuBarLabel: View {
     var body: some View {
         Image(nsImage: viewModel.makeMenuBarImage(litColor: statusColor))
             .help(menuBarTooltip)
-            .id(refreshTrigger)
             .onAppear {
-                // Trigger stats loading on label launch
+                // Trigger stats loading and adaptive quota polling on label launch
                 viewModel.setup()
-            }
-            .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
-                refreshTrigger.toggle()
-                Task {
-                    await viewModel.refreshQuotaOnly()
-                }
             }
     }
 

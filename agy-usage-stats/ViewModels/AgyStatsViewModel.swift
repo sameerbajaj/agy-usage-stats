@@ -489,9 +489,11 @@ public final class AgyStatsViewModel {
 
         // 1. Inspect recent query activity across all active terminals and sessions.
         // Queries from the last 2 hours (or the most recent 15 queries) tell us what is actively running.
+        // Consumer box queries ONLY (!q.isGcp): GCP credit queries must never hijack subscription model/quota!
+        let consumerQueries = stats.recentQueries.filter { !$0.isGcp }
         let recentCutoff = Date().addingTimeInterval(-2 * 3600)
-        let activeQueries = stats.recentQueries.filter { $0.timestamp >= recentCutoff }
-        let queriesToInspect = activeQueries.isEmpty ? Array(stats.recentQueries.prefix(15)) : activeQueries
+        let activeQueries = consumerQueries.filter { $0.timestamp >= recentCutoff }
+        let queriesToInspect = activeQueries.isEmpty ? Array(consumerQueries.prefix(15)) : activeQueries
 
         var activeGroups: [AgyQuotaGroup] = []
         for q in queriesToInspect {
@@ -526,7 +528,8 @@ public final class AgyStatsViewModel {
     }
 
     public var activeModelDisplayName: String {
-        if let firstQ = stats.recentQueries.first, firstQ.isGcp, let specificName = firstQ.modelName {
+        let consumerQueries = stats.recentQueries.filter { !$0.isGcp }
+        if consumerQueries.isEmpty, let firstQ = stats.recentQueries.first, firstQ.isGcp, let specificName = firstQ.modelName {
             return "\(specificName) (GCP)"
         }
 
@@ -535,15 +538,12 @@ public final class AgyStatsViewModel {
         }
 
         let groupName = group.displayName.lowercased()
-        let matchingQuery = stats.recentQueries.first { q in
+        let matchingQuery = consumerQueries.first { q in
             guard let m = q.modelName?.lowercased() else { return false }
             return ((m.contains("gemini") || m.contains("argon")) && (groupName.contains("gemini") || groupName.contains("argon"))) ||
                    ((m.contains("claude") || m.contains("sonnet") || m.contains("opus") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt") || groupName.contains("openai") || groupName.contains("anthropic") || groupName.contains("sonnet") || groupName.contains("opus")))
         }
         if let specificName = matchingQuery?.modelName {
-            if matchingQuery?.isGcp == true {
-                return "\(specificName) (GCP)"
-            }
             return specificName
         }
 
@@ -847,7 +847,22 @@ public final class AgyStatsViewModel {
     }
     
     private var isSetup = false
+    private var quotaPollingTimer: Timer?
     private var quotaPollingTask: Task<Void, Never>?
+    private var lastFileChangedAt: Date?
+    
+    public var isRecentlyActive: Bool {
+        if let lastFile = lastFileChangedAt, Date().timeIntervalSince(lastFile) < 120 {
+            return true
+        }
+        let lastQuery = stats.lastQueryAt ?? stats.recentQueries.first?.timestamp
+        guard let last = lastQuery else { return false }
+        return Date().timeIntervalSince(last) < 120
+    }
+    
+    public var adaptivePollingInterval: TimeInterval {
+        return isRecentlyActive ? 15.0 : 60.0
+    }
     
     public func setup() {
         guard !isSetup else { return }
@@ -856,17 +871,28 @@ public final class AgyStatsViewModel {
         // Start watching for file changes with instant response
         watcher.cliDirOverride = cliDir
         watcher.onFileChanged = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.lastFileChangedAt = Date()
+                self?.scheduleAdaptiveQuotaPolling()
+            }
             Task { [weak self] in
-                AgyQuotaService.clearCache()
+                // Do NOT block UI updates waiting on slow network timeouts or clear verified quota.
+                // Refresh stats immediately, preserving existing quotaInfo.
                 await self?.refresh()
+                await MainActor.run { [weak self] in
+                    self?.scheduleAdaptiveQuotaPolling()
+                }
                 // Fast follow-up: language server quota accounting may take 1-2s to settle after streaming
                 try? await Task.sleep(nanoseconds: 1_800_000_000)
                 await self?.refreshQuotaOnly(forceRefresh: true)
+                await MainActor.run { [weak self] in
+                    self?.scheduleAdaptiveQuotaPolling()
+                }
             }
         }
         watcher.start()
         
-        // Start adaptive background quota polling
+        // Start adaptive background quota polling (15s active, 60s idle, 5s tolerance)
         startAdaptiveQuotaPolling()
         
         // Initial load
@@ -877,17 +903,28 @@ public final class AgyStatsViewModel {
     }
     
     public func startAdaptiveQuotaPolling() {
+        scheduleAdaptiveQuotaPolling()
+    }
+    
+    public func stopAdaptiveQuotaPolling() {
+        quotaPollingTimer?.invalidate()
+        quotaPollingTimer = nil
         quotaPollingTask?.cancel()
-        quotaPollingTask = Task { [weak self] in
-            while !Task.isCancelled {
-                // Adaptive interval: 4s when active session port is known, 25s when idle
-                let hasActive = AgyQuotaService.hasActiveSession
-                let intervalSeconds: UInt64 = hasActive ? 4 : 25
-                try? await Task.sleep(nanoseconds: intervalSeconds * 1_000_000_000)
-                if Task.isCancelled { break }
+        quotaPollingTask = nil
+    }
+    
+    public func scheduleAdaptiveQuotaPolling() {
+        quotaPollingTimer?.invalidate()
+        let interval = adaptivePollingInterval
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
                 await self?.refreshQuotaOnly()
+                self?.scheduleAdaptiveQuotaPolling()
             }
         }
+        timer.tolerance = 5.0
+        RunLoop.main.add(timer, forMode: .common)
+        quotaPollingTimer = timer
     }
     
     /// Fast-path quota refresh without re-reading or parsing history files (<1ms localhost request)
@@ -907,14 +944,18 @@ public final class AgyStatsViewModel {
             isRefreshing = true
         }
         
-        let (loadedStats, loadedSettings) = await AgyStatsService.loadStats(cliDir: cliDir)
+        let (loadedStats, loadedSettings) = await AgyStatsService.loadStats(cliDir: cliDir, existingQuota: self.stats.quotaInfo)
         let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         let path = (expanded as NSString).appendingPathComponent("history.jsonl")
         let connected = FileManager.default.fileExists(atPath: path)
         
         await MainActor.run {
-            if self.stats != loadedStats {
-                self.stats = loadedStats
+            var updatedStats = loadedStats
+            if updatedStats.quotaInfo == nil, let existingQuota = self.stats.quotaInfo {
+                updatedStats.quotaInfo = existingQuota
+            }
+            if self.stats != updatedStats {
+                self.stats = updatedStats
             }
             if self.settings != loadedSettings {
                 self.settings = loadedSettings
@@ -924,6 +965,7 @@ public final class AgyStatsViewModel {
             }
             self.reconcileGcpBaseline(with: loadedStats)
             self.isRefreshing = false
+            self.scheduleAdaptiveQuotaPolling()
         }
     }
     
@@ -935,6 +977,8 @@ public final class AgyStatsViewModel {
     
     deinit {
         watcher.stop()
+        quotaPollingTimer?.invalidate()
+        quotaPollingTimer = nil
         quotaPollingTask?.cancel()
     }
     

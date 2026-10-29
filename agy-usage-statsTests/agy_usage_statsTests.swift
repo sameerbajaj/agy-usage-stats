@@ -1565,6 +1565,284 @@ struct agy_usage_statsTests {
         await viewModel.refreshQuotaOnly(forceRefresh: false)
     }
 
+    // MARK: - Quota Service & Persistence Tests
+
+    private static let persistedKey = "agy.lastKnownSubscriptionQuota"
+
+    @Test
+    func testNormalizedForCurrentTimePromotesExpiredResetTimeAndPreservesFuture() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000) // Fixed reference date
+        let pastDate = now.addingTimeInterval(-3600) // 1 hour in the past
+        let futureDate = now.addingTimeInterval(7200) // 2 hours in the future
+
+        let isoFormatter = ISO8601DateFormatter()
+        let pastIsoString = isoFormatter.string(from: pastDate)
+        let futureIsoString = isoFormatter.string(from: futureDate)
+
+        let expiredBucket = AgyQuotaBucket(
+            bucketId: "gemini-5h",
+            displayName: "5-Hour Limit",
+            remainingFraction: 0.15,
+            resetDescription: "Resets in 1 hour",
+            disabled: false,
+            resetTime: pastIsoString
+        )
+
+        let futureBucket = AgyQuotaBucket(
+            bucketId: "gemini-weekly",
+            displayName: "Weekly Limit",
+            remainingFraction: 0.72,
+            resetDescription: "Resets in 2 days",
+            disabled: false,
+            resetTime: futureIsoString
+        )
+
+        let intactBucket = AgyQuotaBucket(
+            bucketId: "claude-weekly",
+            displayName: "Weekly Limit",
+            remainingFraction: 1.0,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+
+        let group = AgyQuotaGroup(
+            displayName: "Gemini",
+            description: "Gemini Quota Group",
+            buckets: [expiredBucket, futureBucket, intactBucket]
+        )
+
+        let quotaInfo = AgyQuotaInfo(
+            email: "engineer@company.internal",
+            plan: "Antigravity Pro",
+            groups: [group]
+        )
+
+        let normalized = quotaInfo.normalizedForCurrentTime(now: now)
+        #expect(normalized.groups.count == 1)
+
+        let normBuckets = normalized.groups[0].buckets
+        #expect(normBuckets.count == 3)
+
+        // 1. Expired bucket must be promoted to 1.0 and have resetTime cleared to nil
+        let normExpired = normBuckets.first(where: { $0.bucketId == "gemini-5h" })
+        #expect(normExpired != nil)
+        #expect(normExpired?.remainingFraction == 1.0)
+        #expect(normExpired?.resetTime == nil)
+
+        // 2. Future bucket must preserve its remainingFraction and resetTime
+        let normFuture = normBuckets.first(where: { $0.bucketId == "gemini-weekly" })
+        #expect(normFuture != nil)
+        #expect(normFuture?.remainingFraction == 0.72)
+        #expect(normFuture?.resetTime == futureIsoString)
+
+        // 3. Intact bucket remains 1.0 and nil
+        let normIntact = normBuckets.first(where: { $0.bucketId == "claude-weekly" })
+        #expect(normIntact != nil)
+        #expect(normIntact?.remainingFraction == 1.0)
+        #expect(normIntact?.resetTime == nil)
+    }
+
+    @Test
+    func testNormalizedForCurrentTimeWithFractionalSecondsAndEpoch() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let pastDate = now.addingTimeInterval(-120)
+
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let pastFractionalString = fractionalFormatter.string(from: pastDate)
+
+        let bucketWithFractional = AgyQuotaBucket(
+            bucketId: "b-frac",
+            displayName: "Fractional",
+            remainingFraction: 0.45,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: pastFractionalString
+        )
+
+        let normFractional = bucketWithFractional.normalizedForCurrentTime(now: now)
+        #expect(normFractional.remainingFraction == 1.0)
+        #expect(normFractional.resetTime == nil)
+
+        let pastEpochString = String(format: "%.3f", pastDate.timeIntervalSince1970)
+        let bucketWithEpoch = AgyQuotaBucket(
+            bucketId: "b-epoch",
+            displayName: "Epoch",
+            remainingFraction: 0.30,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: pastEpochString
+        )
+
+        let normEpoch = bucketWithEpoch.normalizedForCurrentTime(now: now)
+        #expect(normEpoch.remainingFraction == 1.0)
+        #expect(normEpoch.resetTime == nil)
+    }
+
+    @Test
+    func testSavePersistedQuotaAndLoadPersistedQuotaRoundTrip() {
+        let existingBackup = UserDefaults.standard.data(forKey: Self.persistedKey)
+        defer {
+            if let backup = existingBackup {
+                UserDefaults.standard.set(backup, forKey: Self.persistedKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.persistedKey)
+            }
+        }
+
+        let bucket = AgyQuotaBucket(
+            bucketId: "roundtrip-bucket",
+            displayName: "Roundtrip Bucket",
+            remainingFraction: 0.88,
+            resetDescription: "No reset pending",
+            disabled: false,
+            resetTime: nil
+        )
+        let group = AgyQuotaGroup(
+            displayName: "Roundtrip Group",
+            description: nil,
+            buckets: [bucket]
+        )
+        let originalInfo = AgyQuotaInfo(
+            email: "roundtrip@company.internal",
+            plan: "Team Quota",
+            groups: [group]
+        )
+
+        // Save through AgyQuotaService
+        AgyQuotaService.savePersistedQuota(originalInfo)
+
+        // In-memory property should immediately reflect saved value
+        #expect(AgyQuotaService.lastKnownSubscriptionQuota == originalInfo)
+
+        // Load persisted quota (with no expired reset time, should equal original exactly)
+        let loaded = AgyQuotaService.loadPersistedQuota()
+        #expect(loaded == originalInfo)
+    }
+
+    @Test
+    func testClearCachePreservesPersistedFallback() {
+        let existingBackup = UserDefaults.standard.data(forKey: Self.persistedKey)
+        defer {
+            if let backup = existingBackup {
+                UserDefaults.standard.set(backup, forKey: Self.persistedKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.persistedKey)
+            }
+        }
+
+        let bucket = AgyQuotaBucket(
+            bucketId: "sticky-bucket",
+            displayName: "Sticky Limit",
+            remainingFraction: 0.65,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+        let group = AgyQuotaGroup(displayName: "Sticky Group", buckets: [bucket])
+        let originalInfo = AgyQuotaInfo(email: "sticky@company.internal", plan: "Pro", groups: [group])
+
+        AgyQuotaService.savePersistedQuota(originalInfo)
+
+        // Clear cache with clearActivePort: true
+        AgyQuotaService.clearCache(clearActivePort: true)
+
+        // active session should be cleared
+        #expect(!AgyQuotaService.hasActiveSession)
+        #expect(AgyQuotaService.activePort == nil)
+
+        // In-memory lastKnownSubscriptionQuota must NOT be erased by clearCache
+        #expect(AgyQuotaService.lastKnownSubscriptionQuota == originalInfo)
+
+        // UserDefaults persisted quota must NOT be erased by clearCache
+        let loaded = AgyQuotaService.loadPersistedQuota()
+        #expect(loaded == originalInfo)
+    }
+
+    @Test
+    func testLoadPersistedQuotaNormalizesExpiredWindowsAutomatically() {
+        let existingBackup = UserDefaults.standard.data(forKey: Self.persistedKey)
+        defer {
+            if let backup = existingBackup {
+                UserDefaults.standard.set(backup, forKey: Self.persistedKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.persistedKey)
+            }
+        }
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let pastDate = now.addingTimeInterval(-1800) // 30 minutes in the past
+        let pastIsoString = ISO8601DateFormatter().string(from: pastDate)
+
+        let bucket = AgyQuotaBucket(
+            bucketId: "expired-on-disk",
+            displayName: "5-Hour Limit",
+            remainingFraction: 0.05,
+            resetDescription: "Expired window",
+            disabled: false,
+            resetTime: pastIsoString
+        )
+        let group = AgyQuotaGroup(displayName: "Gemini", buckets: [bucket])
+        let unnormalizedInfo = AgyQuotaInfo(email: "expired@test.com", plan: "Pro", groups: [group])
+
+        AgyQuotaService.savePersistedQuota(unnormalizedInfo)
+
+        // When loaded with now, it must automatically promote to 1.0 and clear resetTime
+        let loaded = AgyQuotaService.loadPersistedQuota(now: now)
+        #expect(loaded != nil)
+        let loadedBucket = loaded?.groups.first?.buckets.first
+        #expect(loadedBucket?.remainingFraction == 1.0)
+        #expect(loadedBucket?.resetTime == nil)
+    }
+
+    @Test
+    func testModelQuotaTypealiasesConformToCodableAndEquatable() throws {
+        let bucket = ModelQuotaBucket(
+            bucketId: "alias-b",
+            displayName: "Alias Bucket",
+            remainingFraction: 0.5,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+        let group = ModelQuotaGroup(displayName: "Alias Group", buckets: [bucket])
+        let info = AgyQuotaInfo(email: nil, plan: nil, groups: [group])
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(info)
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(AgyQuotaInfo.self, from: data)
+
+        #expect(decoded == info)
+        #expect(decoded.groups[0] == group)
+        #expect(decoded.groups[0].buckets[0] == bucket)
+    }
+
+    @Test
+    func testQuotaServiceFetchAndPersistedQuotaNeverDeadlocks() async {
+        let existingBackup = UserDefaults.standard.data(forKey: Self.persistedKey)
+        defer {
+            if let backup = existingBackup {
+                UserDefaults.standard.set(backup, forKey: Self.persistedKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.persistedKey)
+            }
+        }
+
+        AgyQuotaService.clearCache(clearActivePort: true)
+        _ = AgyQuotaService.loadPersistedQuota()
+
+        // Calling fetchQuota with forceRefresh: true will discover ports or fallback to loadPersistedQuotaUnlocked,
+        // which must NEVER deadlock on quotaLock.
+        let quota = await AgyQuotaService.fetchQuota(forceRefresh: true)
+        _ = quota
+
+        AgyQuotaService.clearCache(clearActivePort: true)
+        let loaded = AgyQuotaService.loadPersistedQuota()
+        _ = loaded
+    }
+
     // MARK: - Update Checker Anti-Loop Tests
 
     @Test func testUpdateCheckerIsNewerSemanticComparison() {

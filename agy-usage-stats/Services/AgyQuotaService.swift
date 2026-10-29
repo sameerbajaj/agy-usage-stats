@@ -117,10 +117,40 @@ public actor AgyQuotaService {
         let timestamp: Date
     }
 
+    private struct CachedPorts {
+        let ports: [Int]
+        let portToCsrf: [Int: String]
+        let timestamp: Date
+    }
+
+    private static let persistedQuotaKey = "agy.lastKnownSubscriptionQuota"
+    private static var _lastKnownSubscriptionQuota: AgyQuotaInfo? = {
+        if let data = UserDefaults.standard.data(forKey: persistedQuotaKey),
+           let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
+            return decoded
+        }
+        return nil
+    }()
+
+    public static var lastKnownSubscriptionQuota: AgyQuotaInfo? {
+        get {
+            quotaLock.lock()
+            defer { quotaLock.unlock() }
+            return _lastKnownSubscriptionQuota
+        }
+        set {
+            quotaLock.lock()
+            _lastKnownSubscriptionQuota = newValue
+            quotaLock.unlock()
+        }
+    }
+
     private static var lastActivePort: Int? = nil
     private static var cachedQuota: CachedQuota? = nil
+    private static var cachedDetectedPorts: CachedPorts? = nil
     private static let cacheTTL: TimeInterval = 4.0
     private static let nilCacheTTL: TimeInterval = 15.0
+    private static let portsCacheTTL: TimeInterval = 5.0
     private static let quotaLock = NSLock()
 
     public static var hasActiveSession: Bool {
@@ -144,9 +174,34 @@ public actor AgyQuotaService {
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }()
 
+    private static func loadPersistedQuotaUnlocked(now: Date = Date()) -> AgyQuotaInfo? {
+        if let data = UserDefaults.standard.data(forKey: persistedQuotaKey),
+           let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
+            _lastKnownSubscriptionQuota = decoded
+            return decoded.normalizedForCurrentTime(now: now)
+        }
+        return _lastKnownSubscriptionQuota?.normalizedForCurrentTime(now: now)
+    }
+
+    public static func loadPersistedQuota(now: Date = Date()) -> AgyQuotaInfo? {
+        quotaLock.lock()
+        defer { quotaLock.unlock() }
+        return loadPersistedQuotaUnlocked(now: now)
+    }
+
+    public static func savePersistedQuota(_ info: AgyQuotaInfo) {
+        quotaLock.lock()
+        _lastKnownSubscriptionQuota = info
+        quotaLock.unlock()
+        if let data = try? JSONEncoder().encode(info) {
+            UserDefaults.standard.set(data, forKey: persistedQuotaKey)
+        }
+    }
+
     public static func clearCache(clearActivePort: Bool = false) {
         quotaLock.lock()
         cachedQuota = nil
+        cachedDetectedPorts = nil
         if clearActivePort {
             lastActivePort = nil
         }
@@ -159,7 +214,7 @@ public actor AgyQuotaService {
             if let cached = cachedQuota {
                 let ttl = cached.info != nil ? cacheTTL : nilCacheTTL
                 if Date().timeIntervalSince(cached.timestamp) < ttl {
-                    let info = cached.info
+                    let info = cached.info?.normalizedForCurrentTime()
                     quotaLock.unlock()
                     return info
                 }
@@ -175,6 +230,7 @@ public actor AgyQuotaService {
 
             if let port = knownPort {
                 if let info = await fetchFromPort(port), !info.groups.isEmpty {
+                    savePersistedQuota(info)
                     quotaLock.lock()
                     cachedQuota = CachedQuota(info: info, timestamp: Date())
                     quotaLock.unlock()
@@ -182,14 +238,15 @@ public actor AgyQuotaService {
                 }
             }
 
-            let detectedPorts = detectAgyPorts()
+            let detectedPorts = detectAgyPorts(forceRefresh: forceRefresh)
             let portsToProbe = detectedPorts.filter { $0 != knownPort }
             guard !portsToProbe.isEmpty else {
                 quotaLock.lock()
                 lastActivePort = nil
-                cachedQuota = CachedQuota(info: nil, timestamp: Date())
+                let fallback = (cachedQuota?.info ?? _lastKnownSubscriptionQuota ?? loadPersistedQuotaUnlocked())?.normalizedForCurrentTime()
+                cachedQuota = CachedQuota(info: fallback, timestamp: Date())
                 quotaLock.unlock()
-                return nil
+                return fallback
             }
 
             // Probe detected ports in parallel until a group-bearing result arrives
@@ -202,18 +259,14 @@ public actor AgyQuotaService {
                 lastActivePort = port
                 cachedQuota = CachedQuota(info: info, timestamp: Date())
                 quotaLock.unlock()
+                savePersistedQuota(info)
                 return info
             } else {
-                if let prevInfo = cachedQuota?.info, !prevInfo.groups.isEmpty {
-                    // Retain previously verified subscription quota so the menu bar doesn't abruptly drop to empty
-                    cachedQuota = CachedQuota(info: prevInfo, timestamp: Date())
-                    quotaLock.unlock()
-                    return prevInfo
-                }
                 lastActivePort = nil
-                cachedQuota = CachedQuota(info: nil, timestamp: Date())
+                let fallback = (cachedQuota?.info ?? _lastKnownSubscriptionQuota ?? loadPersistedQuotaUnlocked())?.normalizedForCurrentTime()
+                cachedQuota = CachedQuota(info: fallback, timestamp: Date())
                 quotaLock.unlock()
-                return nil
+                return fallback
             }
         }.value
     }
@@ -239,78 +292,119 @@ public actor AgyQuotaService {
         }
     }
 
-    private static func detectAgyPorts() -> [Int] {
+    public static func detectAgyPorts(forceRefresh: Bool = false) -> [Int] {
+        quotaLock.lock()
+        if !forceRefresh, let cached = cachedDetectedPorts, Date().timeIntervalSince(cached.timestamp) < portsCacheTTL {
+            let ports = cached.ports
+            quotaLock.unlock()
+            return ports
+        }
+        quotaLock.unlock()
+
         let lsofPath = ["/usr/sbin/lsof", "/usr/bin/lsof"].first(where: {
             FileManager.default.isExecutableFile(atPath: $0)
         }) ?? "/usr/sbin/lsof"
 
-        // Fast path: Ask lsof directly for listening sockets owned by 'agy' process
-        if let directOutput = runCommand(executable: lsofPath, arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-c", "agy", "-a"]),
-           !directOutput.isEmpty {
-            let ports = parseListeningPorts(directOutput)
-            if !ports.isEmpty {
-                return ports
-            }
-        }
-
-        // Fallback: Query via ps if -c agy didn't match
-        guard let psOutput = runCommand(executable: "/bin/ps", arguments: ["-ax", "-o", "pid=,command="]) else {
+        guard let lsofOutput = runCommand(
+            executable: lsofPath,
+            arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-c", "agy", "-c", "language_server"]
+        ), !lsofOutput.isEmpty else {
+            quotaLock.lock()
+            cachedDetectedPorts = CachedPorts(ports: [], portToCsrf: [:], timestamp: Date())
+            quotaLock.unlock()
             return []
         }
 
-        let lines = psOutput.components(separatedBy: .newlines)
-        var pids: [Int] = []
+        struct DiscoveredPort {
+            let pid: Int
+            let port: Int
+            let is10u: Bool
+        }
+
+        var discovered: [DiscoveredPort] = []
+        var candidatePids = Set<Int>()
+        let lines = lsofOutput.components(separatedBy: .newlines)
+        let listenRegex = try? NSRegularExpression(pattern: #":(\d+)\s+\(LISTEN\)"#)
+
         for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-            guard parts.count == 2, let pid = Int(parts[0]) else { continue }
-            let command = String(parts[1]).lowercased()
+            let tokens = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard tokens.count >= 2, let pid = Int(tokens[1]) else { continue }
 
-            // Check if it's agy CLI or language server (exclude tmux and stats app)
-            if (command.contains("agy") || command.contains("language_server") || command.contains("language-server")) &&
-               !command.contains("agy-usage-stats") && !command.contains("tmux") {
-                pids.append(pid)
-            }
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            guard let match = listenRegex?.firstMatch(in: line, options: [], range: range),
+                  let portRange = Range(match.range(at: 1), in: line),
+                  let port = Int(line[portRange]) else { continue }
+
+            candidatePids.insert(pid)
+            discovered.append(DiscoveredPort(pid: pid, port: port, is10u: line.contains("10u")))
         }
 
-        guard !pids.isEmpty else { return [] }
-        pids.sort(by: >)
-
-        let pidArg = pids.prefix(25).map(String.init).joined(separator: ",")
-        guard let lsofOutput = runCommand(executable: lsofPath, arguments: ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", pidArg]) else {
+        guard !candidatePids.isEmpty else {
+            quotaLock.lock()
+            cachedDetectedPorts = CachedPorts(ports: [], portToCsrf: [:], timestamp: Date())
+            quotaLock.unlock()
             return []
         }
 
-        return parseListeningPorts(lsofOutput)
-    }
+        // Run at most ONE batched ps call to filter out .agy-gcp-home and extract CSRF tokens
+        let pidArg = candidatePids.prefix(50).map(String.init).joined(separator: ",")
+        var gcpPids = Set<Int>()
+        var pidToCsrf: [Int: String] = [:]
 
-    private static func parseListeningPorts(_ output: String) -> [Int] {
-        // Line-based parsing: prioritize FD 10u lines (the Connect protocol HTTPS port on agy)
-        let lines = output.components(separatedBy: .newlines)
+        if let psOutput = runCommand(executable: "/bin/ps", arguments: ["-E", "-o", "pid=,command=", "-p", pidArg]) ??
+                          runCommand(executable: "/bin/ps", arguments: ["-o", "pid=,command=", "-p", pidArg]) {
+            let csrfRegex = try? NSRegularExpression(pattern: #"--csrf_token=([^\s]+)"#)
+            let envCsrfRegex = try? NSRegularExpression(pattern: #"ANTIGRAVITY_CSRF_TOKEN=([^\s]+)"#)
+
+            for psLine in psOutput.components(separatedBy: .newlines) {
+                let trimmed = psLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+                guard parts.count == 2, let pid = Int(parts[0]) else { continue }
+                let cmdAndEnv = String(parts[1])
+
+                if cmdAndEnv.contains(".agy-gcp-home") {
+                    gcpPids.insert(pid)
+                    continue
+                }
+
+                let range = NSRange(cmdAndEnv.startIndex..<cmdAndEnv.endIndex, in: cmdAndEnv)
+                if let match = csrfRegex?.firstMatch(in: cmdAndEnv, options: [], range: range),
+                   let tokenRange = Range(match.range(at: 1), in: cmdAndEnv) {
+                    pidToCsrf[pid] = String(cmdAndEnv[tokenRange])
+                } else if let match = envCsrfRegex?.firstMatch(in: cmdAndEnv, options: [], range: range),
+                          let tokenRange = Range(match.range(at: 1), in: cmdAndEnv) {
+                    pidToCsrf[pid] = String(cmdAndEnv[tokenRange])
+                }
+            }
+        }
+
         var primaryPorts: [Int] = []
         var secondaryPorts: [Int] = []
-        var seen = Set<Int>()
+        var seenPorts = Set<Int>()
+        var portToCsrf: [Int: String] = [:]
 
-        guard let regex = try? NSRegularExpression(pattern: #":(\d+)\s+\(LISTEN\)"#) else { return [] }
+        for item in discovered {
+            if gcpPids.contains(item.pid) { continue }
+            if seenPorts.contains(item.port) { continue }
+            seenPorts.insert(item.port)
 
-        for line in lines {
-            let range = NSRange(line.startIndex..<line.endIndex, in: line)
-            guard let match = regex.firstMatch(in: line, options: [], range: range),
-                  let portRange = Range(match.range(at: 1), in: line),
-                  let port = Int(line[portRange]),
-                  !seen.contains(port) else { continue }
-
-            seen.insert(port)
-            if line.contains("10u") {
-                primaryPorts.append(port)
+            if item.is10u {
+                primaryPorts.append(item.port)
             } else {
-                secondaryPorts.append(port)
+                secondaryPorts.append(item.port)
+            }
+
+            if let token = pidToCsrf[item.pid] {
+                portToCsrf[item.port] = token
             }
         }
 
-        // Return 10u ports first, followed by others
-        return primaryPorts + secondaryPorts
+        let ports = primaryPorts + secondaryPorts
+        quotaLock.lock()
+        cachedDetectedPorts = CachedPorts(ports: ports, portToCsrf: portToCsrf, timestamp: Date())
+        quotaLock.unlock()
+        return ports
     }
 
     private static func runCommand(executable: String, arguments: [String]) -> String? {
@@ -356,14 +450,22 @@ public actor AgyQuotaService {
         return nil
     }
 
+    public static func extractCsrfToken(forPort port: Int) -> String? {
+        quotaLock.lock()
+        let token = cachedDetectedPorts?.portToCsrf[port]
+        quotaLock.unlock()
+        return token ?? getCsrfToken()
+    }
+
     private static func fetchFromPort(_ port: Int) async -> AgyQuotaInfo? {
+
         // 1. Prepare RetrieveUserQuotaSummary
         guard let summaryUrl = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"),
               let statusUrl = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/GetUserStatus") else {
             return nil
         }
 
-        let csrfToken = getCsrfToken()
+        let csrfToken = extractCsrfToken(forPort: port) ?? getCsrfToken()
 
         var summaryRequest = URLRequest(url: summaryUrl)
         summaryRequest.httpMethod = "POST"

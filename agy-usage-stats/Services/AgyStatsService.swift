@@ -120,10 +120,12 @@ public enum AgyStatsService {
     public struct DirectoryContentSignature: Equatable, Sendable {
         public let latestModDate: Date
         public let totalSize: Int64
+        public let fileCount: Int
         
-        public init(latestModDate: Date = Date.distantPast, totalSize: Int64 = 0) {
+        public init(latestModDate: Date = Date.distantPast, totalSize: Int64 = 0, fileCount: Int = 0) {
             self.latestModDate = latestModDate
             self.totalSize = totalSize
+            self.fileCount = fileCount
         }
     }
     
@@ -251,32 +253,66 @@ public enum AgyStatsService {
     
     public static func directoryContentSignature(atPath dirPath: String) -> DirectoryContentSignature {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: dirPath) else {
-            return DirectoryContentSignature(latestModDate: .distantPast, totalSize: 0)
+        let dirURL = URL(fileURLWithPath: dirPath, isDirectory: true)
+        
+        guard let urls = try? fm.contentsOfDirectory(
+            at: dirURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return DirectoryContentSignature(latestModDate: .distantPast, totalSize: 0, fileCount: 0)
         }
         
         var maxModDate = Date.distantPast
         var totalSize: Int64 = 0
+        var dbFiles: [(url: URL, modDate: Date)] = []
+        var knownSizes: [String: Int64] = [:]
+        knownSizes.reserveCapacity(urls.count)
         
-        for file in files {
-            if file.hasSuffix(".db") || file.hasSuffix(".db-wal") {
-                let fullPath = (dirPath as NSString).appendingPathComponent(file)
-                if let attrs = try? fm.attributesOfItem(atPath: fullPath) {
-                    if let modDate = attrs[.modificationDate] as? Date {
-                        if modDate > maxModDate {
-                            maxModDate = modDate
-                        }
+        for url in urls {
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]) else {
+                continue
+            }
+            let modDate = values.contentModificationDate ?? Date.distantPast
+            if modDate > maxModDate {
+                maxModDate = modDate
+            }
+            let size = Int64(values.fileSize ?? 0)
+            totalSize += size
+            knownSizes[url.path] = size
+            
+            if url.pathExtension == "db" {
+                dbFiles.append((url: url, modDate: modDate))
+            }
+        }
+        
+        // Stat -wal only for the top 5 most recently modified .db files if any exist
+        if !dbFiles.isEmpty {
+            dbFiles.sort { $0.modDate > $1.modDate }
+            let top5 = dbFiles.prefix(5)
+            for dbFile in top5 {
+                let walPath = dbFile.url.path + "-wal"
+                if let walAttrs = try? fm.attributesOfItem(atPath: walPath) {
+                    if let walModDate = walAttrs[.modificationDate] as? Date, walModDate > maxModDate {
+                        maxModDate = walModDate
                     }
-                    if let size = (attrs[.size] as? NSNumber)?.int64Value {
-                        totalSize += size
+                    if let walSize = (walAttrs[.size] as? NSNumber)?.int64Value {
+                        if let oldSize = knownSizes[walPath] {
+                            if walSize > oldSize {
+                                totalSize += (walSize - oldSize)
+                            }
+                        } else {
+                            totalSize += walSize
+                        }
                     }
                 }
             }
         }
-        return DirectoryContentSignature(latestModDate: maxModDate, totalSize: totalSize)
+        
+        return DirectoryContentSignature(latestModDate: maxModDate, totalSize: totalSize, fileCount: urls.count)
     }
     
-    public static func loadStats(cliDir: String, gcpCliDir: String? = nil) async -> (AgyUsageStats, AgySettings) {
+    public static func loadStats(cliDir: String, gcpCliDir: String? = nil, existingQuota: AgyQuotaInfo? = nil) async -> (AgyUsageStats, AgySettings) {
         return await Task.detached(priority: .userInitiated) {
             let expandedDir = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
             let historyPath = (expandedDir as NSString).appendingPathComponent("history.jsonl")
@@ -332,6 +368,8 @@ public enum AgyStatsService {
                 // Fetch fresh quota without blocking UI if already cached
                 if let quota = await AgyQuotaService.fetchQuota() {
                     cachedStats.quotaInfo = quota
+                } else if cachedStats.quotaInfo == nil {
+                    cachedStats.quotaInfo = existingQuota
                 }
                 return (cachedStats, settings)
             }
@@ -687,12 +725,18 @@ public enum AgyStatsService {
             
             let tQuota = ContinuousClock.now
             // Await Quota Info (which ran concurrently in the background)
-            let quotaInfo = await quotaTask
+            let fetchedQuota = await quotaTask
             print("TIME: quotaInfo await = \(tQuota.duration(to: .now))")
+            
+            statsCacheLock.lock()
+            let previousCachedQuota = statsCache?.stats.quotaInfo
+            statsCacheLock.unlock()
+            let quotaInfo = fetchedQuota ?? existingQuota ?? previousCachedQuota
+            
             if let quotaInfo = quotaInfo {
-                print("AgyStatsService: Fetched quota: plan = \(quotaInfo.plan ?? "nil"), email = \(quotaInfo.email ?? "nil"), groups count = \(quotaInfo.groups.count)")
+                print("AgyStatsService: Resolved quota: plan = \(quotaInfo.plan ?? "nil"), email = \(quotaInfo.email ?? "nil"), groups count = \(quotaInfo.groups.count)")
             } else {
-                print("AgyStatsService: Fetched quota: NONE")
+                print("AgyStatsService: Resolved quota: NONE")
             }
             
             let tBuckets = ContinuousClock.now
