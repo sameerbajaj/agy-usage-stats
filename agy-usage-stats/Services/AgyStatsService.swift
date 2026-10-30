@@ -28,6 +28,7 @@ public enum AgyStatsService {
         let cachedInputTokens: Int?
         let isGcpOrigin: Bool
         let isExplicitConsumer: Bool
+        let hasProtobufMetadata: Bool
     }
     
     private struct DbConversationData: Sendable {
@@ -479,7 +480,8 @@ public enum AgyStatsService {
                                 outputTokens: g.outputTokens,
                                 cachedInputTokens: g.cachedInputTokens,
                                 isGcpOrigin: false,
-                                isExplicitConsumer: true
+                                isExplicitConsumer: true,
+                                hasProtobufMetadata: g.hasProtobufMetadata
                             )
                         }
                         allDbConversations[cid] = DbConversationData(
@@ -1060,7 +1062,7 @@ public enum AgyStatsService {
                 
                 let defaultModelForDate: String
                 if genDate >= sep2026 {
-                    defaultModelForDate = settings.model ?? "Gemini 3.8 Flash (High)"
+                    defaultModelForDate = gen.isGcpOrigin ? "Gemini 4 Argon (High)" : (settings.model ?? "Gemini 3.8 Flash (High)")
                 } else if genDate >= aug2026 {
                     defaultModelForDate = "Gemini 3.7 Flash (High)"
                 } else {
@@ -1087,7 +1089,7 @@ public enum AgyStatsService {
                     cost = promptCost + cachedCost + outputCost
                     inTokens = pTokens + cTokens
                     outTokens = oTokens
-                } else if gen.size > 0 {
+                } else if !gen.hasProtobufMetadata && gen.size > 0 {
                     outTokens = max(80, gen.size / 4)
                     inTokens = Int(model.tier.inputTokens * 0.35)
                     cost = (Double(inTokens) / 1_000_000.0) * model.inputPricePerMillion + (Double(outTokens) / 1_000_000.0) * model.outputPricePerMillion
@@ -2028,6 +2030,7 @@ public enum AgyStatsService {
                 var inputTokens: Int? = nil
                 var outputTokens: Int? = nil
                 var cachedTokens: Int? = nil
+                var hasProtobufMetadata = false
                 
                 if let blob = sqlite3_column_blob(genStmt, 1) {
                     let blobSize = sqlite3_column_bytes(genStmt, 1)
@@ -2035,27 +2038,53 @@ public enum AgyStatsService {
                         let data = Data(bytes: blob, count: Int(blobSize))
                         if let msg = ProtobufMessage.parse(data: data) {
                             let f1 = msg.submessage(for: 1)
+                            hasProtobufMetadata = (f1 != nil)
                             
                             // Model name
                             if let rawModel = f1?.string(for: 19) ?? msg.string(for: 19) {
                                 modelName = cleanAndMapModelName(rawModel)
                             }
                             
-                            // Tokens from Field 1 -> Field 4
+                            // Tokens and fallback model enum from Field 1 -> Field 4
+                            var modelEnumId: Int? = nil
                             if let f4 = f1?.submessage(for: 4) {
+                                modelEnumId = f4.firstVarint(for: 1)
                                 inputTokens = f4.firstVarint(for: 2)
                                 outputTokens = f4.firstVarint(for: 3)
                                 cachedTokens = f4.firstVarint(for: 5)
                             }
                             
-                            // Step index from Field 1 -> Field 20
+                            // Step index and model_enum from Field 1 -> Field 20
+                            var modelEnumStr: String? = nil
                             let f20List = f1?.submessages(for: 20) ?? msg.submessages(for: 20)
                             for kv in f20List {
-                                if kv.string(for: 1) == "last_step_index",
+                                let k = kv.string(for: 1)
+                                if k == "last_step_index",
                                    let v = kv.string(for: 2),
                                    let sIdx = Int(v) {
                                     timestamp = stepsTimestamps[sIdx]
-                                    break
+                                } else if k == "model_enum",
+                                          let v = kv.string(for: 2) {
+                                    modelEnumStr = v
+                                }
+                            }
+                            
+                            if modelName == nil {
+                                if let enumStr = modelEnumStr, let mapped = cleanAndMapModelName(enumStr) {
+                                    modelName = mapped
+                                } else if let enumId = modelEnumId {
+                                    switch enumId {
+                                    case 1418:
+                                        modelName = "Gemini 4 Argon (High)"
+                                    case 1401:
+                                        modelName = "Gemini 3.5 Flash Lite"
+                                    case 1318, 1319:
+                                        modelName = "Gemini 3.8 Flash (High)"
+                                    case 1299:
+                                        modelName = "Gemini 3.7 Flash (High)"
+                                    default:
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -2077,7 +2106,8 @@ public enum AgyStatsService {
                     outputTokens: outputTokens,
                     cachedInputTokens: cachedTokens,
                     isGcpOrigin: isGcpOrigin,
-                    isExplicitConsumer: false
+                    isExplicitConsumer: false,
+                    hasProtobufMetadata: hasProtobufMetadata
                 ))
             }
         }
@@ -2260,7 +2290,15 @@ public enum AgyStatsService {
             ("gemini-3.1", "Gemini 3.1 Pro (High)"),
             ("gemini-1.5-pro", "Gemini 3.1 Pro (High)"),
 
-            // Shorthands
+            // Shorthands & Placeholders
+            ("model_placeholder_m418", "Gemini 4 Argon (High)"),
+            ("model_placeholder_m401", "Gemini 3.5 Flash Lite"),
+            ("model_placeholder_m318", "Gemini 3.8 Flash (High)"),
+            ("model_placeholder_m319", "Gemini 3.8 Flash (High)"),
+            ("model_placeholder_m299", "Gemini 3.7 Flash (High)"),
+            ("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite"),
+            ("3.5-flash-lite", "Gemini 3.5 Flash Lite"),
+            ("flash-lite", "Gemini 3.5 Flash Lite"),
             ("flash-extra-low", "Gemini 3.7 Flash (Low)"),
             ("flash-low", "Gemini 3.7 Flash (Low)"),
             ("flash-medium", "Gemini 3.7 Flash (Medium)"),
@@ -2300,6 +2338,7 @@ public enum AgyStatsService {
             "Gemini 3.6 Flash (Low)",
             "Gemini 3.6 Flash (Medium)",
             "Gemini 3.6 Flash (High)",
+            "Gemini 3.5 Flash Lite",
             "Gemini 3.5 Flash (Low)",
             "Gemini 3.5 Flash (Medium)",
             "Gemini 3.5 Flash (High)",

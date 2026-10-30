@@ -596,12 +596,26 @@ struct agy_usage_statsTests {
         #expect(argonHigh != nil)
         #expect(argonHigh?.inputPricePerMillion == 2.00)
         #expect(argonHigh?.outputPricePerMillion == 12.00)
-        #expect(argonHigh?.cachedInputPricePerMillion == 0.50)
+        #expect(argonHigh?.cachedInputPricePerMillion == 0.20)
 
         let argonLow = knownModels.first { $0.name == "Gemini 4 Argon (Low)" }
         #expect(argonLow != nil)
         #expect(argonLow?.inputPricePerMillion == 2.00)
         #expect(argonLow?.outputPricePerMillion == 12.00)
+        #expect(argonLow?.cachedInputPricePerMillion == 0.20)
+
+        // Gemini 3.8 Flash & 3.5 Flash Lite
+        let flash38 = knownModels.first { $0.name == "Gemini 3.8 Flash (High)" }
+        #expect(flash38 != nil)
+        #expect(flash38?.inputPricePerMillion == 0.50)
+        #expect(flash38?.outputPricePerMillion == 3.00)
+        #expect(flash38?.cachedInputPricePerMillion == 0.05)
+
+        let flashLite = knownModels.first { $0.name == "Gemini 3.5 Flash Lite" }
+        #expect(flashLite != nil)
+        #expect(flashLite?.inputPricePerMillion == 0.10)
+        #expect(flashLite?.outputPricePerMillion == 0.40)
+        #expect(flashLite?.cachedInputPricePerMillion == 0.01)
 
         // Claude Sonnet 5.5
         let sonnet55High = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }
@@ -636,12 +650,12 @@ struct agy_usage_statsTests {
             modelName: nil
         )
 
-        // Argon: 100k * $2/M ($0.20) + 50k * $0.50/M ($0.025) + 10k * $12/M ($0.12) = $0.345
+        // Argon: 100k * $2/M ($0.20) + 50k * $0.20/M ($0.010) + 10k * $12/M ($0.12) = $0.330
         let argon = knownModels.first { $0.name == "Gemini 4 Argon (High)" }!
         let argonResult = argon.estimateTokensAndCost(for: query)
         #expect(argonResult.inputTokens == 150_000)
         #expect(argonResult.outputTokens == 10_000)
-        #expect(abs(argonResult.cost - 0.345) < 0.0001)
+        #expect(abs(argonResult.cost - 0.330) < 0.0001)
 
         // Sonnet 5.5: 100k * $2/M ($0.20) + 50k * $0.20/M ($0.010) + 10k * $10/M ($0.10) = $0.310
         let sonnet55 = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }!
@@ -659,6 +673,12 @@ struct agy_usage_statsTests {
         #expect(AgyStatsService.cleanAndMapModelName("gemini-argon-low") == "Gemini 4 Argon (Low)")
         #expect(AgyStatsService.cleanAndMapModelName("argon-high") == "Gemini 4 Argon (High)")
         #expect(AgyStatsService.cleanAndMapModelName("argon") == "Gemini 4 Argon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M418") == "Gemini 4 Argon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M401") == "Gemini 3.5 Flash Lite")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M318") == "Gemini 3.8 Flash (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M319") == "Gemini 3.8 Flash (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M299") == "Gemini 3.7 Flash (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-3.5-flash-lite") == "Gemini 3.5 Flash Lite")
 
         #expect(AgyStatsService.cleanAndMapModelName("claude-sonnet-5-5-high") == "Claude Sonnet 5.5 (High)")
         #expect(AgyStatsService.cleanAndMapModelName("claude-sonnet-5.5-medium") == "Claude Sonnet 5.5 (Medium)")
