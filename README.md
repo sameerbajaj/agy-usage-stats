@@ -7,7 +7,7 @@
 
 A native macOS menu bar application for monitoring local [Google Antigravity CLI](https://antigravity.google) (`agy`) activity. It provides a real-time dashboard for token quotas, rate limits, model depletion, and API spending across all active workspaces.
 
-🔗 **Landing Page**: [sameerbajaj.com/tools](https://sameerbajaj.com/tools)
+🔗 **Canonical Page & Documentation**: [sameerbajaj.com/tools/agy-usage-stats](https://sameerbajaj.com/tools/agy-usage-stats/) | [All Tools](https://sameerbajaj.com/tools)
 
 <p align="center">
   <img src="assets/preview.png" width="640" alt="Antigravity Usage Stats Preview">
