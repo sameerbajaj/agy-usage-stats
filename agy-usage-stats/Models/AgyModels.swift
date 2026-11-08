@@ -607,15 +607,15 @@ public let knownModels = [
     ModelCostInfo(name: "Claude Opus 5.5 (High)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .high),
 
     // Gemini 3.8 Series
-    ModelCostInfo(name: "Gemini 3.8 Flash (Low)", inputPricePerMillion: 0.50, outputPricePerMillion: 3.00, cachedInputPricePerMillion: 0.05, tier: .low),
-    ModelCostInfo(name: "Gemini 3.8 Flash (Medium)", inputPricePerMillion: 0.50, outputPricePerMillion: 3.00, cachedInputPricePerMillion: 0.05, tier: .medium),
-    ModelCostInfo(name: "Gemini 3.8 Flash (High)", inputPricePerMillion: 0.50, outputPricePerMillion: 3.00, cachedInputPricePerMillion: 0.05, tier: .high),
-    ModelCostInfo(name: "Gemini 3.8 Flash Cyber", inputPricePerMillion: 0.50, outputPricePerMillion: 3.00, cachedInputPricePerMillion: 0.05, tier: .high),
+    ModelCostInfo(name: "Gemini 3.8 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .low),
+    ModelCostInfo(name: "Gemini 3.8 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .medium),
+    ModelCostInfo(name: "Gemini 3.8 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
+    ModelCostInfo(name: "Gemini 3.8 Flash Cyber", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
 
     // Gemini 3.7 Series
-    ModelCostInfo(name: "Gemini 3.7 Flash (Low)", inputPricePerMillion: 0.50, outputPricePerMillion: 3.00, cachedInputPricePerMillion: 0.05, tier: .low),
-    ModelCostInfo(name: "Gemini 3.7 Flash (Medium)", inputPricePerMillion: 0.50, outputPricePerMillion: 3.00, cachedInputPricePerMillion: 0.05, tier: .medium),
-    ModelCostInfo(name: "Gemini 3.7 Flash (High)", inputPricePerMillion: 0.50, outputPricePerMillion: 3.00, cachedInputPricePerMillion: 0.05, tier: .high),
+    ModelCostInfo(name: "Gemini 3.7 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .low),
+    ModelCostInfo(name: "Gemini 3.7 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .medium),
+    ModelCostInfo(name: "Gemini 3.7 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
 
     // Gemini 3.6 Series
     ModelCostInfo(name: "Gemini 3.6 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .low),

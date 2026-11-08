@@ -607,9 +607,9 @@ struct agy_usage_statsTests {
         // Gemini 3.8 Flash & 3.5 Flash Lite
         let flash38 = knownModels.first { $0.name == "Gemini 3.8 Flash (High)" }
         #expect(flash38 != nil)
-        #expect(flash38?.inputPricePerMillion == 0.50)
-        #expect(flash38?.outputPricePerMillion == 3.00)
-        #expect(flash38?.cachedInputPricePerMillion == 0.05)
+        #expect(flash38?.inputPricePerMillion == 0.75)
+        #expect(flash38?.outputPricePerMillion == 3.75)
+        #expect(flash38?.cachedInputPricePerMillion == 0.075)
 
         let flashLite = knownModels.first { $0.name == "Gemini 3.5 Flash Lite" }
         #expect(flashLite != nil)
