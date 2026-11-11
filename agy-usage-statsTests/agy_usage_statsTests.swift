@@ -591,6 +591,25 @@ struct agy_usage_statsTests {
     // MARK: - Gemini 4 Argon & Claude 5.5 Tests
 
     @Test func testArgonAndClaude55CatalogAndPricing() {
+        // Gemini 4 Carbon (Frontier Reasoning)
+        let carbonHigh = knownModels.first { $0.name == "Gemini 4 Carbon (High)" }
+        #expect(carbonHigh != nil)
+        #expect(carbonHigh?.inputPricePerMillion == 2.00)
+        #expect(carbonHigh?.outputPricePerMillion == 10.00)
+        #expect(carbonHigh?.cachedInputPricePerMillion == 0.10)
+
+        let carbonMedium = knownModels.first { $0.name == "Gemini 4 Carbon (Medium)" }
+        #expect(carbonMedium != nil)
+        #expect(carbonMedium?.inputPricePerMillion == 2.00)
+        #expect(carbonMedium?.outputPricePerMillion == 10.00)
+        #expect(carbonMedium?.cachedInputPricePerMillion == 0.10)
+
+        let carbonLow = knownModels.first { $0.name == "Gemini 4 Carbon (Low)" }
+        #expect(carbonLow != nil)
+        #expect(carbonLow?.inputPricePerMillion == 2.00)
+        #expect(carbonLow?.outputPricePerMillion == 10.00)
+        #expect(carbonLow?.cachedInputPricePerMillion == 0.10)
+
         // Gemini 4 Argon
         let argonHigh = knownModels.first { $0.name == "Gemini 4 Argon (High)" }
         #expect(argonHigh != nil)
@@ -668,7 +687,87 @@ struct agy_usage_statsTests {
         #expect(abs(opusResult.cost - 0.610) < 0.0001)
     }
 
+    @Test func testGemini4CarbonDateAwarePricing() {
+        let cutoffTimestamp: TimeInterval = 1796083200 // 2026-12-01 00:00:00 UTC
+
+        // 1. Before cutoff: Introductory pricing ($2.00 / $10.00 / $0.10)
+        let preDate = Date(timeIntervalSince1970: cutoffTimestamp - 3600)
+        let prePricing = ModelCostInfo.gemini4CarbonPricing(at: preDate)
+        #expect(prePricing.input == 2.00)
+        #expect(prePricing.output == 10.00)
+        #expect(prePricing.cached == 0.10)
+
+        let preModels = knownModels(at: preDate)
+        let preCarbonHigh = preModels.first { $0.name == "Gemini 4 Carbon (High)" }!
+        #expect(preCarbonHigh.inputPricePerMillion == 2.00)
+        #expect(preCarbonHigh.outputPricePerMillion == 10.00)
+        #expect(preCarbonHigh.cachedInputPricePerMillion == 0.10)
+
+        // Pre-cutoff cost calculation:
+        // 100k prompt * $2.00/M ($0.20) + 50k cached * $0.10/M ($0.005) + 10k output * $10.00/M ($0.10) = $0.305
+        let meta = ConversationDbMeta(
+            llmCalls: 1,
+            totalOutputBytes: 40000,
+            inputTokens: 100_000,
+            outputTokens: 10_000,
+            cachedInputTokens: 50_000
+        )
+        let query = QueryEntry(
+            display: "Carbon prompt test",
+            timestamp: preDate,
+            workspace: "/Users/test/workspace",
+            conversationId: "carbon-conv",
+            type: nil,
+            conversationMeta: meta,
+            modelName: nil
+        )
+        let preResult = preCarbonHigh.estimateTokensAndCost(for: query)
+        #expect(preResult.inputTokens == 150_000)
+        #expect(preResult.outputTokens == 10_000)
+        #expect(abs(preResult.cost - 0.305) < 0.0001)
+
+        // 2. On or after cutoff: Standard tier pricing ($4.00 / $20.00 / $0.20)
+        let postDate = Date(timeIntervalSince1970: cutoffTimestamp)
+        let postPricing = ModelCostInfo.gemini4CarbonPricing(at: postDate)
+        #expect(postPricing.input == 4.00)
+        #expect(postPricing.output == 20.00)
+        #expect(postPricing.cached == 0.20)
+
+        let postModels = knownModels(at: postDate)
+        let postCarbonHigh = postModels.first { $0.name == "Gemini 4 Carbon (High)" }!
+        #expect(postCarbonHigh.inputPricePerMillion == 4.00)
+        #expect(postCarbonHigh.outputPricePerMillion == 20.00)
+        #expect(postCarbonHigh.cachedInputPricePerMillion == 0.20)
+
+        // Post-cutoff cost calculation:
+        // 100k prompt * $4.00/M ($0.40) + 50k cached * $0.20/M ($0.010) + 10k output * $20.00/M ($0.20) = $0.610
+        let postResult = postCarbonHigh.estimateTokensAndCost(for: query)
+        #expect(postResult.inputTokens == 150_000)
+        #expect(postResult.outputTokens == 10_000)
+        #expect(abs(postResult.cost - 0.610) < 0.0001)
+    }
+
     @Test func testModelNamePatternMappings() {
+        // Carbon mappings
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-carbon") == "Gemini 4 Carbon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-carbon-low") == "Gemini 4 Carbon (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-carbon-medium") == "Gemini 4 Carbon (Medium)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-carbon-high") == "Gemini 4 Carbon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-carbon-low") == "Gemini 4 Carbon (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-carbon") == "Gemini 4 Carbon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("carbon-low") == "Gemini 4 Carbon (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("carbon-high") == "Gemini 4 Carbon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("carbon") == "Gemini 4 Carbon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini 4 carbon") == "Gemini 4 Carbon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini 4 carbon (low)") == "Gemini 4 Carbon (Low)")
+
+        // Canonical display name consolidation
+        #expect(canonicalModelDisplayName(from: "gemini-4-carbon") == "Gemini 4 Carbon")
+        #expect(canonicalModelDisplayName(from: "Gemini 4 Carbon (High)") == "Gemini 4 Carbon")
+        #expect(canonicalModelDisplayName(from: "Gemini 4 Carbon (Medium)") == "Gemini 4 Carbon")
+        #expect(canonicalModelDisplayName(from: "carbon") == "Gemini 4 Carbon")
+
+        // Argon mappings
         #expect(AgyStatsService.cleanAndMapModelName("gemini-4-argon") == "Gemini 4 Argon (High)")
         #expect(AgyStatsService.cleanAndMapModelName("gemini-argon-low") == "Gemini 4 Argon (Low)")
         #expect(AgyStatsService.cleanAndMapModelName("argon-high") == "Gemini 4 Argon (High)")
@@ -721,6 +820,13 @@ struct agy_usage_statsTests {
             groups: [geminiGroup, claudeGroup]
         )
 
+        // Carbon matches Gemini quota group when dedicated group absent
+        let carbonGroup = vm.getGroup(matchingModelName: "Gemini 4 Carbon (High)")
+        #expect(carbonGroup?.displayName == "Gemini Models")
+
+        let carbonShortGroup = vm.getGroup(matchingModelName: "carbon-high")
+        #expect(carbonShortGroup?.displayName == "Gemini Models")
+
         // Argon matches Gemini quota group
         let argonGroup = vm.getGroup(matchingModelName: "Gemini 4 Argon (High)")
         #expect(argonGroup?.displayName == "Gemini Models")
@@ -760,6 +866,31 @@ struct agy_usage_statsTests {
 
         let dedicatedShortMatch = vm.getGroup(matchingModelName: "argon-high")
         #expect(dedicatedShortMatch?.displayName == "Gemini 4 Argon")
+
+        // Dedicated Carbon group matching
+        let carbonBucket = AgyQuotaBucket(
+            bucketId: "gemini-carbon-wtu-weekly",
+            displayName: "Gemini 4 Carbon Weekly Limit",
+            remainingFraction: 0.90,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+        let dedicatedCarbonGroup = AgyQuotaGroup(
+            displayName: "Gemini 4 Carbon",
+            description: "Dedicated quota for Gemini 4 Carbon.",
+            buckets: [carbonBucket]
+        )
+        vm.stats.quotaInfo = AgyQuotaInfo(
+            email: "test@example.com",
+            plan: "Google AI Pro",
+            groups: [geminiGroup, claudeGroup, dedicatedCarbonGroup]
+        )
+        let dedicatedCarbonMatch = vm.getGroup(matchingModelName: "Gemini 4 Carbon (High)")
+        #expect(dedicatedCarbonMatch?.displayName == "Gemini 4 Carbon")
+
+        let dedicatedCarbonShortMatch = vm.getGroup(matchingModelName: "carbon-high")
+        #expect(dedicatedCarbonShortMatch?.displayName == "Gemini 4 Carbon")
     }
 
     // MARK: - Tab Consolidation & Canonical Model Tests
@@ -907,12 +1038,20 @@ struct agy_usage_statsTests {
         // Must return nil and not fall back to Gemini
         #expect(vm.argonUsageFraction == nil)
         #expect(vm.argonCircleFillFraction == nil)
+        #expect(vm.carbonUsageFraction == nil)
+        #expect(vm.carbonCircleFillFraction == nil)
         
         // When Argon group is added, it resolves cleanly
         let argonBucket = AgyQuotaBucket(bucketId: "a-w", displayName: "Weekly Limit", remainingFraction: 0.95, resetDescription: nil, disabled: false, resetTime: nil)
         let argonGroup = AgyQuotaGroup(displayName: "Gemini 4 Argon", description: nil, buckets: [argonBucket])
         vm.stats.quotaInfo = AgyQuotaInfo(email: "test@example.com", plan: "Pro", groups: [geminiGroup, claudeGroup, argonGroup])
         #expect(vm.argonUsageFraction == 0.95)
+
+        // When Carbon group is added, it resolves cleanly
+        let carbonBucket = AgyQuotaBucket(bucketId: "cb-w", displayName: "Weekly Limit", remainingFraction: 0.90, resetDescription: nil, disabled: false, resetTime: nil)
+        let carbonGroup = AgyQuotaGroup(displayName: "Gemini 4 Carbon", description: nil, buckets: [carbonBucket])
+        vm.stats.quotaInfo = AgyQuotaInfo(email: "test@example.com", plan: "Pro", groups: [geminiGroup, claudeGroup, argonGroup, carbonGroup])
+        #expect(vm.carbonUsageFraction == 0.90)
     }
 
     @Test func testAllThreeAndArgonIconPresentation() {
@@ -990,6 +1129,77 @@ struct agy_usage_statsTests {
         )
         #expect(allThreeArgonNil.text == "G:80% C:50%")
         #expect(allThreeArgonNil.gaugeStyle == .both(geminiFraction: 0.80, claudeFraction: 0.50))
+    }
+
+    @Test func testCarbonIconPresentation() {
+        let litNS = NSColor.systemGreen
+
+        // Carbon single presentation (healthy, zero prefix)
+        let carbonPresent = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .carbon,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            carbonUsageFraction: 0.85,
+            carbonFillFraction: 0.85,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(carbonPresent.text == "85%")
+        #expect(carbonPresent.textColor == MenuBarPresentationResolver.healthyGreenColor)
+        #expect(carbonPresent.gaugeStyle == .single(fraction: 0.85, strokeColor: MenuBarPresentationResolver.healthyGreenColor))
+
+        // Carbon missing presentation -> empty text, gauge none
+        let carbonMissing = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .carbon,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            carbonUsageFraction: nil,
+            carbonFillFraction: nil,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(carbonMissing.text == "")
+        #expect(carbonMissing.gaugeStyle == .none)
+
+        // Most depleted when Carbon is the most depleted model
+        let mostDepletedCarbon = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .mostDepleted,
+            queriesToday: 4,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: 0.80,
+            geminiFillFraction: 0.80,
+            carbonUsageFraction: 0.15,
+            carbonFillFraction: 0.15,
+            argonUsageFraction: 0.90,
+            argonFillFraction: 0.90,
+            claudeUsageFraction: 0.50,
+            claudeFillFraction: 0.50
+        )
+        #expect(mostDepletedCarbon.text == "15%")
+        #expect(mostDepletedCarbon.textColor == MenuBarPresentationResolver.lowRedColor)
+        #expect(mostDepletedCarbon.gaugeStyle == .single(fraction: 0.15, strokeColor: MenuBarPresentationResolver.lowRedColor))
+
+        // IconModelSelection enum checks
+        #expect(IconModelSelection(rawValue: "Gemini 4 Carbon") == .carbon)
+        #expect(IconModelSelection(rawValue: "carbon") == .carbon)
+        #expect(IconModelSelection.primaryCases.contains(.carbon))
     }
 
     @Test func testGcpCreditPoolConfiguration() {
@@ -1310,6 +1520,27 @@ struct agy_usage_statsTests {
         )
         #expect(geminiState.text == "82%")
         #expect(!geminiState.text.contains("G:"))
+
+        // Carbon: no "Cb:" or "C:" prefix
+        let carbonState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .carbon,
+            queriesToday: 5,
+            litColor: litNS,
+            activeUsageFraction: nil,
+            activeFillFraction: nil,
+            geminiUsageFraction: nil,
+            geminiFillFraction: nil,
+            carbonUsageFraction: 0.70,
+            carbonFillFraction: 0.70,
+            argonUsageFraction: nil,
+            argonFillFraction: nil,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil
+        )
+        #expect(carbonState.text == "70%")
+        #expect(!carbonState.text.contains("Cb:"))
+        #expect(!carbonState.text.contains("C:"))
 
         // Argon: no "A:" prefix
         let argonState = MenuBarPresentationResolver.resolveIconPresentation(

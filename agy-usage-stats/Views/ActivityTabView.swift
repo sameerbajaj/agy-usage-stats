@@ -271,7 +271,7 @@ struct ActivityQueryRow: View {
     
     private var modelBadgeColor: Color {
         let lower = (query.modelName ?? "").lowercased()
-        if lower.contains("argon") || lower.contains("gemini") {
+        if lower.contains("argon") || lower.contains("carbon") || lower.contains("gemini") {
             return theme.geminiAccent
         } else if lower.contains("claude") || lower.contains("opus") || lower.contains("sonnet") {
             return theme.claudeAccent

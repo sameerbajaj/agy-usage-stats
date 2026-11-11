@@ -868,16 +868,18 @@ public enum AgyStatsService {
             }
             
             var modelCache: [String: ModelCostInfo] = [:]
-            func resolveModel(name: String, fallback: ModelCostInfo) -> ModelCostInfo {
-                if let cached = modelCache[name] {
+            func resolveModel(name: String, fallback: ModelCostInfo, at date: Date? = nil) -> ModelCostInfo {
+                let cacheKey = "\(name)_\(date.map { String($0.timeIntervalSince1970 < ModelCostInfo.carbonStandardPriceCutoffTimestamp) } ?? "default")"
+                if let cached = modelCache[cacheKey] {
                     return cached
                 }
                 let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                let model = knownModels.first(where: {
+                let modelsList = date != nil ? knownModels(at: date!) : knownModels
+                let model = modelsList.first(where: {
                     let mName = $0.name.lowercased()
                     return cleaned.contains(mName) || mName.contains(cleaned)
                 }) ?? fallback
-                modelCache[name] = model
+                modelCache[cacheKey] = model
                 return model
             }
             
@@ -982,7 +984,7 @@ public enum AgyStatsService {
                 // Fallback only for historical days with no SQLite DB files (e.g. May/June 2026 prior to SQLite storage)
                 if !daysWithDbGens.contains(dayKey) {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
-                    let model = resolveModel(name: name, fallback: defaultGeminiModel)
+                    let model = resolveModel(name: name, fallback: defaultGeminiModel, at: q.timestamp)
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
                     if cost > 0 {
@@ -1039,7 +1041,7 @@ public enum AgyStatsService {
                 }
                 if !daysWithDbGens.contains(dayKey) {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
-                    let model = resolveModel(name: name, fallback: defaultGeminiModel)
+                    let model = resolveModel(name: name, fallback: defaultGeminiModel, at: q.timestamp)
                     
                     let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
                     if cost > 0 {
@@ -1072,7 +1074,7 @@ public enum AgyStatsService {
                 let rawName = gen.modelName ?? defaultModelForDate
                 let validName = enforceDateModelValidity(modelName: rawName, date: genDate, aug2026: aug2026, sep2026: sep2026)
                 let fallbackModel = genDate >= sep2026 ? defaultGeminiModel : (knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ?? defaultGeminiModel)
-                let model = resolveModel(name: validName, fallback: fallbackModel)
+                let model = resolveModel(name: validName, fallback: fallbackModel, at: genDate)
                 
                 let pTokens = gen.inputTokens ?? 0
                 let cTokens = gen.cachedInputTokens ?? 0
@@ -2175,6 +2177,32 @@ public enum AgyStatsService {
         let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
         let mappings: [(pattern: String, modelName: String)] = [
+            // Gemini 4 / Carbon (Frontier Reasoning)
+            ("gemini-4-carbon-low", "Gemini 4 Carbon (Low)"),
+            ("gemini-4-carbon-medium", "Gemini 4 Carbon (Medium)"),
+            ("gemini-4-carbon-high", "Gemini 4 Carbon (High)"),
+            ("gemini-4-carbon", "Gemini 4 Carbon (High)"),
+            ("gemini4carbon-low", "Gemini 4 Carbon (Low)"),
+            ("gemini4carbon-medium", "Gemini 4 Carbon (Medium)"),
+            ("gemini4carbon-high", "Gemini 4 Carbon (High)"),
+            ("gemini4carbon", "Gemini 4 Carbon (High)"),
+            ("gemini-carbon-low", "Gemini 4 Carbon (Low)"),
+            ("gemini-carbon-medium", "Gemini 4 Carbon (Medium)"),
+            ("gemini-carbon-high", "Gemini 4 Carbon (High)"),
+            ("gemini-carbon", "Gemini 4 Carbon (High)"),
+            ("gemini 4 carbon (low)", "Gemini 4 Carbon (Low)"),
+            ("gemini 4 carbon (medium)", "Gemini 4 Carbon (Medium)"),
+            ("gemini 4 carbon (high)", "Gemini 4 Carbon (High)"),
+            ("gemini 4 carbon", "Gemini 4 Carbon (High)"),
+            ("gemini carbon (low)", "Gemini 4 Carbon (Low)"),
+            ("gemini carbon (medium)", "Gemini 4 Carbon (Medium)"),
+            ("gemini carbon (high)", "Gemini 4 Carbon (High)"),
+            ("gemini carbon", "Gemini 4 Carbon (High)"),
+            ("carbon-low", "Gemini 4 Carbon (Low)"),
+            ("carbon-medium", "Gemini 4 Carbon (Medium)"),
+            ("carbon-high", "Gemini 4 Carbon (High)"),
+            ("carbon", "Gemini 4 Carbon (High)"),
+
             // Gemini 4 / Argon (Frontier)
             ("gemini-4-argon-low", "Gemini 4 Argon (Low)"),
             ("gemini-4-argon-medium", "Gemini 4 Argon (Medium)"),
@@ -2319,6 +2347,9 @@ public enum AgyStatsService {
         }
         
         let knownModelNames = [
+            "Gemini 4 Carbon (Low)",
+            "Gemini 4 Carbon (Medium)",
+            "Gemini 4 Carbon (High)",
             "Gemini 4 Argon (Low)",
             "Gemini 4 Argon (Medium)",
             "Gemini 4 Argon (High)",
@@ -2360,14 +2391,14 @@ public enum AgyStatsService {
     
     static func enforceDateModelValidity(modelName: String, date: Date, aug2026: Date, sep2026: Date) -> String {
         if date < aug2026 {
-            if modelName.contains("3.7") || modelName.contains("3.8") || modelName.contains("Argon") {
+            if modelName.contains("3.7") || modelName.contains("3.8") || modelName.contains("Argon") || modelName.contains("Carbon") {
                 return "Gemini 3.6 Flash (High)"
             }
             if modelName.contains("5.5") {
                 return modelName.contains("Opus") ? "Claude Opus 4.6 (Thinking)" : "Claude Sonnet 4.6 (Thinking)"
             }
         } else if date < sep2026 {
-            if modelName.contains("3.8") || modelName.contains("Argon") {
+            if modelName.contains("3.8") || modelName.contains("Argon") || modelName.contains("Carbon") {
                 return "Gemini 3.7 Flash (High)"
             }
             if modelName.contains("5.5") {

@@ -55,6 +55,9 @@ struct MenuBarLabel: View {
         if let gf = viewModel.geminiUsageFraction {
             fractions.append(gf)
         }
+        if let carb = viewModel.carbonUsageFraction {
+            fractions.append(carb)
+        }
         if let af = viewModel.argonUsageFraction {
             fractions.append(af)
         }
@@ -93,6 +96,9 @@ struct MenuBarLabel: View {
         lines.append("Active: \(viewModel.activeModelDisplayName)")
         if let g = viewModel.geminiUsageFraction {
             lines.append(String(format: "Gemini: %.0f%%", g * 100))
+        }
+        if let carb = viewModel.carbonUsageFraction {
+            lines.append(String(format: "Carbon: %.0f%%", carb * 100))
         }
         if let a = viewModel.argonUsageFraction {
             lines.append(String(format: "Argon: %.0f%%", a * 100))
@@ -153,6 +159,7 @@ public struct IconPresentationState: Equatable {
 
 public enum MenuBarPresentationResolver {
     public static let geminiColor = NSColor(red: 0.65, green: 0.45, blue: 1.0, alpha: 1.0)
+    public static let carbonColor = NSColor(red: 0.20, green: 0.85, blue: 0.70, alpha: 1.0)
     public static let argonColor = NSColor(red: 0.0, green: 0.82, blue: 0.95, alpha: 1.0)
     public static let claudeColor = NSColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
     public static let gcpBlueColor = NSColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0)
@@ -190,6 +197,7 @@ public enum MenuBarPresentationResolver {
 
     public static func resolveQuotaText(
         geminiFraction: Double?,
+        carbonFraction: Double? = nil,
         argonFraction: Double? = nil,
         claudeFraction: Double?,
         gcpTodayCost: Double? = nil
@@ -197,6 +205,9 @@ public enum MenuBarPresentationResolver {
         var parts: [String] = []
         if let gf = geminiFraction {
             parts.append(String(format: "G:%.0f%%", gf * 100))
+        }
+        if let carb = carbonFraction {
+            parts.append(String(format: "Cb:%.0f%%", carb * 100))
         }
         if let af = argonFraction {
             parts.append(String(format: "A:%.0f%%", af * 100))
@@ -222,6 +233,8 @@ public enum MenuBarPresentationResolver {
         activeFillFraction: Double?,
         geminiUsageFraction: Double?,
         geminiFillFraction: Double?,
+        carbonUsageFraction: Double? = nil,
+        carbonFillFraction: Double? = nil,
         argonUsageFraction: Double? = nil,
         argonFillFraction: Double? = nil,
         claudeUsageFraction: Double?,
@@ -287,6 +300,9 @@ public enum MenuBarPresentationResolver {
             if let gf = geminiUsageFraction {
                 candidates.append((fraction: gf, fill: geminiFillFraction ?? gf))
             }
+            if let carb = carbonUsageFraction {
+                candidates.append((fraction: carb, fill: carbonFillFraction ?? carb))
+            }
             if let af = argonUsageFraction {
                 candidates.append((fraction: af, fill: argonFillFraction ?? af))
             }
@@ -315,6 +331,17 @@ public enum MenuBarPresentationResolver {
             if let fraction = geminiUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = geminiFillFraction ?? fraction
+                let textColor = healthColor(for: fraction)
+                let strokeColor = healthColor(for: fill)
+                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
+            } else {
+                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+            }
+
+        case .carbon:
+            if let fraction = carbonUsageFraction {
+                let pctText = String(format: "%.0f%%", fraction * 100)
+                let fill = carbonFillFraction ?? fraction
                 let textColor = healthColor(for: fraction)
                 let strokeColor = healthColor(for: fill)
                 return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
@@ -434,10 +461,12 @@ public enum AgyMenuBarRenderer {
         selectedModelForIcon: IconModelSelection = .active,
         activeUsageFraction: Double? = nil,
         geminiUsageFraction: Double? = nil,
+        carbonUsageFraction: Double? = nil,
         argonUsageFraction: Double? = nil,
         claudeUsageFraction: Double? = nil,
         activeFillFraction: Double? = nil,
         geminiFillFraction: Double? = nil,
+        carbonFillFraction: Double? = nil,
         argonFillFraction: Double? = nil,
         claudeFillFraction: Double? = nil,
         showMenuBarSpend: Bool = false,
@@ -457,6 +486,8 @@ public enum AgyMenuBarRenderer {
             activeFillFraction: activeFillFraction,
             geminiUsageFraction: geminiUsageFraction,
             geminiFillFraction: geminiFillFraction,
+            carbonUsageFraction: carbonUsageFraction,
+            carbonFillFraction: carbonFillFraction,
             argonUsageFraction: argonUsageFraction,
             argonFillFraction: argonFillFraction,
             claudeUsageFraction: claudeUsageFraction,
@@ -716,10 +747,12 @@ public func makeAntigravityImage(
     selectedModelForIcon: IconModelSelection = .active,
     activeUsageFraction: Double? = nil,
     geminiUsageFraction: Double? = nil,
+    carbonUsageFraction: Double? = nil,
     argonUsageFraction: Double? = nil,
     claudeUsageFraction: Double? = nil,
     activeFillFraction: Double? = nil,
     geminiFillFraction: Double? = nil,
+    carbonFillFraction: Double? = nil,
     argonFillFraction: Double? = nil,
     claudeFillFraction: Double? = nil,
     showMenuBarSpend: Bool = false,
@@ -736,10 +769,12 @@ public func makeAntigravityImage(
         selectedModelForIcon: selectedModelForIcon,
         activeUsageFraction: activeUsageFraction,
         geminiUsageFraction: geminiUsageFraction,
+        carbonUsageFraction: carbonUsageFraction,
         argonUsageFraction: argonUsageFraction,
         claudeUsageFraction: claudeUsageFraction,
         activeFillFraction: activeFillFraction,
         geminiFillFraction: geminiFillFraction,
+        carbonFillFraction: carbonFillFraction,
         argonFillFraction: argonFillFraction,
         claudeFillFraction: claudeFillFraction,
         showMenuBarSpend: showMenuBarSpend,

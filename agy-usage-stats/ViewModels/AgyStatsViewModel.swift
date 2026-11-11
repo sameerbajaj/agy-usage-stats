@@ -24,6 +24,7 @@ public enum IconModelSelection: String, Codable, CaseIterable, Identifiable {
     case active = "Active Model"
     case mostDepleted = "Most Depleted"
     case gemini = "Gemini"
+    case carbon = "Gemini 4 Carbon"
     case argon = "Gemini 4 Argon"
     case claude = "Claude"
     case both = "Both (G & C)"
@@ -33,7 +34,7 @@ public enum IconModelSelection: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 
     public static var primaryCases: [IconModelSelection] {
-        [.active, .mostDepleted, .gemini, .argon, .claude]
+        [.active, .mostDepleted, .gemini, .carbon, .argon, .claude]
     }
 
     public init?(rawValue: String) {
@@ -41,6 +42,7 @@ public enum IconModelSelection: String, Codable, CaseIterable, Identifiable {
         case "Active Model", "active": self = .active
         case "Most Depleted", "mostDepleted": self = .mostDepleted
         case "Gemini", "Gemini Only", "gemini": self = .gemini
+        case "Gemini 4 Carbon", "carbon": self = .carbon
         case "Gemini 4 Argon", "argon": self = .argon
         case "Claude", "Claude Only", "claude": self = .claude
         case "Both (G & C)", "both": self = .both
@@ -441,6 +443,13 @@ public final class AgyStatsViewModel {
             }
         }
         
+        // Keyword checks for Carbon (prioritize dedicated Carbon group if present, otherwise fall back to Gemini group)
+        if rawName.contains("carbon") {
+            if let carbonGroup = quota.groups.first(where: { $0.displayName.lowercased().contains("carbon") }) {
+                return carbonGroup
+            }
+        }
+        
         // Keyword checks for Argon (prioritize dedicated Argon group if present, otherwise fall back to Gemini group)
         if rawName.contains("argon") {
             if let argonGroup = quota.groups.first(where: { $0.displayName.lowercased().contains("argon") }) {
@@ -448,11 +457,11 @@ public final class AgyStatsViewModel {
             }
         }
         
-        // Keyword checks for Gemini / Argon fallback
-        if rawName.contains("gemini") || rawName.contains("argon") {
+        // Keyword checks for Gemini / Carbon / Argon fallback
+        if rawName.contains("gemini") || rawName.contains("carbon") || rawName.contains("argon") {
             for group in quota.groups {
                 let name = group.displayName.lowercased()
-                if name.contains("gemini") || name.contains("argon") {
+                if name.contains("gemini") || name.contains("carbon") || name.contains("argon") {
                     return group
                 }
             }
@@ -540,7 +549,7 @@ public final class AgyStatsViewModel {
         let groupName = group.displayName.lowercased()
         let matchingQuery = consumerQueries.first { q in
             guard let m = q.modelName?.lowercased() else { return false }
-            return ((m.contains("gemini") || m.contains("argon")) && (groupName.contains("gemini") || groupName.contains("argon"))) ||
+            return ((m.contains("gemini") || m.contains("carbon") || m.contains("argon")) && (groupName.contains("gemini") || groupName.contains("carbon") || groupName.contains("argon"))) ||
                    ((m.contains("claude") || m.contains("sonnet") || m.contains("opus") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt") || groupName.contains("openai") || groupName.contains("anthropic") || groupName.contains("sonnet") || groupName.contains("opus")))
         }
         if let specificName = matchingQuery?.modelName {
@@ -558,7 +567,7 @@ public final class AgyStatsViewModel {
         guard let quota = stats.quotaInfo else { return nil }
         if let flashGroup = quota.groups.first(where: {
             let name = $0.displayName.lowercased()
-            return (name.contains("gemini") || name.contains("flash")) && !name.contains("argon")
+            return (name.contains("gemini") || name.contains("flash")) && !name.contains("argon") && !name.contains("carbon")
         }) {
             return flashGroup
         }
@@ -566,6 +575,11 @@ public final class AgyStatsViewModel {
             let name = $0.displayName.lowercased()
             return name.contains("gemini")
         }
+    }
+
+    private func getCarbonGroup() -> AgyQuotaGroup? {
+        guard let quota = stats.quotaInfo else { return nil }
+        return quota.groups.first(where: { $0.displayName.lowercased().contains("carbon") })
     }
 
     private func getArgonGroup() -> AgyQuotaGroup? {
@@ -668,6 +682,8 @@ public final class AgyStatsViewModel {
             group = getMostDepletedGroup()
         case .gemini:
             group = getGeminiGroup()
+        case .carbon:
+            group = getCarbonGroup()
         case .argon:
             group = getArgonGroup()
         case .claude:
@@ -681,6 +697,12 @@ public final class AgyStatsViewModel {
 
     public var geminiUsageFraction: Double? {
         let group = getGeminiGroup()
+        let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
+        return getUsageFraction(for: bucket)
+    }
+
+    public var carbonUsageFraction: Double? {
+        let group = getCarbonGroup()
         let bucket = getBucket(forGroup: group, target: iconQuotaLimitTarget)
         return getUsageFraction(for: bucket)
     }
@@ -711,6 +733,8 @@ public final class AgyStatsViewModel {
             group = getMostDepletedGroup()
         case .gemini:
             group = getGeminiGroup()
+        case .carbon:
+            group = getCarbonGroup()
         case .argon:
             group = getArgonGroup()
         case .claude:
@@ -724,6 +748,12 @@ public final class AgyStatsViewModel {
 
     public var geminiCircleFillFraction: Double? {
         let group = getGeminiGroup()
+        let bucket = getBucket(forGroup: group, target: circleRingTarget)
+        return getCircleFillFraction(for: bucket)
+    }
+
+    public var carbonCircleFillFraction: Double? {
+        let group = getCarbonGroup()
         let bucket = getBucket(forGroup: group, target: circleRingTarget)
         return getCircleFillFraction(for: bucket)
     }
@@ -747,6 +777,7 @@ public final class AgyStatsViewModel {
         } else {
             var fractions: [Double] = []
             if let gf = geminiUsageFraction { fractions.append(gf) }
+            if let carb = carbonUsageFraction { fractions.append(carb) }
             if let af = argonUsageFraction { fractions.append(af) }
             if let cf = claudeUsageFraction { fractions.append(cf) }
             if let minFraction = fractions.min() {
@@ -771,10 +802,12 @@ public final class AgyStatsViewModel {
             selectedModelForIcon: selectedModelForIcon,
             activeUsageFraction: selectedModelUsageFraction,
             geminiUsageFraction: geminiUsageFraction,
+            carbonUsageFraction: carbonUsageFraction,
             argonUsageFraction: argonUsageFraction,
             claudeUsageFraction: claudeUsageFraction,
             activeFillFraction: selectedModelCircleFillFraction,
             geminiFillFraction: geminiCircleFillFraction,
+            carbonFillFraction: carbonCircleFillFraction,
             argonFillFraction: argonCircleFillFraction,
             claudeFillFraction: claudeCircleFillFraction,
             showMenuBarSpend: showMenuBarSpend,

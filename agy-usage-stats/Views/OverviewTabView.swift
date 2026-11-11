@@ -587,7 +587,7 @@ public struct OverviewTabView: View {
     }
     
     private func quotaGroupCard(_ group: AgyQuotaGroup) -> some View {
-        let isGemini = group.displayName.lowercased().contains("gemini") || group.displayName.lowercased().contains("argon")
+        let isGemini = group.displayName.lowercased().contains("gemini") || group.displayName.lowercased().contains("argon") || group.displayName.lowercased().contains("carbon")
         let groupAccent = isGemini ? theme.geminiAccent : theme.claudeAccent
         
         return VStack(alignment: .leading, spacing: 8) {
@@ -1115,7 +1115,7 @@ public struct OverviewTabView: View {
     
     private func modelAccentColor(_ name: String) -> Color {
         let lower = name.lowercased()
-        if lower.contains("argon") {
+        if lower.contains("argon") || lower.contains("carbon") {
             return theme.geminiAccent
         } else if lower.contains("claude") || lower.contains("opus") || lower.contains("sonnet") {
             return theme.claudeAccent
