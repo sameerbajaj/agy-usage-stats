@@ -2177,6 +2177,21 @@ public enum AgyStatsService {
         let cleaned = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
         let mappings: [(pattern: String, modelName: String)] = [
+            // Gemini 4 Hydrogen (Standard API pricing)
+            ("gemini-4-hydrogen-low", "Gemini 4 Hydrogen (Low)"),
+            ("gemini-4-hydrogen-medium", "Gemini 4 Hydrogen (Medium)"),
+            ("gemini-4-hydrogen-high", "Gemini 4 Hydrogen (High)"),
+            ("gemini-4-hydrogen", "Gemini 4 Hydrogen (High)"),
+            ("gemini4hydrogen-low", "Gemini 4 Hydrogen (Low)"),
+            ("gemini4hydrogen-medium", "Gemini 4 Hydrogen (Medium)"),
+            ("gemini4hydrogen-high", "Gemini 4 Hydrogen (High)"),
+            ("gemini4hydrogen", "Gemini 4 Hydrogen (High)"),
+            ("gemini hydrogen", "Gemini 4 Hydrogen (High)"),
+            ("hydrogen-low", "Gemini 4 Hydrogen (Low)"),
+            ("hydrogen-medium", "Gemini 4 Hydrogen (Medium)"),
+            ("hydrogen-high", "Gemini 4 Hydrogen (High)"),
+            ("hydrogen", "Gemini 4 Hydrogen (High)"),
+
             // Gemini 4 / Carbon (Frontier Reasoning)
             ("gemini-4-carbon-low", "Gemini 4 Carbon (Low)"),
             ("gemini-4-carbon-medium", "Gemini 4 Carbon (Medium)"),
@@ -2347,6 +2362,9 @@ public enum AgyStatsService {
         }
         
         let knownModelNames = [
+            "Gemini 4 Hydrogen (Low)",
+            "Gemini 4 Hydrogen (Medium)",
+            "Gemini 4 Hydrogen (High)",
             "Gemini 4 Carbon (Low)",
             "Gemini 4 Carbon (Medium)",
             "Gemini 4 Carbon (High)",

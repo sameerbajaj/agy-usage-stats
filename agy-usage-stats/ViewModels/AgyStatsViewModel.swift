@@ -443,6 +443,13 @@ public final class AgyStatsViewModel {
             }
         }
         
+        // Keyword checks for Hydrogen (prefer a dedicated model quota when available).
+        if rawName.contains("hydrogen") {
+            if let hydrogenGroup = quota.groups.first(where: { $0.displayName.lowercased().contains("hydrogen") }) {
+                return hydrogenGroup
+            }
+        }
+
         // Keyword checks for Carbon (prioritize dedicated Carbon group if present, otherwise fall back to Gemini group)
         if rawName.contains("carbon") {
             if let carbonGroup = quota.groups.first(where: { $0.displayName.lowercased().contains("carbon") }) {
@@ -457,11 +464,11 @@ public final class AgyStatsViewModel {
             }
         }
         
-        // Keyword checks for Gemini / Carbon / Argon fallback
-        if rawName.contains("gemini") || rawName.contains("carbon") || rawName.contains("argon") {
+        // Keyword checks for Gemini / Hydrogen / Carbon / Argon fallback
+        if rawName.contains("gemini") || rawName.contains("hydrogen") || rawName.contains("carbon") || rawName.contains("argon") {
             for group in quota.groups {
                 let name = group.displayName.lowercased()
-                if name.contains("gemini") || name.contains("carbon") || name.contains("argon") {
+                if name.contains("gemini") || name.contains("hydrogen") || name.contains("carbon") || name.contains("argon") {
                     return group
                 }
             }
@@ -549,7 +556,7 @@ public final class AgyStatsViewModel {
         let groupName = group.displayName.lowercased()
         let matchingQuery = consumerQueries.first { q in
             guard let m = q.modelName?.lowercased() else { return false }
-            return ((m.contains("gemini") || m.contains("carbon") || m.contains("argon")) && (groupName.contains("gemini") || groupName.contains("carbon") || groupName.contains("argon"))) ||
+            return ((m.contains("gemini") || m.contains("hydrogen") || m.contains("carbon") || m.contains("argon")) && (groupName.contains("gemini") || groupName.contains("hydrogen") || groupName.contains("carbon") || groupName.contains("argon"))) ||
                    ((m.contains("claude") || m.contains("sonnet") || m.contains("opus") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt") || groupName.contains("openai") || groupName.contains("anthropic") || groupName.contains("sonnet") || groupName.contains("opus")))
         }
         if let specificName = matchingQuery?.modelName {
@@ -567,7 +574,7 @@ public final class AgyStatsViewModel {
         guard let quota = stats.quotaInfo else { return nil }
         if let flashGroup = quota.groups.first(where: {
             let name = $0.displayName.lowercased()
-            return (name.contains("gemini") || name.contains("flash")) && !name.contains("argon") && !name.contains("carbon")
+            return (name.contains("gemini") || name.contains("flash")) && !name.contains("hydrogen") && !name.contains("argon") && !name.contains("carbon")
         }) {
             return flashGroup
         }

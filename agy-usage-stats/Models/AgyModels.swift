@@ -607,6 +607,12 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
     public static func knownModels(at date: Date = Date()) -> [ModelCostInfo] {
         let carbonPricing = gemini4CarbonPricing(at: date)
         return [
+            // Gemini 4 Hydrogen: Google Gemini API Standard tier pricing.
+            // Rates are per 1M tokens; cached input is implicit caching.
+            ModelCostInfo(name: "Gemini 4 Hydrogen (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.075, tier: .low),
+            ModelCostInfo(name: "Gemini 4 Hydrogen (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.075, tier: .medium),
+            ModelCostInfo(name: "Gemini 4 Hydrogen (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.075, tier: .high),
+
             // Frontier / Gemini 4 Reasoning (Carbon)
             ModelCostInfo(name: "Gemini 4 Carbon (Low)", inputPricePerMillion: carbonPricing.input, outputPricePerMillion: carbonPricing.output, cachedInputPricePerMillion: carbonPricing.cached, tier: .low),
             ModelCostInfo(name: "Gemini 4 Carbon (Medium)", inputPricePerMillion: carbonPricing.input, outputPricePerMillion: carbonPricing.output, cachedInputPricePerMillion: carbonPricing.cached, tier: .medium),
@@ -687,7 +693,9 @@ public func canonicalModelDisplayName(from rawName: String) -> String {
         name = name.replacingOccurrences(of: suffix, with: "")
     }
     let lower = name.lowercased()
-    if lower.contains("carbon") {
+    if lower.contains("hydrogen") {
+        return "Gemini 4 Hydrogen"
+    } else if lower.contains("carbon") {
         return "Gemini 4 Carbon"
     } else if lower.contains("argon") {
         return "Gemini 4 Argon"

@@ -590,6 +590,40 @@ struct agy_usage_statsTests {
 
     // MARK: - Gemini 4 Argon & Claude 5.5 Tests
 
+    @Test func testGemini4HydrogenStandardPricingAndCostMapping() {
+        let hydrogenLow = knownModels.first { $0.name == "Gemini 4 Hydrogen (Low)" }
+        let hydrogenMedium = knownModels.first { $0.name == "Gemini 4 Hydrogen (Medium)" }
+        let hydrogenHigh = knownModels.first { $0.name == "Gemini 4 Hydrogen (High)" }
+        #expect(hydrogenLow?.inputPricePerMillion == 1.50)
+        #expect(hydrogenLow?.outputPricePerMillion == 7.50)
+        #expect(hydrogenLow?.cachedInputPricePerMillion == 0.075)
+        #expect(hydrogenMedium?.inputPricePerMillion == 1.50)
+        #expect(hydrogenHigh?.outputPricePerMillion == 7.50)
+
+        let meta = ConversationDbMeta(
+            llmCalls: 1,
+            totalOutputBytes: 0,
+            inputTokens: 100_000,
+            outputTokens: 10_000,
+            cachedInputTokens: 50_000
+        )
+        let query = QueryEntry(
+            display: "Hydrogen pricing test",
+            timestamp: Date(),
+            workspace: "/Users/test/workspace",
+            conversationMeta: meta,
+            modelName: "gemini-4-hydrogen"
+        )
+        let result = hydrogenHigh!.estimateTokensAndCost(for: query)
+        // 100k × $1.50/M + 50k × $0.075/M + 10k × $7.50/M = $0.22875
+        #expect(abs(result.cost - 0.22875) < 0.000001)
+
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-hydrogen") == "Gemini 4 Hydrogen (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-hydrogen-low") == "Gemini 4 Hydrogen (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("hydrogen-medium") == "Gemini 4 Hydrogen (Medium)")
+        #expect(canonicalModelDisplayName(from: "Gemini 4 Hydrogen (High)") == "Gemini 4 Hydrogen")
+    }
+
     @Test func testArgonAndClaude55CatalogAndPricing() {
         // Gemini 4 Carbon (Frontier Reasoning)
         let carbonHigh = knownModels.first { $0.name == "Gemini 4 Carbon (High)" }
