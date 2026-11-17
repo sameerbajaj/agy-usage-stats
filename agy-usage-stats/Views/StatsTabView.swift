@@ -494,7 +494,7 @@ struct StatsTabView: View {
                         }
                     }
 
-                    Text("Direct pay-as-you-go Vertex AI calls billed to Google Cloud credits. Subscription quota limits bypassed.")
+                    Text("Direct pay-as-you-go Vertex AI calls billed to Google Cloud credits (1.10× US regional rates). Subscription quota limits bypassed.")
                         .font(.system(size: 8))
                         .foregroundStyle(.secondary.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)

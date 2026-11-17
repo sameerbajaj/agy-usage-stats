@@ -537,13 +537,16 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
         }
     }
     
+    public static let gcpRegionalMultiplier: Double = 1.10
+
     public var costPerQuery: Double {
         let inputCost = (tier.inputTokens / 1_000_000.0) * inputPricePerMillion
         let outputCost = (tier.outputTokens / 1_000_000.0) * outputPricePerMillion
         return inputCost + outputCost
     }
 
-    public func estimateTokensAndCost(for query: QueryEntry) -> (inputTokens: Int, outputTokens: Int, cost: Double) {
+    public func estimateTokensAndCost(for query: QueryEntry, regionalMultiplier: Double? = nil) -> (inputTokens: Int, outputTokens: Int, cost: Double) {
+        let multiplier = regionalMultiplier ?? (query.isGcp ? Self.gcpRegionalMultiplier : 1.0)
         let trimmed = query.display.trimmingCharacters(in: .whitespacesAndNewlines)
         let offlineCommands: Set<String> = ["/help", "/clear", "/exit", "/theme", "/status", "/resume", "/settings", "/version", "/usage", "/model", "/context", "/rewind", "/auth", "/login", "/logout"]
         let commandName = trimmed.components(separatedBy: .whitespaces).first?.lowercased() ?? ""
@@ -567,7 +570,7 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
                 let cachedCost = (Double(cachedTokens) / 1_000_000.0) * cachedInputPricePerMillion
                 let outputCost = (Double(outTokens) / 1_000_000.0) * outputPricePerMillion
                 let totalInput = promptTokens + cachedTokens
-                return (totalInput, outTokens, promptCost + cachedCost + outputCost)
+                return (totalInput, outTokens, (promptCost + cachedCost + outputCost) * multiplier)
             }
         }
         
@@ -588,21 +591,15 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
         let inputCost = (Double(inputTokens) / 1_000_000.0) * inputPricePerMillion
         let outputCost = (Double(outputTokens) / 1_000_000.0) * outputPricePerMillion
         
-        return (inputTokens, outputTokens, inputCost + outputCost)
+        return (inputTokens, outputTokens, (inputCost + outputCost) * multiplier)
     }
     public static let carbonStandardPriceCutoffTimestamp: TimeInterval = 1796083200 // 2026-12-01 00:00:00 UTC
 
-    /// Date-aware pricing helper for Gemini 4 Carbon.
-    /// Before Dec 1, 2026 00:00:00 UTC (timestamp < 1796083200):
-    /// Introductory promotional pricing: $2.00 input, $10.00 output, $0.10 cached input per MTok.
-    /// On or after Dec 1, 2026 00:00:00 UTC (timestamp >= 1796083200):
-    /// Standard tier pricing: $4.00 input, $20.00 output, $0.20 cached input per MTok.
+    /// Base SKU pricing helper for Gemini 4 Carbon.
+    /// Standard tier base rates: $4.00 input, $20.00 output, $0.20 cached input per MTok
+    /// (Vertex AI 'us' GCP billing applies the 1.10x regional multiplier -> $4.40 / $22.00 / $0.22).
     public static func gemini4CarbonPricing(at date: Date = Date()) -> (input: Double, output: Double, cached: Double) {
-        if date.timeIntervalSince1970 < carbonStandardPriceCutoffTimestamp {
-            return (input: 2.00, output: 10.00, cached: 0.10)
-        } else {
-            return (input: 4.00, output: 20.00, cached: 0.20)
-        }
+        return (input: 4.00, output: 20.00, cached: 0.20)
     }
     public static func knownModels(at date: Date = Date()) -> [ModelCostInfo] {
         let carbonPricing = gemini4CarbonPricing(at: date)
@@ -618,10 +615,10 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
             ModelCostInfo(name: "Gemini 4 Carbon (Medium)", inputPricePerMillion: carbonPricing.input, outputPricePerMillion: carbonPricing.output, cachedInputPricePerMillion: carbonPricing.cached, tier: .medium),
             ModelCostInfo(name: "Gemini 4 Carbon (High)", inputPricePerMillion: carbonPricing.input, outputPricePerMillion: carbonPricing.output, cachedInputPricePerMillion: carbonPricing.cached, tier: .high),
 
-            // Frontier / Gemini 4
-            ModelCostInfo(name: "Gemini 4 Argon (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.20, tier: .low),
-            ModelCostInfo(name: "Gemini 4 Argon (Medium)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.20, tier: .medium),
-            ModelCostInfo(name: "Gemini 4 Argon (High)", inputPricePerMillion: 2.00, outputPricePerMillion: 12.00, cachedInputPricePerMillion: 0.20, tier: .high),
+            // Frontier / Gemini 4 (Argon)
+            ModelCostInfo(name: "Gemini 4 Argon (Low)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .low),
+            ModelCostInfo(name: "Gemini 4 Argon (Medium)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .medium),
+            ModelCostInfo(name: "Gemini 4 Argon (High)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .high),
 
             // Claude 5.5 Series
             ModelCostInfo(name: "Claude Sonnet 5.5 (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.20, tier: .low),
@@ -632,15 +629,15 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
             ModelCostInfo(name: "Claude Opus 5.5 (High)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .high),
 
             // Gemini 3.8 Series
-            ModelCostInfo(name: "Gemini 3.8 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .low),
-            ModelCostInfo(name: "Gemini 3.8 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .medium),
-            ModelCostInfo(name: "Gemini 3.8 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
-            ModelCostInfo(name: "Gemini 3.8 Flash Cyber", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
+            ModelCostInfo(name: "Gemini 3.8 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .low),
+            ModelCostInfo(name: "Gemini 3.8 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .medium),
+            ModelCostInfo(name: "Gemini 3.8 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .high),
+            ModelCostInfo(name: "Gemini 3.8 Flash Cyber", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .high),
 
             // Gemini 3.7 Series
-            ModelCostInfo(name: "Gemini 3.7 Flash (Low)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .low),
-            ModelCostInfo(name: "Gemini 3.7 Flash (Medium)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .medium),
-            ModelCostInfo(name: "Gemini 3.7 Flash (High)", inputPricePerMillion: 0.75, outputPricePerMillion: 3.75, cachedInputPricePerMillion: 0.075, tier: .high),
+            ModelCostInfo(name: "Gemini 3.7 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .low),
+            ModelCostInfo(name: "Gemini 3.7 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .medium),
+            ModelCostInfo(name: "Gemini 3.7 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .high),
 
             // Gemini 3.6 Series
             ModelCostInfo(name: "Gemini 3.6 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .low),
@@ -648,7 +645,7 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
             ModelCostInfo(name: "Gemini 3.6 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.15, tier: .high),
 
             // Gemini 3.5 & 3.1 Series
-            ModelCostInfo(name: "Gemini 3.5 Flash Lite", inputPricePerMillion: 0.10, outputPricePerMillion: 0.40, cachedInputPricePerMillion: 0.01, tier: .low),
+            ModelCostInfo(name: "Gemini 3.5 Flash Lite", inputPricePerMillion: 0.30, outputPricePerMillion: 2.50, cachedInputPricePerMillion: 0.03, tier: .low),
             ModelCostInfo(name: "Gemini 3.5 Flash (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.15, tier: .low),
             ModelCostInfo(name: "Gemini 3.5 Flash (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.15, tier: .medium),
             ModelCostInfo(name: "Gemini 3.5 Flash (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 9.00, cachedInputPricePerMillion: 0.15, tier: .high),

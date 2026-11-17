@@ -9,6 +9,8 @@ import Foundation
 import SQLite3
 
 public enum AgyStatsService {
+    /// Vertex AI 'us' regional multiplier (1.10x) applied exclusively to GCP direct-billed usage.
+    public static let gcpRegionalMultiplier: Double = ModelCostInfo.gcpRegionalMultiplier
     
     private struct HistoryLine: Decodable {
         let display: String
@@ -986,7 +988,10 @@ public enum AgyStatsService {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let model = resolveModel(name: name, fallback: defaultGeminiModel, at: q.timestamp)
                     
-                    let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
+                    let (inTokens, outTokens, cost) = model.estimateTokensAndCost(
+                        for: q,
+                        regionalMultiplier: isGcp ? Self.gcpRegionalMultiplier : 1.0
+                    )
                     if cost > 0 {
                         dayBucket.totalCost += cost
                         dayBucket.inputTokens += inTokens
@@ -1043,7 +1048,10 @@ public enum AgyStatsService {
                     let name = q.modelName ?? "Gemini 3.6 Flash (High)"
                     let model = resolveModel(name: name, fallback: defaultGeminiModel, at: q.timestamp)
                     
-                    let (inTokens, outTokens, cost) = model.estimateTokensAndCost(for: q)
+                    let (inTokens, outTokens, cost) = model.estimateTokensAndCost(
+                        for: q,
+                        regionalMultiplier: isGcp ? Self.gcpRegionalMultiplier : 1.0
+                    )
                     if cost > 0 {
                         monthBucket.totalCost += cost
                         monthBucket.inputTokens += inTokens
@@ -1076,11 +1084,16 @@ public enum AgyStatsService {
                 let fallbackModel = genDate >= sep2026 ? defaultGeminiModel : (knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ?? defaultGeminiModel)
                 let model = resolveModel(name: validName, fallback: fallbackModel, at: genDate)
                 
+                let authState = authForDate(genDate)
+                let isGcp = !gen.isExplicitConsumer && (gen.isGcpOrigin || authState.isGcp)
+                let accName = isGcp ? (gen.isGcpOrigin ? "GCP (\(resolvedGcpProject))" : authState.accountDisplayName) : (authState.email ?? "sameerbajaj24@gmail.com")
+                let regionalMultiplier = isGcp ? Self.gcpRegionalMultiplier : 1.0
+
                 let pTokens = gen.inputTokens ?? 0
                 let cTokens = gen.cachedInputTokens ?? 0
                 let oTokens = gen.outputTokens ?? 0
                 
-                let cost: Double
+                let baseCost: Double
                 let inTokens: Int
                 let outTokens: Int
                 
@@ -1088,20 +1101,18 @@ public enum AgyStatsService {
                     let promptCost = (Double(pTokens) / 1_000_000.0) * model.inputPricePerMillion
                     let cachedCost = (Double(cTokens) / 1_000_000.0) * model.cachedInputPricePerMillion
                     let outputCost = (Double(oTokens) / 1_000_000.0) * model.outputPricePerMillion
-                    cost = promptCost + cachedCost + outputCost
+                    baseCost = promptCost + cachedCost + outputCost
                     inTokens = pTokens + cTokens
                     outTokens = oTokens
                 } else if !gen.hasProtobufMetadata && gen.size > 0 {
                     outTokens = max(80, gen.size / 4)
                     inTokens = Int(model.tier.inputTokens * 0.35)
-                    cost = (Double(inTokens) / 1_000_000.0) * model.inputPricePerMillion + (Double(outTokens) / 1_000_000.0) * model.outputPricePerMillion
+                    baseCost = (Double(inTokens) / 1_000_000.0) * model.inputPricePerMillion + (Double(outTokens) / 1_000_000.0) * model.outputPricePerMillion
                 } else {
                     continue
                 }
-                
-                let authState = authForDate(genDate)
-                let isGcp = !gen.isExplicitConsumer && (gen.isGcpOrigin || authState.isGcp)
-                let accName = isGcp ? (gen.isGcpOrigin ? "GCP (\(resolvedGcpProject))" : authState.accountDisplayName) : (authState.email ?? "sameerbajaj24@gmail.com")
+
+                let cost = baseCost * regionalMultiplier
                 
                 totalCost += cost
                 accountCostTotals[accName, default: 0.0] += cost

@@ -266,4 +266,82 @@ struct AgyStatsServiceTests {
         #expect(q != nil)
         #expect(q?.isGcp == false)
     }
+
+    @Test
+    func testGcpRegionalMultiplierAppliesOnlyToGcpBoxAcrossAllAggregations() async throws {
+        let rootDir = FileManager.default.temporaryDirectory.appendingPathComponent("gcp-mult-test-\(UUID().uuidString)")
+        let consumerDir = rootDir.appendingPathComponent("consumer")
+        let consumerConvDir = consumerDir.appendingPathComponent("conversations")
+        let gcpDir = rootDir.appendingPathComponent("gcp")
+        let gcpConvDir = gcpDir.appendingPathComponent("conversations")
+        try FileManager.default.createDirectory(at: consumerConvDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: gcpConvDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: rootDir)
+            AgyStatsService.clearCaches()
+        }
+
+        let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+        let tsMs = Int64(now.timeIntervalSince1970 * 1000)
+
+        // Consumer box: Gemini 4 Carbon (1M in, 1M cached, 1M out -> $24.20 at 1.0x)
+        let consumerConvId = "consumer-\(UUID().uuidString)"
+        let consumerHist = "{\"display\":\"consumer prompt\",\"timestamp\":\(tsMs),\"workspace\":\"/tmp/c\",\"conversationId\":\"\(consumerConvId)\"}\n"
+        try consumerHist.write(to: consumerDir.appendingPathComponent("history.jsonl"), atomically: true, encoding: .utf8)
+        try "{\"model\":\"Gemini 4 Carbon (High)\"}".write(to: consumerDir.appendingPathComponent("settings.json"), atomically: true, encoding: .utf8)
+
+        var cDb: OpaquePointer?
+        let cDbPath = consumerConvDir.appendingPathComponent("\(consumerConvId).db").path
+        #expect(sqlite3_open(cDbPath, &cDb) == SQLITE_OK)
+        #expect(sqlite3_exec(cDb, "CREATE TABLE steps (idx INTEGER PRIMARY KEY, metadata BLOB, step_payload BLOB);", nil, nil, nil) == SQLITE_OK)
+        #expect(sqlite3_exec(cDb, "CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB, size INTEGER);", nil, nil, nil) == SQLITE_OK)
+        insertStep(db: cDb, idx: 0, metadata: makeStepMetadata(timestamp: now))
+        let cGen = makeGenMetadata(modelName: "gemini-4-carbon", inputTokens: 1_000_000, outputTokens: 1_000_000, cachedTokens: 1_000_000, stepIndex: 0)
+        insertGen(db: cDb, idx: 0, data: cGen, size: cGen.count)
+        sqlite3_close(cDb)
+
+        // GCP box: Gemini 4 Carbon (1M in, 1M cached, 1M out -> $24.20 * 1.10 = $26.62)
+        //          + Gemini 4 Hydrogen (1M in, 1M cached, 1M out -> $9.075 * 1.10 = $9.9825)
+        let gcpConvId = "gcp-\(UUID().uuidString)"
+        let gcpHist = "{\"display\":\"gcp prompt\",\"timestamp\":\(tsMs),\"workspace\":\"/tmp/g\",\"conversationId\":\"\(gcpConvId)\"}\n"
+        try gcpHist.write(to: gcpDir.appendingPathComponent("history.jsonl"), atomically: true, encoding: .utf8)
+
+        var gDb: OpaquePointer?
+        let gDbPath = gcpConvDir.appendingPathComponent("\(gcpConvId).db").path
+        #expect(sqlite3_open(gDbPath, &gDb) == SQLITE_OK)
+        #expect(sqlite3_exec(gDb, "CREATE TABLE steps (idx INTEGER PRIMARY KEY, metadata BLOB, step_payload BLOB);", nil, nil, nil) == SQLITE_OK)
+        #expect(sqlite3_exec(gDb, "CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB, size INTEGER);", nil, nil, nil) == SQLITE_OK)
+        insertStep(db: gDb, idx: 0, metadata: makeStepMetadata(timestamp: now))
+        insertStep(db: gDb, idx: 1, metadata: makeStepMetadata(timestamp: now.addingTimeInterval(5)))
+        let gGen0 = makeGenMetadata(modelName: "gemini-4-carbon", inputTokens: 1_000_000, outputTokens: 1_000_000, cachedTokens: 1_000_000, stepIndex: 0)
+        let gGen1 = makeGenMetadata(modelName: "gemini-4-hydrogen", inputTokens: 1_000_000, outputTokens: 1_000_000, cachedTokens: 1_000_000, stepIndex: 1)
+        insertGen(db: gDb, idx: 0, data: gGen0, size: gGen0.count)
+        insertGen(db: gDb, idx: 1, data: gGen1, size: gGen1.count)
+        sqlite3_close(gDb)
+
+        AgyStatsService.clearCaches()
+        let (stats, _) = await AgyStatsService.loadStats(cliDir: consumerDir.path, gcpCliDir: gcpDir.path)
+
+        let expectedConsumer = 24.20
+        let expectedGcp = 26.62 + 9.9825 // 36.6025
+        #expect(abs(stats.quotaTotalCost - expectedConsumer) < 0.0001)
+        #expect(abs(stats.quotaTodayCost - expectedConsumer) < 0.0001)
+        #expect(abs(stats.quotaWeeklyCost - expectedConsumer) < 0.0001)
+
+        #expect(abs(stats.gcpTotalCost - expectedGcp) < 0.0001)
+        #expect(abs(stats.gcpTodayCost - expectedGcp) < 0.0001)
+        #expect(abs(stats.gcpWeeklyCost - expectedGcp) < 0.0001)
+        #expect(abs(stats.totalCostEstimate - (expectedConsumer + expectedGcp)) < 0.0001)
+
+        let entriesSum = stats.gcpSpendEntries.reduce(0.0) { $0 + $1.cost }
+        #expect(abs(entriesSum - expectedGcp) < 0.0001)
+
+        let todayBucket = stats.dailyUsage.last
+        #expect(todayBucket != nil)
+        #expect(abs((todayBucket?.quotaCost ?? 0) - expectedConsumer) < 0.0001)
+        #expect(abs((todayBucket?.gcpCost ?? 0) - expectedGcp) < 0.0001)
+        #expect(abs((todayBucket?.gcpModelBreakdown["Gemini 4 Carbon (High)"] ?? 0) - 26.62) < 0.0001)
+        #expect(abs((todayBucket?.gcpModelBreakdown["Gemini 4 Hydrogen (High)"] ?? 0) - 9.9825) < 0.0001)
+        #expect(abs((todayBucket?.quotaModelBreakdown["Gemini 4 Carbon (High)"] ?? 0) - 24.20) < 0.0001)
+    }
 }

@@ -45,9 +45,12 @@ Always report build status explicitly (`BUILD SUCCEEDED` or failure reason) in h
   - Reads `gen_metadata` table to extract prompt tokens (field 1.4.2), output tokens (field 1.4.3), and cached context tokens (field 1.4.5).
   - Correlates each generation with `last_step_index` (field 1.20) to align with chronological query windows `[start, end)`.
 - **Official API Billing Formula (`ModelCostInfo`):**
-  - `Cost = (Prompt Tokens * Input Rate) + (Cached Tokens * Cached Rate) + (Output Tokens * Output Rate)`
-  - Gemini Flash: $0.75/M prompt in, $0.1875/M cached in (75% cache discount), $3.75/M out.
-  - Claude Sonnet: $3.00/M in, $0.30/M cached in (90% cache discount), $15.00/M out.
+  - `Cost = ((Prompt Tokens * Input Rate) + (Cached Tokens * Cached Rate) + (Output Tokens * Output Rate)) * Regional Multiplier` (`1.0x` Consumer, `1.10x` GCP Vertex AI `'us'`).
+  - Gemini 4 Carbon / Argon: $4.00/M in, $0.20/M cached in, $20.00/M out (GCP 1.10x: $4.40 / $0.22 / $22.00).
+  - Gemini 4 Hydrogen: $1.50/M in, $0.075/M cached in, $7.50/M out (GCP 1.10x: $1.65 / $0.0825 / $8.25).
+  - Gemini 3.7 / 3.8 Flash: $1.50/M in, $0.15/M cached in, $7.50/M out (GCP 1.10x: $1.65 / $0.165 / $8.25).
+  - Gemini 3.5 Flash Lite: $0.30/M in, $0.03/M cached in, $2.50/M out (GCP 1.10x: $0.33 / $0.033 / $2.75).
+  - Claude Sonnet: $2.00/M in (5.5) / $3.00/M in (4.6), $0.20–$0.30/M cached in, $10.00–$15.00/M out.
 
 ### Persistence
 

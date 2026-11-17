@@ -458,9 +458,10 @@ public struct OverviewTabView: View {
                     .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(theme.textPrimary)
                 Spacer()
-                Text("Region: \(viewModel.stats.gcpLocation ?? "us")")
+                Text("Region: \(viewModel.stats.gcpLocation ?? "us") (1.10×)")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(theme.textSecondary)
+                    .help("Vertex AI 'us' regional billing applies a 1.10× multiplier to base SKU token rates.")
             }
             
             Rectangle().fill(theme.divider).frame(height: 0.5)
@@ -673,6 +674,7 @@ public struct OverviewTabView: View {
                 Text("ESTIMATED COST BY MODEL")
                     .font(.system(size: 10.5, weight: .black, design: .monospaced))
                     .foregroundStyle(theme.textPrimary)
+                    .help("Consumer estimates use 1.0× base SKU rates; GCP direct calls include the 1.10× Vertex AI 'us' regional multiplier.")
                 
                 Spacer()
                 

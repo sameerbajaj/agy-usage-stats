@@ -230,7 +230,7 @@ struct CostTabView: View {
                                                 }
                                             }
                                             
-                                            Text(String(format: "$%.3f/q • rate: $%.2f / $%.2f per M", model.costPerQuery, model.inputPricePerMillion, model.outputPricePerMillion))
+                                            Text(String(format: "$%.3f/q • base: $%.2f / $%.2f / $%.3f per M (in/out/cache)", model.costPerQuery, model.inputPricePerMillion, model.outputPricePerMillion, model.cachedInputPricePerMillion))
                                                 .font(.system(size: 8, weight: .medium, design: .rounded))
                                                 .foregroundStyle(.secondary)
                                         }

@@ -628,47 +628,59 @@ struct agy_usage_statsTests {
         // Gemini 4 Carbon (Frontier Reasoning)
         let carbonHigh = knownModels.first { $0.name == "Gemini 4 Carbon (High)" }
         #expect(carbonHigh != nil)
-        #expect(carbonHigh?.inputPricePerMillion == 2.00)
-        #expect(carbonHigh?.outputPricePerMillion == 10.00)
-        #expect(carbonHigh?.cachedInputPricePerMillion == 0.10)
+        #expect(carbonHigh?.inputPricePerMillion == 4.00)
+        #expect(carbonHigh?.outputPricePerMillion == 20.00)
+        #expect(carbonHigh?.cachedInputPricePerMillion == 0.20)
 
         let carbonMedium = knownModels.first { $0.name == "Gemini 4 Carbon (Medium)" }
         #expect(carbonMedium != nil)
-        #expect(carbonMedium?.inputPricePerMillion == 2.00)
-        #expect(carbonMedium?.outputPricePerMillion == 10.00)
-        #expect(carbonMedium?.cachedInputPricePerMillion == 0.10)
+        #expect(carbonMedium?.inputPricePerMillion == 4.00)
+        #expect(carbonMedium?.outputPricePerMillion == 20.00)
+        #expect(carbonMedium?.cachedInputPricePerMillion == 0.20)
 
         let carbonLow = knownModels.first { $0.name == "Gemini 4 Carbon (Low)" }
         #expect(carbonLow != nil)
-        #expect(carbonLow?.inputPricePerMillion == 2.00)
-        #expect(carbonLow?.outputPricePerMillion == 10.00)
-        #expect(carbonLow?.cachedInputPricePerMillion == 0.10)
+        #expect(carbonLow?.inputPricePerMillion == 4.00)
+        #expect(carbonLow?.outputPricePerMillion == 20.00)
+        #expect(carbonLow?.cachedInputPricePerMillion == 0.20)
 
         // Gemini 4 Argon
         let argonHigh = knownModels.first { $0.name == "Gemini 4 Argon (High)" }
         #expect(argonHigh != nil)
-        #expect(argonHigh?.inputPricePerMillion == 2.00)
-        #expect(argonHigh?.outputPricePerMillion == 12.00)
+        #expect(argonHigh?.inputPricePerMillion == 4.00)
+        #expect(argonHigh?.outputPricePerMillion == 20.00)
         #expect(argonHigh?.cachedInputPricePerMillion == 0.20)
 
         let argonLow = knownModels.first { $0.name == "Gemini 4 Argon (Low)" }
         #expect(argonLow != nil)
-        #expect(argonLow?.inputPricePerMillion == 2.00)
-        #expect(argonLow?.outputPricePerMillion == 12.00)
+        #expect(argonLow?.inputPricePerMillion == 4.00)
+        #expect(argonLow?.outputPricePerMillion == 20.00)
         #expect(argonLow?.cachedInputPricePerMillion == 0.20)
 
-        // Gemini 3.8 Flash & 3.5 Flash Lite
+        // Gemini 3.8 Flash, 3.7 Flash & 3.5 Flash Lite
         let flash38 = knownModels.first { $0.name == "Gemini 3.8 Flash (High)" }
         #expect(flash38 != nil)
-        #expect(flash38?.inputPricePerMillion == 0.75)
-        #expect(flash38?.outputPricePerMillion == 3.75)
-        #expect(flash38?.cachedInputPricePerMillion == 0.075)
+        #expect(flash38?.inputPricePerMillion == 1.50)
+        #expect(flash38?.outputPricePerMillion == 7.50)
+        #expect(flash38?.cachedInputPricePerMillion == 0.15)
+
+        let flash38Cyber = knownModels.first { $0.name == "Gemini 3.8 Flash Cyber" }
+        #expect(flash38Cyber != nil)
+        #expect(flash38Cyber?.inputPricePerMillion == 1.50)
+        #expect(flash38Cyber?.outputPricePerMillion == 7.50)
+        #expect(flash38Cyber?.cachedInputPricePerMillion == 0.15)
+
+        let flash37 = knownModels.first { $0.name == "Gemini 3.7 Flash (High)" }
+        #expect(flash37 != nil)
+        #expect(flash37?.inputPricePerMillion == 1.50)
+        #expect(flash37?.outputPricePerMillion == 7.50)
+        #expect(flash37?.cachedInputPricePerMillion == 0.15)
 
         let flashLite = knownModels.first { $0.name == "Gemini 3.5 Flash Lite" }
         #expect(flashLite != nil)
-        #expect(flashLite?.inputPricePerMillion == 0.10)
-        #expect(flashLite?.outputPricePerMillion == 0.40)
-        #expect(flashLite?.cachedInputPricePerMillion == 0.01)
+        #expect(flashLite?.inputPricePerMillion == 0.30)
+        #expect(flashLite?.outputPricePerMillion == 2.50)
+        #expect(flashLite?.cachedInputPricePerMillion == 0.03)
 
         // Claude Sonnet 5.5
         let sonnet55High = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }
@@ -703,12 +715,18 @@ struct agy_usage_statsTests {
             modelName: nil
         )
 
-        // Argon: 100k * $2/M ($0.20) + 50k * $0.20/M ($0.010) + 10k * $12/M ($0.12) = $0.330
+        // Argon (1.0x Consumer): 100k * $4/M ($0.40) + 50k * $0.20/M ($0.010) + 10k * $20/M ($0.20) = $0.610
         let argon = knownModels.first { $0.name == "Gemini 4 Argon (High)" }!
         let argonResult = argon.estimateTokensAndCost(for: query)
         #expect(argonResult.inputTokens == 150_000)
         #expect(argonResult.outputTokens == 10_000)
-        #expect(abs(argonResult.cost - 0.330) < 0.0001)
+        #expect(abs(argonResult.cost - 0.610) < 0.0001)
+
+        // Argon (1.10x GCP): $0.610 * 1.10 = $0.671
+        var gcpQuery = query
+        gcpQuery.isGcp = true
+        let argonGcpResult = argon.estimateTokensAndCost(for: gcpQuery)
+        #expect(abs(argonGcpResult.cost - 0.671) < 0.0001)
 
         // Sonnet 5.5: 100k * $2/M ($0.20) + 50k * $0.20/M ($0.010) + 10k * $10/M ($0.10) = $0.310
         let sonnet55 = knownModels.first { $0.name == "Claude Sonnet 5.5 (High)" }!
@@ -724,21 +742,24 @@ struct agy_usage_statsTests {
     @Test func testGemini4CarbonDateAwarePricing() {
         let cutoffTimestamp: TimeInterval = 1796083200 // 2026-12-01 00:00:00 UTC
 
-        // 1. Before cutoff: Introductory pricing ($2.00 / $10.00 / $0.10)
-        let preDate = Date(timeIntervalSince1970: cutoffTimestamp - 3600)
-        let prePricing = ModelCostInfo.gemini4CarbonPricing(at: preDate)
-        #expect(prePricing.input == 2.00)
-        #expect(prePricing.output == 10.00)
-        #expect(prePricing.cached == 0.10)
+        // 1. Oct-Nov 2026 (before Dec 1 cutoff): Standard base pricing ($4.00 / $20.00 / $0.20)
+        let octDate = Date(timeIntervalSince1970: 1792108800) // 2026-10-16
+        let novDate = Date(timeIntervalSince1970: cutoffTimestamp - 3600) // 2026-11-30
+        for checkDate in [octDate, novDate] {
+            let pricing = ModelCostInfo.gemini4CarbonPricing(at: checkDate)
+            #expect(pricing.input == 4.00)
+            #expect(pricing.output == 20.00)
+            #expect(pricing.cached == 0.20)
 
-        let preModels = knownModels(at: preDate)
-        let preCarbonHigh = preModels.first { $0.name == "Gemini 4 Carbon (High)" }!
-        #expect(preCarbonHigh.inputPricePerMillion == 2.00)
-        #expect(preCarbonHigh.outputPricePerMillion == 10.00)
-        #expect(preCarbonHigh.cachedInputPricePerMillion == 0.10)
+            let models = knownModels(at: checkDate)
+            let carbonHigh = models.first { $0.name == "Gemini 4 Carbon (High)" }!
+            #expect(carbonHigh.inputPricePerMillion == 4.00)
+            #expect(carbonHigh.outputPricePerMillion == 20.00)
+            #expect(carbonHigh.cachedInputPricePerMillion == 0.20)
+        }
 
-        // Pre-cutoff cost calculation:
-        // 100k prompt * $2.00/M ($0.20) + 50k cached * $0.10/M ($0.005) + 10k output * $10.00/M ($0.10) = $0.305
+        // Base cost calculation (1.0x Consumer):
+        // 100k prompt * $4.00/M ($0.40) + 50k cached * $0.20/M ($0.010) + 10k output * $20.00/M ($0.20) = $0.610
         let meta = ConversationDbMeta(
             llmCalls: 1,
             totalOutputBytes: 40000,
@@ -748,19 +769,27 @@ struct agy_usage_statsTests {
         )
         let query = QueryEntry(
             display: "Carbon prompt test",
-            timestamp: preDate,
+            timestamp: novDate,
             workspace: "/Users/test/workspace",
             conversationId: "carbon-conv",
             type: nil,
             conversationMeta: meta,
             modelName: nil
         )
-        let preResult = preCarbonHigh.estimateTokensAndCost(for: query)
-        #expect(preResult.inputTokens == 150_000)
-        #expect(preResult.outputTokens == 10_000)
-        #expect(abs(preResult.cost - 0.305) < 0.0001)
+        let novModels = knownModels(at: novDate)
+        let novCarbonHigh = novModels.first { $0.name == "Gemini 4 Carbon (High)" }!
+        let novResult = novCarbonHigh.estimateTokensAndCost(for: query)
+        #expect(novResult.inputTokens == 150_000)
+        #expect(novResult.outputTokens == 10_000)
+        #expect(abs(novResult.cost - 0.610) < 0.0001)
 
-        // 2. On or after cutoff: Standard tier pricing ($4.00 / $20.00 / $0.20)
+        // GCP Vertex 'us' (1.10x): $0.610 * 1.10 = $0.671
+        var gcpCarbonQuery = query
+        gcpCarbonQuery.isGcp = true
+        let gcpNovResult = novCarbonHigh.estimateTokensAndCost(for: gcpCarbonQuery)
+        #expect(abs(gcpNovResult.cost - 0.671) < 0.0001)
+
+        // 2. On or after Dec 1 cutoff: Standard tier pricing ($4.00 / $20.00 / $0.20)
         let postDate = Date(timeIntervalSince1970: cutoffTimestamp)
         let postPricing = ModelCostInfo.gemini4CarbonPricing(at: postDate)
         #expect(postPricing.input == 4.00)
@@ -773,12 +802,48 @@ struct agy_usage_statsTests {
         #expect(postCarbonHigh.outputPricePerMillion == 20.00)
         #expect(postCarbonHigh.cachedInputPricePerMillion == 0.20)
 
-        // Post-cutoff cost calculation:
-        // 100k prompt * $4.00/M ($0.40) + 50k cached * $0.20/M ($0.010) + 10k output * $20.00/M ($0.20) = $0.610
         let postResult = postCarbonHigh.estimateTokensAndCost(for: query)
         #expect(postResult.inputTokens == 150_000)
         #expect(postResult.outputTokens == 10_000)
         #expect(abs(postResult.cost - 0.610) < 0.0001)
+    }
+
+    @Test func testAllSkuRatesAndGcpRegionalMultiplier() {
+        #expect(ModelCostInfo.gcpRegionalMultiplier == 1.10)
+        #expect(AgyStatsService.gcpRegionalMultiplier == 1.10)
+
+        let meta = ConversationDbMeta(
+            llmCalls: 1,
+            totalOutputBytes: 0,
+            inputTokens: 1_000_000,
+            outputTokens: 1_000_000,
+            cachedInputTokens: 1_000_000
+        )
+        let cases: [(modelName: String, expectedBase: Double, expectedGcp: Double)] = [
+            // $4.00 + $20.00 + $0.20 = $24.20 base; * 1.10 = $26.62 ($4.40 + $22.00 + $0.22)
+            ("Gemini 4 Carbon (High)", 24.20, 26.62),
+            ("Gemini 4 Argon (High)", 24.20, 26.62),
+            // $1.50 + $7.50 + $0.075 = $9.075 base; * 1.10 = $9.9825 ($1.65 + $8.25 + $0.0825)
+            ("Gemini 4 Hydrogen (High)", 9.075, 9.9825),
+            // $1.50 + $7.50 + $0.15 = $9.15 base; * 1.10 = $10.065 ($1.65 + $8.25 + $0.165)
+            ("Gemini 3.8 Flash (High)", 9.15, 10.065),
+            ("Gemini 3.8 Flash Cyber", 9.15, 10.065),
+            ("Gemini 3.7 Flash (High)", 9.15, 10.065),
+            // $0.30 + $2.50 + $0.03 = $2.83 base; * 1.10 = $3.113 ($0.33 + $2.75 + $0.033)
+            ("Gemini 3.5 Flash Lite", 2.83, 3.113)
+        ]
+
+        for (modelName, expectedBase, expectedGcp) in cases {
+            let model = knownModels.first { $0.name == modelName }
+            #expect(model != nil)
+            let consumerQ = QueryEntry(display: "test", timestamp: Date(), workspace: "/tmp", conversationMeta: meta, isGcp: false)
+            let gcpQ = QueryEntry(display: "test", timestamp: Date(), workspace: "/tmp", conversationMeta: meta, isGcp: true)
+
+            let baseRes = model!.estimateTokensAndCost(for: consumerQ)
+            let gcpRes = model!.estimateTokensAndCost(for: gcpQ)
+            #expect(abs(baseRes.cost - expectedBase) < 0.0001)
+            #expect(abs(gcpRes.cost - expectedGcp) < 0.0001)
+        }
     }
 
     @Test func testModelNamePatternMappings() {
@@ -1428,6 +1493,42 @@ struct agy_usage_statsTests {
         #expect(vm.gcpCreditBaselineTimestamp == baselineTs)
         #expect(abs(vm.gcpCostSinceBaseline - 0.09) < 0.001)
         #expect(abs(vm.gcpCreditRemaining - 179.47) < 0.001)
+    }
+
+    @Test func testReconcileGcpBaselineRateUpgradeStability() {
+        let suiteName = "test-rate-upgrade-baseline-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+
+        // Simulate persisted defaults prior to rate correction:
+        // pool = 51.78, baselineCost = 137.6756 (old rates), baselineTs = 1794499467.046857
+        let baselineTs: Double = 1794499467.046857
+        defaults.set(51.78, forKey: "agy_gcpCreditPool")
+        defaults.set(137.6755997, forKey: "agy_gcpCreditBaselineCost")
+        defaults.set(baselineTs, forKey: "agy_gcpCreditBaselineTimestamp")
+
+        let vm = AgyStatsViewModel(userDefaults: defaults)
+        #expect(vm.gcpCreditPool == 51.78)
+        #expect(vm.gcpCreditBaselineTimestamp == baselineTs)
+
+        // After upgrading rates, pre-baseline spend increases from $137.68 to $260.40,
+        // while post-baseline spend is $25.60 (total $286.00).
+        var loadedStats = AgyUsageStats.empty
+        loadedStats.gcpTotalCost = 286.00
+        loadedStats.gcpTodayCost = 3.20
+        loadedStats.gcpSpendEntries = [
+            GcpSpendEntry(timestamp: baselineTs - 86400.0, cost: 260.40),
+            GcpSpendEntry(timestamp: baselineTs + 3600.0, cost: 25.60)
+        ]
+
+        vm.stats = loadedStats
+        vm.reconcileGcpBaseline(with: loadedStats)
+
+        // Upgrading rates must NEVER reset baselineTs or pool, and must deduct only post-baseline spend
+        #expect(vm.gcpCreditBaselineTimestamp == baselineTs)
+        #expect(vm.gcpCreditPool == 51.78)
+        #expect(abs(vm.gcpCreditBaselineCost - 260.40) < 0.001)
+        #expect(abs(vm.gcpCostSinceBaseline - 25.60) < 0.001)
+        #expect(abs(vm.gcpCreditRemaining - 26.18) < 0.001)
     }
 
     @Test func testGcpIconPresentation() {

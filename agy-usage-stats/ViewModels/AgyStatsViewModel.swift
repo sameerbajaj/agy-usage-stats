@@ -400,6 +400,8 @@ public final class AgyStatsViewModel {
             self.gcpCreditBaselineTimestamp = rawBaselineTs
         } else if let num = userDefaults.object(forKey: "agy_gcpCreditBaselineTimestamp") as? NSNumber {
             self.gcpCreditBaselineTimestamp = num.doubleValue
+        } else if let str = userDefaults.string(forKey: "agy_gcpCreditBaselineTimestamp"), let parsed = Double(str.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            self.gcpCreditBaselineTimestamp = parsed
         } else {
             self.gcpCreditBaselineTimestamp = 0.0
         }
