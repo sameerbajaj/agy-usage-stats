@@ -193,20 +193,31 @@ public actor AgyQuotaService {
         let timestamp: Date
     }
 
+    private static let isRunningTests: Bool = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil || NSClassFromString("XCTestCase") != nil
+    private static let testHostDefaults = UserDefaults(suiteName: "com.agy-usage-stats.xctest-host-isolated")!
+    private static var defaultStore: UserDefaults { isRunningTests ? testHostDefaults : .standard }
+
     private static let persistedQuotaKey = "agy.lastKnownSubscriptionQuota"
     private static let persistedQuotasByEmailKey = "agy.persistedQuotasByEmail"
     private static let peakGoogleOneAiCreditsKey = "agy.peakGoogleOneAiCreditsByEmail"
     private static var _lastKnownSubscriptionQuota: AgyQuotaInfo? = {
-        if let data = UserDefaults.standard.data(forKey: persistedQuotaKey),
+        if let data = defaultStore.data(forKey: persistedQuotaKey),
            let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
+            if let email = decoded.email, isSyntheticTestEmail(email) {
+                if !isRunningTests {
+                    defaultStore.removeObject(forKey: persistedQuotaKey)
+                }
+                return nil
+            }
             return decoded
         }
         return nil
     }()
     private static var _persistedQuotasByEmail: [String: AgyQuotaInfo] = {
-        if let data = UserDefaults.standard.data(forKey: persistedQuotasByEmailKey),
+        _ = loadPeakGoogleOneAiCreditsDict(from: defaultStore)
+        if let data = defaultStore.data(forKey: persistedQuotasByEmailKey),
            let decoded = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: data) {
-            return decoded
+            return sanitizePersistedQuotasDict(decoded, persistingTo: isRunningTests ? nil : defaultStore)
         }
         return [:]
     }()
@@ -261,20 +272,72 @@ public actor AgyQuotaService {
         return trimmed
     }
 
+    public static func isSyntheticTestEmail(_ email: String) -> Bool {
+        let lower = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let atIndex = lower.lastIndex(of: "@") else { return false }
+        let domain = String(lower[lower.index(after: atIndex)...])
+        guard !domain.isEmpty else { return false }
+        if domain == "test.com" || domain == "example.com" || domain == "example.org" {
+            return true
+        }
+        let reservedSuffixes = [".internal", ".invalid", ".localhost", ".test", ".example.com", ".example.org", ".test.com"]
+        if reservedSuffixes.contains(where: { domain.hasSuffix($0) })
+            || domain == "localhost" || domain == "internal" || domain == "invalid" || domain == "test" {
+            return true
+        }
+        return false
+    }
+
+    private static func sanitizePersistedQuotasDict(
+        _ dict: [String: AgyQuotaInfo],
+        persistingTo store: UserDefaults?
+    ) -> [String: AgyQuotaInfo] {
+        var cleaned: [String: AgyQuotaInfo] = [:]
+        var removedAny = false
+        for (key, value) in dict {
+            let emailToCheck = value.email ?? key
+            if isSyntheticTestEmail(key) || isSyntheticTestEmail(emailToCheck) {
+                removedAny = true
+                continue
+            }
+            cleaned[key] = value
+        }
+        if removedAny, let store,
+           let encoded = try? JSONEncoder().encode(cleaned) {
+            store.set(encoded, forKey: persistedQuotasByEmailKey)
+        }
+        return cleaned
+    }
+
     private static func loadPersistedQuotaUnlocked(
         expectedEmail: String? = nil,
         now: Date = Date()
     ) -> AgyQuotaInfo? {
-        if let data = UserDefaults.standard.data(forKey: persistedQuotaKey),
+        let store = defaultStore
+        if let data = store.data(forKey: persistedQuotaKey),
            let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
-            _lastKnownSubscriptionQuota = decoded
+            if let email = decoded.email, isSyntheticTestEmail(email) {
+                if !isRunningTests {
+                    store.removeObject(forKey: persistedQuotaKey)
+                }
+                _lastKnownSubscriptionQuota = nil
+            } else {
+                _lastKnownSubscriptionQuota = decoded
+            }
         }
-        if let dictData = UserDefaults.standard.data(forKey: persistedQuotasByEmailKey),
+        if let dictData = store.data(forKey: persistedQuotasByEmailKey),
            let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
-            _persistedQuotasByEmail = decodedDict
+            _persistedQuotasByEmail = sanitizePersistedQuotasDict(
+                decodedDict,
+                persistingTo: isRunningTests ? nil : store
+            )
+        } else {
+            _persistedQuotasByEmail = sanitizePersistedQuotasDict(_persistedQuotasByEmail, persistingTo: nil)
         }
+        _ = loadPeakGoogleOneAiCreditsDict(from: store)
 
         if let targetEmail = normalizeEmailKey(expectedEmail) {
+            guard !isSyntheticTestEmail(targetEmail) else { return nil }
             if let emailMatch = _persistedQuotasByEmail[targetEmail] {
                 return emailMatch.normalizedForCurrentTime(now: now)
             }
@@ -293,24 +356,31 @@ public actor AgyQuotaService {
         now: Date = Date(),
         userDefaults: UserDefaults = .standard
     ) -> AgyQuotaInfo? {
-        if userDefaults === UserDefaults.standard {
+        let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
+        if resolvedStore === defaultStore {
             quotaLock.lock()
             defer { quotaLock.unlock() }
             return loadPersistedQuotaUnlocked(expectedEmail: expectedEmail, now: now)
         }
 
         var dict: [String: AgyQuotaInfo] = [:]
-        if let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+        if let dictData = resolvedStore.data(forKey: persistedQuotasByEmailKey),
            let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
-            dict = decodedDict
+            dict = sanitizePersistedQuotasDict(decodedDict, persistingTo: resolvedStore)
         }
         var lastKnown: AgyQuotaInfo? = nil
-        if let data = userDefaults.data(forKey: persistedQuotaKey),
+        if let data = resolvedStore.data(forKey: persistedQuotaKey),
            let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
-            lastKnown = decoded
+            if let email = decoded.email, isSyntheticTestEmail(email) {
+                resolvedStore.removeObject(forKey: persistedQuotaKey)
+            } else {
+                lastKnown = decoded
+            }
         }
+        _ = loadPeakGoogleOneAiCreditsDict(from: resolvedStore)
 
         if let targetEmail = normalizeEmailKey(expectedEmail) {
+            guard !isSyntheticTestEmail(targetEmail) else { return nil }
             if let emailMatch = dict[targetEmail] {
                 return emailMatch.normalizedForCurrentTime(now: now)
             }
@@ -328,12 +398,20 @@ public actor AgyQuotaService {
             return [:]
         }
         var result: [String: Int] = [:]
+        var removedAny = false
         for (key, value) in raw {
+            if isSyntheticTestEmail(key) {
+                removedAny = true
+                continue
+            }
             if let intVal = value as? Int {
                 result[key] = intVal
             } else if let numVal = value as? NSNumber {
                 result[key] = numVal.intValue
             }
+        }
+        if removedAny {
+            userDefaults.set(result, forKey: peakGoogleOneAiCreditsKey)
         }
         return result
     }
@@ -343,6 +421,7 @@ public actor AgyQuotaService {
         credits: Int,
         userDefaults: UserDefaults
     ) {
+        guard !isSyntheticTestEmail(emailKey) else { return }
         var peaks = loadPeakGoogleOneAiCreditsDict(from: userDefaults)
         let existing = peaks[emailKey]
         let newPeak = existing.map { max($0, credits) } ?? credits
@@ -356,106 +435,169 @@ public actor AgyQuotaService {
         forEmail: String,
         userDefaults: UserDefaults = .standard
     ) -> Int? {
-        guard let emailKey = normalizeEmailKey(forEmail) else { return nil }
-        if userDefaults === UserDefaults.standard {
+        guard let emailKey = normalizeEmailKey(forEmail),
+              !isSyntheticTestEmail(emailKey) else { return nil }
+        let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
+        if resolvedStore === defaultStore {
             quotaLock.lock()
             defer { quotaLock.unlock() }
-            return loadPeakGoogleOneAiCreditsDict(from: userDefaults)[emailKey]
+            return loadPeakGoogleOneAiCreditsDict(from: resolvedStore)[emailKey]
         }
-        return loadPeakGoogleOneAiCreditsDict(from: userDefaults)[emailKey]
+        return loadPeakGoogleOneAiCreditsDict(from: resolvedStore)[emailKey]
     }
 
     public static func allPersistedQuotas(
         now: Date = Date(),
         userDefaults: UserDefaults = .standard
     ) -> [String: AgyQuotaInfo] {
-        if userDefaults === UserDefaults.standard {
+        let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
+        if resolvedStore === defaultStore {
             quotaLock.lock()
-            if let dictData = UserDefaults.standard.data(forKey: persistedQuotasByEmailKey),
+            if let dictData = resolvedStore.data(forKey: persistedQuotasByEmailKey),
                let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
-                _persistedQuotasByEmail = decodedDict
+                _persistedQuotasByEmail = sanitizePersistedQuotasDict(
+                    decodedDict,
+                    persistingTo: isRunningTests ? nil : resolvedStore
+                )
+            } else {
+                _persistedQuotasByEmail = sanitizePersistedQuotasDict(
+                    _persistedQuotasByEmail,
+                    persistingTo: isRunningTests ? nil : resolvedStore
+                )
             }
+            _ = loadPeakGoogleOneAiCreditsDict(from: resolvedStore)
             let snapshot = _persistedQuotasByEmail
             quotaLock.unlock()
             return snapshot.mapValues { $0.normalizedForCurrentTime(now: now) }
         }
 
-        guard let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+        _ = loadPeakGoogleOneAiCreditsDict(from: resolvedStore)
+        guard let dictData = resolvedStore.data(forKey: persistedQuotasByEmailKey),
               let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) else {
             return [:]
         }
-        return decodedDict.mapValues { $0.normalizedForCurrentTime(now: now) }
+        let cleaned = sanitizePersistedQuotasDict(decodedDict, persistingTo: resolvedStore)
+        return cleaned.mapValues { $0.normalizedForCurrentTime(now: now) }
     }
 
     public static func saveQuotaSnapshotForAccount(_ info: AgyQuotaInfo, userDefaults: UserDefaults = .standard) {
-        guard let emailKey = normalizeEmailKey(info.email) else { return }
-        if userDefaults === UserDefaults.standard {
+        guard let emailKey = normalizeEmailKey(info.email),
+              !isSyntheticTestEmail(emailKey) else { return }
+        let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
+        if resolvedStore === defaultStore {
             quotaLock.lock()
             _persistedQuotasByEmail[emailKey] = info
             let dictSnapshot = _persistedQuotasByEmail
             if let credits = info.googleOneAiCredits {
-                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
             }
             quotaLock.unlock()
 
             if let dictData = try? JSONEncoder().encode(dictSnapshot) {
-                userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
+                resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
             }
             return
         }
 
         var dict: [String: AgyQuotaInfo] = [:]
-        if let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+        if let dictData = resolvedStore.data(forKey: persistedQuotasByEmailKey),
            let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
-            dict = decodedDict
+            dict = sanitizePersistedQuotasDict(decodedDict, persistingTo: resolvedStore)
         }
         dict[emailKey] = info
         if let credits = info.googleOneAiCredits {
-            updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+            updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
         }
         if let dictData = try? JSONEncoder().encode(dict) {
-            userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
+            resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
         }
     }
 
     public static func savePersistedQuota(_ info: AgyQuotaInfo, userDefaults: UserDefaults = .standard) {
-        if userDefaults === UserDefaults.standard {
+        if let email = info.email, isSyntheticTestEmail(email) {
+            return
+        }
+        let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
+        if resolvedStore === defaultStore {
             quotaLock.lock()
             _lastKnownSubscriptionQuota = info
             if let emailKey = normalizeEmailKey(info.email) {
                 _persistedQuotasByEmail[emailKey] = info
                 if let credits = info.googleOneAiCredits {
-                    updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+                    updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
                 }
             }
             let dictSnapshot = _persistedQuotasByEmail
             quotaLock.unlock()
 
             if let data = try? JSONEncoder().encode(info) {
-                userDefaults.set(data, forKey: persistedQuotaKey)
+                resolvedStore.set(data, forKey: persistedQuotaKey)
             }
             if let dictData = try? JSONEncoder().encode(dictSnapshot) {
-                userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
+                resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
             }
             return
         }
 
         var dict: [String: AgyQuotaInfo] = [:]
-        if let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+        if let dictData = resolvedStore.data(forKey: persistedQuotasByEmailKey),
            let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
-            dict = decodedDict
+            dict = sanitizePersistedQuotasDict(decodedDict, persistingTo: resolvedStore)
         }
         if let emailKey = normalizeEmailKey(info.email) {
             dict[emailKey] = info
             if let credits = info.googleOneAiCredits {
-                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
             }
         }
         if let data = try? JSONEncoder().encode(info) {
-            userDefaults.set(data, forKey: persistedQuotaKey)
+            resolvedStore.set(data, forKey: persistedQuotaKey)
         }
         if let dictData = try? JSONEncoder().encode(dict) {
-            userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
+            resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
+        }
+    }
+
+    public static func removePersistedAccount(_ email: String, userDefaults: UserDefaults? = nil) {
+        guard let emailKey = normalizeEmailKey(email) else { return }
+        let targetStore = userDefaults ?? .standard
+        let resolvedStore = (targetStore === UserDefaults.standard) ? defaultStore : targetStore
+
+        if resolvedStore === defaultStore {
+            quotaLock.lock()
+            _persistedQuotasByEmail.removeValue(forKey: emailKey)
+            let dictSnapshot = _persistedQuotasByEmail
+            if let last = _lastKnownSubscriptionQuota, normalizeEmailKey(last.email) == emailKey {
+                _lastKnownSubscriptionQuota = nil
+                resolvedStore.removeObject(forKey: persistedQuotaKey)
+            }
+            var peaks = loadPeakGoogleOneAiCreditsDict(from: resolvedStore)
+            if peaks.removeValue(forKey: emailKey) != nil {
+                resolvedStore.set(peaks, forKey: peakGoogleOneAiCreditsKey)
+            }
+            quotaLock.unlock()
+
+            if let dictData = try? JSONEncoder().encode(dictSnapshot) {
+                resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
+            }
+            return
+        }
+
+        if let dictData = resolvedStore.data(forKey: persistedQuotasByEmailKey),
+           var dict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
+            if dict.removeValue(forKey: emailKey) != nil,
+               let encoded = try? JSONEncoder().encode(dict) {
+                resolvedStore.set(encoded, forKey: persistedQuotasByEmailKey)
+            }
+        }
+        if let data = resolvedStore.data(forKey: persistedQuotaKey),
+           let last = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data),
+           normalizeEmailKey(last.email) == emailKey {
+            resolvedStore.removeObject(forKey: persistedQuotaKey)
+        }
+        var peaks = loadPeakGoogleOneAiCreditsDict(from: resolvedStore)
+        if peaks.removeValue(forKey: emailKey) != nil {
+            resolvedStore.set(peaks, forKey: peakGoogleOneAiCreditsKey)
         }
     }
 

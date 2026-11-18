@@ -1288,7 +1288,8 @@ public enum AgyStatsService {
                       trimmed.contains("@"),
                       !trimmed.hasPrefix("GCP ("),
                       trimmed != "Google Cloud API",
-                      trimmed != "Account Quota" else { return }
+                      trimmed != "Account Quota",
+                      !AgyQuotaService.isSyntheticTestEmail(trimmed) else { return }
                 let key = trimmed.lowercased()
                 if discoveredByLower[key] == nil {
                     discoveredByLower[key] = trimmed
@@ -1459,11 +1460,11 @@ public enum AgyStatsService {
               prefix[5] == " ", prefix[8] == ":", prefix[11] == ":" else {
             return nil
         }
-        guard let month = Int(String(prefix[1...2])),
-              let day = Int(String(prefix[3...4])),
-              let hour = Int(String(prefix[6...7])),
-              let minute = Int(String(prefix[9...10])),
-              let second = Int(String(prefix[12...13])) else {
+        guard let month = Int(String(prefix[1...2])), (1...12).contains(month),
+              let day = Int(String(prefix[3...4])), (1...31).contains(day),
+              let hour = Int(String(prefix[6...7])), (0...23).contains(hour),
+              let minute = Int(String(prefix[9...10])), (0...59).contains(minute),
+              let second = Int(String(prefix[12...13])), (0...60).contains(second) else {
             return nil
         }
         var nanosecond = 0
@@ -1586,14 +1587,24 @@ public enum AgyStatsService {
                 continue
             }
 
+            // Anchor auth events to genuine Go glog headers (e.g. `I1117 19:13:16.341234 ...`)
+            // so agent tool outputs, code snippets, and diffs inside logs are never parsed as auth events.
+            guard let lineTs = parseGlogTimestamp(line: line, year: year, calendar: calendar) else {
+                if linesSinceGcpApplyAuth > 0 { linesSinceGcpApplyAuth -= 1 }
+                continue
+            }
+
             let range = NSRange(line.startIndex..<line.endIndex, in: line)
-            let lineTs = parseGlogTimestamp(line: line, year: year, calendar: calendar)
 
             if let regex = applyAuthRegex,
                let match = regex.firstMatch(in: line, range: range),
                let emailRange = Range(match.range(at: 1), in: line),
                let methodRange = Range(match.range(at: 2), in: line) {
                 let email = cleanExtractedEmail(String(line[emailRange]))
+                if let email, AgyQuotaService.isSyntheticTestEmail(email) {
+                    if linesSinceGcpApplyAuth > 0 { linesSinceGcpApplyAuth -= 1 }
+                    continue
+                }
                 let method = String(line[methodRange])
                 var project: String? = nil
                 if match.range(at: 3).location != NSNotFound,
@@ -1629,7 +1640,8 @@ public enum AgyStatsService {
                let match = regex.firstMatch(in: line, range: range),
                let emailRange = Range(match.range(at: 1), in: line) {
                 linesSinceGcpApplyAuth = 0
-                if let email = cleanExtractedEmail(String(line[emailRange])) {
+                if let email = cleanExtractedEmail(String(line[emailRange])),
+                   !AgyQuotaService.isSyntheticTestEmail(email) {
                     events.append(ParsedLogAuthEvent(
                         timestamp: lineTs,
                         isGcp: false,
@@ -1648,7 +1660,8 @@ public enum AgyStatsService {
                     if linesSinceGcpApplyAuth > 0 { linesSinceGcpApplyAuth -= 1 }
                     continue
                 }
-                if let email = cleanExtractedEmail(String(line[emailRange])) {
+                if let email = cleanExtractedEmail(String(line[emailRange])),
+                   !AgyQuotaService.isSyntheticTestEmail(email) {
                     events.append(ParsedLogAuthEvent(
                         timestamp: lineTs,
                         isGcp: false,
@@ -1662,22 +1675,30 @@ public enum AgyStatsService {
 
             if includeLegacyMarkers {
                 if line.contains("authMethod=gcp") || line.contains("gcp_setup.go") || line.contains("[Auth State Transition]") || line.contains("GCP setup completed") || line.contains("aiplatform.googleapis.com") || line.contains("aiplatform.us.rep.googleapis.com") {
+                    let extracted = extractFirstValidEmail(in: line)
+                    if let extracted, AgyQuotaService.isSyntheticTestEmail(extracted) {
+                        continue
+                    }
                     linesSinceGcpApplyAuth = 3
                     events.append(ParsedLogAuthEvent(
                         timestamp: lineTs,
                         isGcp: true,
-                        email: extractFirstValidEmail(in: line),
+                        email: extracted,
                         project: defaultProject ?? "clawdbot-485304",
                         isConsumerOAuth: false
                     ))
                     continue
                 }
                 if line.contains("authMethod=consumer") || line.contains("daily-cloudcode-pa.googleapis.com") {
+                    let extracted = extractFirstValidEmail(in: line)
+                    if let extracted, AgyQuotaService.isSyntheticTestEmail(extracted) {
+                        continue
+                    }
                     linesSinceGcpApplyAuth = 0
                     events.append(ParsedLogAuthEvent(
                         timestamp: lineTs,
                         isGcp: false,
-                        email: extractFirstValidEmail(in: line),
+                        email: extracted,
                         project: nil,
                         isConsumerOAuth: false
                     ))
@@ -1745,7 +1766,9 @@ public enum AgyStatsService {
            let authMethod = json["auth_method"] as? String,
            authMethod == "consumer" {
             let rawEmail = (json["id_token_email"] as? String) ?? (json["email"] as? String)
-            if let email = rawEmail.flatMap({ cleanExtractedEmail($0) }), !email.isEmpty {
+            if let email = rawEmail.flatMap({ cleanExtractedEmail($0) }),
+               !email.isEmpty,
+               !AgyQuotaService.isSyntheticTestEmail(email) {
                 return cacheAndReturn(email)
             }
         }

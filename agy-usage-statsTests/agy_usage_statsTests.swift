@@ -2091,7 +2091,7 @@ struct agy_usage_statsTests {
             buckets: [bucket]
         )
         let originalInfo = AgyQuotaInfo(
-            email: "roundtrip@company.internal",
+            email: "roundtrip@acme.org",
             plan: "Team Quota",
             groups: [group]
         )
@@ -2127,7 +2127,7 @@ struct agy_usage_statsTests {
             resetTime: nil
         )
         let group = AgyQuotaGroup(displayName: "Sticky Group", buckets: [bucket])
-        let originalInfo = AgyQuotaInfo(email: "sticky@company.internal", plan: "Pro", groups: [group])
+        let originalInfo = AgyQuotaInfo(email: "sticky@acme.org", plan: "Pro", groups: [group])
 
         AgyQuotaService.savePersistedQuota(originalInfo)
 
@@ -2170,7 +2170,7 @@ struct agy_usage_statsTests {
             resetTime: pastIsoString
         )
         let group = AgyQuotaGroup(displayName: "Gemini", buckets: [bucket])
-        let unnormalizedInfo = AgyQuotaInfo(email: "expired@test.com", plan: "Pro", groups: [group])
+        let unnormalizedInfo = AgyQuotaInfo(email: "expired@corp-workspace.io", plan: "Pro", groups: [group])
 
         AgyQuotaService.savePersistedQuota(unnormalizedInfo)
 
@@ -2677,6 +2677,116 @@ struct agy_usage_statsTests {
             AccountSpendEntry(email: "secondary@custom.io", timestamp: Date().timeIntervalSince1970 - 1, cost: 3.75)
         vm.resetAccountCreditBaseline(for: "secondary@custom.io")
         #expect(vm.accountCostSinceBaseline(for: "secondary@custom.io") == 0.0)
+    }
+
+    @Test func testSyntheticTestEmailsAreStrippedFromPersistedQuotasAndIsolatedFromStandardDefaults() throws {
+        #expect(AgyQuotaService.isSyntheticTestEmail("expired@test.com") == true)
+        #expect(AgyQuotaService.isSyntheticTestEmail("roundtrip@company.internal") == true)
+        #expect(AgyQuotaService.isSyntheticTestEmail("user@example.com") == true)
+        #expect(AgyQuotaService.isSyntheticTestEmail("user@example.org") == true)
+        #expect(AgyQuotaService.isSyntheticTestEmail("user@bad.invalid") == true)
+        #expect(AgyQuotaService.isSyntheticTestEmail("user@dev.localhost") == true)
+        #expect(AgyQuotaService.isSyntheticTestEmail("user@local.test") == true)
+        #expect(AgyQuotaService.isSyntheticTestEmail("real@acme.org") == false)
+        #expect(AgyQuotaService.isSyntheticTestEmail("bajajsameer24@gmail.com") == false)
+
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let group = AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+            AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 0.9, disabled: false)
+        ])
+        let pollutedDict: [String: AgyQuotaInfo] = [
+            "expired@test.com": AgyQuotaInfo(email: "expired@test.com", plan: "Pro", groups: [group]),
+            "roundtrip@company.internal": AgyQuotaInfo(email: "roundtrip@company.internal", plan: "Pro", groups: [group]),
+            "real@acme.org": AgyQuotaInfo(email: "real@acme.org", plan: "Pro", groups: [group])
+        ]
+        isolatedDefaults.set(try JSONEncoder().encode(pollutedDict), forKey: "agy.persistedQuotasByEmail")
+        isolatedDefaults.set(
+            try JSONEncoder().encode(AgyQuotaInfo(email: "expired@test.com", plan: "Pro", groups: [group])),
+            forKey: "agy.lastKnownSubscriptionQuota"
+        )
+        isolatedDefaults.set([
+            "expired@test.com": 100,
+            "sticky@company.internal": 200,
+            "real@acme.org": 500
+        ], forKey: "agy.peakGoogleOneAiCreditsByEmail")
+
+        let all = AgyQuotaService.allPersistedQuotas(userDefaults: isolatedDefaults)
+        #expect(all.keys.sorted() == ["real@acme.org"])
+        #expect(AgyQuotaService.loadPersistedQuota(expectedEmail: "expired@test.com", userDefaults: isolatedDefaults) == nil)
+        #expect(AgyQuotaService.loadPersistedQuota(expectedEmail: "roundtrip@company.internal", userDefaults: isolatedDefaults) == nil)
+        #expect(AgyQuotaService.loadPersistedQuota(expectedEmail: "real@acme.org", userDefaults: isolatedDefaults)?.email == "real@acme.org")
+        #expect(AgyQuotaService.peakGoogleOneAiCredits(forEmail: "expired@test.com", userDefaults: isolatedDefaults) == nil)
+        #expect(AgyQuotaService.peakGoogleOneAiCredits(forEmail: "sticky@company.internal", userDefaults: isolatedDefaults) == nil)
+        #expect(AgyQuotaService.peakGoogleOneAiCredits(forEmail: "real@acme.org", userDefaults: isolatedDefaults) == 500)
+
+        // Verify raw persisted store was healed on disk
+        let cleanedData = isolatedDefaults.data(forKey: "agy.persistedQuotasByEmail")
+        let cleanedDecoded = cleanedData.flatMap { try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: $0) }
+        #expect(cleanedDecoded?.keys.sorted() == ["real@acme.org"])
+
+        // Verify calling savePersistedQuota with default store during tests never writes to UserDefaults.standard
+        let probeEmail = "isolation-\(UUID().uuidString)@acme.org"
+        let beforeStandard = UserDefaults.standard.data(forKey: "agy.persistedQuotasByEmail")
+        AgyQuotaService.savePersistedQuota(AgyQuotaInfo(email: probeEmail, plan: "Pro", groups: [group]))
+        let afterStandard = UserDefaults.standard.data(forKey: "agy.persistedQuotasByEmail")
+        #expect(beforeStandard == afterStandard)
+        AgyQuotaService.removePersistedAccount(probeEmail)
+    }
+
+    @Test func testDismissAccountHidesInactiveUnusedAndAutoRestoresWhenActiveOrSpent() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let group = AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+            AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 1.0, disabled: false)
+        ])
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "old.unused@gmail.com", plan: "Pro", groups: [group], googleOneAiCredits: 100),
+            userDefaults: isolatedDefaults
+        )
+
+        let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.activeConsumerEmail = "primary@gmail.com"
+        var stats = AgyUsageStats.empty
+        stats.discoveredConsumerEmails = ["primary@gmail.com", "old.unused@gmail.com", "active.spend@gmail.com"]
+        stats.accountTodayTotals = ["primary@gmail.com": 15.67, "active.spend@gmail.com": 1.44]
+        stats.accountCostTotals = ["primary@gmail.com": 15.67, "active.spend@gmail.com": 1.44]
+        vm.stats = stats
+
+        // Before dismissal: all 3 non-synthetic accounts appear; subline excludes $0.00 unused account
+        #expect(vm.subscriptionAccountSummaries.map(\.id).sorted() == ["active.spend@gmail.com", "old.unused@gmail.com", "primary@gmail.com"])
+        let sublineParts = OverviewTabView.formattedActiveAccountSpendParts(
+            summaries: vm.subscriptionAccountSummaries,
+            spendForSummary: { $0.todayCost }
+        )
+        #expect(sublineParts == ["primary@gmail.com: $15.67", "active.spend@gmail.com: $1.44"])
+        #expect(!sublineParts.joined(separator: " · ").contains("unused"))
+
+        // Dismiss inactive unused account
+        vm.dismissAccount("old.unused@gmail.com")
+        #expect(vm.dismissedConsumerEmails.contains("old.unused@gmail.com"))
+        #expect(!vm.subscriptionAccountSummaries.contains(where: { $0.id == "old.unused@gmail.com" }))
+        #expect(AgyQuotaService.allPersistedQuotas(userDefaults: isolatedDefaults)["old.unused@gmail.com"] == nil)
+
+        // Auto-restore when dismissed account becomes activeConsumerEmail
+        vm.activeConsumerEmail = "old.unused@gmail.com"
+        #expect(!vm.dismissedConsumerEmails.contains("old.unused@gmail.com"))
+        #expect(vm.subscriptionAccountSummaries.contains(where: { $0.id == "old.unused@gmail.com" }))
+
+        // Re-dismiss once no longer active, then auto-restore when todayCost > 0.005
+        vm.activeConsumerEmail = "primary@gmail.com"
+        vm.dismissAccount("old.unused@gmail.com")
+        #expect(!vm.subscriptionAccountSummaries.contains(where: { $0.id == "old.unused@gmail.com" }))
+
+        var updatedStats = stats
+        updatedStats.accountTodayTotals["old.unused@gmail.com"] = 0.02
+        vm.stats = updatedStats
+        #expect(!vm.dismissedConsumerEmails.contains("old.unused@gmail.com"))
+        #expect(vm.subscriptionAccountSummaries.contains(where: { $0.id == "old.unused@gmail.com" }))
     }
 }
 

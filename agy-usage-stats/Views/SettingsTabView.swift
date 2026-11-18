@@ -662,6 +662,20 @@ private struct SubscriptionAccountRowView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(badge.background))
+
+                if !summary.isActive {
+                    Button {
+                        viewModel.dismissAccount(summary.email)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(theme.textTertiary)
+                            .padding(3)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Hide account from list")
+                }
             }
 
             // Second line: Quota & AI Credits

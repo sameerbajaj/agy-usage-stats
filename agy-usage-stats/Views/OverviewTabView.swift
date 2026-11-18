@@ -282,6 +282,17 @@ public struct OverviewTabView: View {
         return peakBucket
     }
 
+    public static func formattedActiveAccountSpendParts(
+        summaries: [SubscriptionAccountSummary],
+        spendForSummary: (SubscriptionAccountSummary) -> Double
+    ) -> [String] {
+        summaries.compactMap { summary in
+            let spend = spendForSummary(summary)
+            guard spend > 0.005 else { return nil }
+            return String(format: "\(summary.email): $%.2f", spend)
+        }
+    }
+
     private func timeframeSpend(for summary: SubscriptionAccountSummary) -> Double {
         if let pinned = pinnedBucket {
             return accountCost(in: pinned, emailKey: summary.id)
@@ -1102,16 +1113,16 @@ public struct OverviewTabView: View {
                 }
 
                 if (selectedAccount == .all || (selectedAccount == .subscription && effectiveSelectedSubscriptionEmail == nil)) && viewModel.subscriptionAccountSummaries.count > 1 {
-                    let accountParts = viewModel.subscriptionAccountSummaries.map { summary in
-                        let spend = timeframeSpend(for: summary)
-                        return spend < 0.005
-                            ? "\(summary.email): $0.00 (unused)"
-                            : String(format: "\(summary.email): $%.2f", spend)
+                    let nonZeroAccounts = Self.formattedActiveAccountSpendParts(
+                        summaries: viewModel.subscriptionAccountSummaries,
+                        spendForSummary: { timeframeSpend(for: $0) }
+                    )
+                    if !nonZeroAccounts.isEmpty {
+                        Text("↳ " + nonZeroAccounts.joined(separator: " · "))
+                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text("↳ " + accountParts.joined(separator: " · "))
-                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.vertical, 2)

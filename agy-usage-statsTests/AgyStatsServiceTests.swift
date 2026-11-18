@@ -487,4 +487,44 @@ struct AgyStatsServiceTests {
         #expect(!stats.consumerSpendEntries.isEmpty)
         #expect(stats.consumerSpendEntries.allSatisfy { $0.email == "used.account@acme.io" })
     }
+
+    @Test
+    func testParseAuthEventsIgnoresNonGlogLinesAndSyntheticEmails() throws {
+        let rootDir = FileManager.default.temporaryDirectory.appendingPathComponent("glog-anchor-\(UUID().uuidString)")
+        let logDir = rootDir.appendingPathComponent("log")
+        try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: rootDir)
+            AgyStatsService.clearCaches()
+        }
+
+        let logFile = logDir.appendingPathComponent("cli-20261117_191300.log")
+        let logContent = """
+        I1117 19:13:16.341234    2203 server_oauth.go:221] applyAuthResult: email=real.user@acme.org, authMethod=consumer, quotaProject=
+        I1117 19:14:00.000000    2203 server_oauth.go:221] applyAuthResult: email=fixture@test.com, authMethod=consumer, quotaProject=
+        I1117 19:14:01.000000    2203 server_oauth.go:221] applyAuthResult: email=leak@company.internal, authMethod=consumer, quotaProject=
+        applyAuthResult: email=fake@domain.com, authMethod=consumer, quotaProject=
+        +I1117 19:15:00.000000    2203 server_oauth.go:221] applyAuthResult: email=diff@domain.com, authMethod=consumer, quotaProject=
+          consumerOAuth: authenticated successfully as tool@domain.com
+        {"tool_output":"OAuth: authenticated successfully as payload@domain.com"}
+        """
+        try logContent.write(to: logFile, atomically: true, encoding: .utf8)
+
+        let cliLogSymlink = rootDir.appendingPathComponent("cli.log")
+        try FileManager.default.createSymbolicLink(at: cliLogSymlink, withDestinationURL: logFile)
+
+        AgyStatsService.clearCaches()
+        let resolved = AgyStatsService.resolveActiveConsumerEmail(cliDir: rootDir.path)
+        #expect(resolved == "real.user@acme.org")
+
+        let transitions = AgyStatsService.loadAuthTransitions(logDir: logDir.path, defaultProject: nil)
+        let emails = Set(transitions.compactMap(\.email))
+        #expect(emails.contains("real.user@acme.org"))
+        #expect(!emails.contains("fake@domain.com"))
+        #expect(!emails.contains("diff@domain.com"))
+        #expect(!emails.contains("tool@domain.com"))
+        #expect(!emails.contains("payload@domain.com"))
+        #expect(!emails.contains("fixture@test.com"))
+        #expect(!emails.contains("leak@company.internal"))
+    }
 }

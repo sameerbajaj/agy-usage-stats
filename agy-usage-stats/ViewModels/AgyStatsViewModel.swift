@@ -318,6 +318,39 @@ public final class AgyStatsViewModel {
     private var accountCreditPools: [String: Double] = [:]
     private var accountCreditBaselineTimestamps: [String: Double] = [:]
 
+    // Dismissed/hidden consumer accounts (persisted, auto-restored if active or accruing new today spend > $0.005)
+    public var dismissedConsumerEmails: Set<String> = []
+
+    public func dismissAccount(_ email: String) {
+        let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return }
+        if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           active == key {
+            return
+        }
+        if dismissedConsumerEmails.insert(key).inserted {
+            userDefaults.set(Array(dismissedConsumerEmails).sorted(), forKey: "agy_dismissedConsumerEmails")
+        }
+        AgyQuotaService.removePersistedAccount(key, userDefaults: userDefaults)
+    }
+
+    private func reconcileDismissedConsumerEmails() {
+        guard !dismissedConsumerEmails.isEmpty else { return }
+        var updated = dismissedConsumerEmails
+        if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !active.isEmpty {
+            updated.remove(active)
+        }
+        for (account, cost) in stats.accountTodayTotals where cost > 0.005 {
+            let key = account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            updated.remove(key)
+        }
+        if updated != dismissedConsumerEmails {
+            dismissedConsumerEmails = updated
+            userDefaults.set(Array(updated).sorted(), forKey: "agy_dismissedConsumerEmails")
+        }
+    }
+
     public func accountCreditPool(for email: String) -> Double {
         let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !key.isEmpty else { return 0.0 }
@@ -373,7 +406,8 @@ public final class AgyStatsViewModel {
                   trimmed.contains("@"),
                   !trimmed.hasPrefix("GCP ("),
                   trimmed != "Google Cloud API",
-                  trimmed != "Account Quota" else { return }
+                  trimmed != "Account Quota",
+                  !AgyQuotaService.isSyntheticTestEmail(trimmed) else { return }
             let key = trimmed.lowercased()
             if displayEmailByLower[key] == nil {
                 displayEmailByLower[key] = trimmed
@@ -388,17 +422,20 @@ public final class AgyStatsViewModel {
         registerEmail(stats.quotaInfo?.email)
         for key in persistedQuotas.keys { registerEmail(key) }
         if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !active.isEmpty, active.contains("@") {
+           !active.isEmpty, active.contains("@"),
+           !AgyQuotaService.isSyntheticTestEmail(active) {
             displayEmailByLower[active.lowercased()] = active
         }
 
         let activeKey: String? = {
             if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !active.isEmpty, active.contains("@") {
+               !active.isEmpty, active.contains("@"),
+               !AgyQuotaService.isSyntheticTestEmail(active) {
                 return active.lowercased()
             }
             if let quotaEmail = stats.quotaInfo?.email?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !quotaEmail.isEmpty, quotaEmail.contains("@") {
+               !quotaEmail.isEmpty, quotaEmail.contains("@"),
+               !AgyQuotaService.isSyntheticTestEmail(quotaEmail) {
                 return quotaEmail.lowercased()
             }
             return nil
@@ -416,8 +453,12 @@ public final class AgyStatsViewModel {
             }
         }
 
-        let summaries = displayEmailByLower.map { (key, displayEmail) -> SubscriptionAccountSummary in
+        let summaries = displayEmailByLower.compactMap { (key, displayEmail) -> SubscriptionAccountSummary? in
             let isActive = (key == activeKey)
+            let todayCost = sumDouble(stats.accountTodayTotals, key: key)
+            if dismissedConsumerEmails.contains(key) && !isActive && todayCost <= 0.005 {
+                return nil
+            }
             let liveMatchingQuota: AgyQuotaInfo? = {
                 guard let q = stats.quotaInfo,
                       q.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == key else {
@@ -426,7 +467,6 @@ public final class AgyStatsViewModel {
                 return q
             }()
             let quota = isActive ? (liveMatchingQuota ?? persistedQuotas[key]) : (persistedQuotas[key] ?? liveMatchingQuota)
-            let todayCost = sumDouble(stats.accountTodayTotals, key: key)
             let weeklyCost = sumDouble(stats.accountWeeklyTotals, key: key)
             let totalCost = sumDouble(stats.accountCostTotals, key: key)
             let todayQueries = sumInt(stats.accountQueryTodayTotals, key: key)
@@ -478,9 +518,17 @@ public final class AgyStatsViewModel {
     }
     
     // UI States
-    public var stats: AgyUsageStats = .empty
+    public var stats: AgyUsageStats = .empty {
+        didSet {
+            reconcileDismissedConsumerEmails()
+        }
+    }
     public var settings: AgySettings = .default
-    public var activeConsumerEmail: String? = nil
+    public var activeConsumerEmail: String? = nil {
+        didSet {
+            reconcileDismissedConsumerEmails()
+        }
+    }
     public var isRefreshing = false
     public var isConnected = false
     public var searchQuery = String()
@@ -633,10 +681,19 @@ public final class AgyStatsViewModel {
             self.accountCreditBaselineTimestamps = loadedTimestamps
         }
         
+        if let savedDismissed = userDefaults.array(forKey: "agy_dismissedConsumerEmails") as? [String] {
+            self.dismissedConsumerEmails = Set(
+                savedDismissed
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+            )
+        }
+
         let expanded = self.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         let path = (expanded as NSString).appendingPathComponent("history.jsonl")
         self.isConnected = FileManager.default.fileExists(atPath: path)
         self.activeConsumerEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: self.cliDir)
+        reconcileDismissedConsumerEmails()
     }
     
     private static let isoFormatter = ISO8601DateFormatter()
