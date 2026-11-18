@@ -344,4 +344,147 @@ struct AgyStatsServiceTests {
         #expect(abs((todayBucket?.gcpModelBreakdown["Gemini 4 Hydrogen (High)"] ?? 0) - 9.9825) < 0.0001)
         #expect(abs((todayBucket?.quotaModelBreakdown["Gemini 4 Carbon (High)"] ?? 0) - 24.20) < 0.0001)
     }
+
+    @Test
+    func testMidLogOAuthAccountSwitchAndCustomDomainResolution() async throws {
+        let rootDir = FileManager.default.temporaryDirectory.appendingPathComponent("multi-sub-auth-\(UUID().uuidString)")
+        let logDir = rootDir.appendingPathComponent("log")
+        let convDir = rootDir.appendingPathComponent("conversations")
+        let isolatedGcpDir = rootDir.appendingPathComponent("empty_gcp").path
+        try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: convDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: rootDir)
+            AgyStatsService.clearCaches()
+        }
+
+        let logFile = logDir.appendingPathComponent("cli-20261117_190000.log")
+        let paddingLine = "I1117 19:01:00.000000    1000 runner.go:100] Processing step output chunk padding data\n"
+        let filler = String(repeating: paddingLine, count: 950) // > 70KB (>64KB offset)
+
+        let logContent = """
+        I1117 19:00:05.100000    1000 server_oauth.go:221] applyAuthResult: email=first.user@gmail.com, authMethod=consumer, quotaProject=
+        I1117 19:00:05.100010    1000 server_oauth.go:226] OAuth: authenticated successfully as first.user@gmail.com
+        \(filler)
+        I1117 19:15:10.500000    1000 server_oauth.go:221] applyAuthResult: email=gcp.only@corp.example, authMethod=gcp, quotaProject=my-proj
+        I1117 19:15:10.500020    1000 server_oauth.go:226] OAuth: authenticated successfully as gcp.only@corp.example
+        I1117 19:20:49.989245    2085 browser.go:167] consumerOAuth: authenticated successfully as alice@acme-custom.io
+        """
+        try logContent.write(to: logFile, atomically: true, encoding: .utf8)
+
+        // Symlink cli.log -> log/cli-20261117_190000.log like real CLI
+        let cliLogSymlink = rootDir.appendingPathComponent("cli.log")
+        try FileManager.default.createSymbolicLink(at: cliLogSymlink, withDestinationURL: logFile)
+
+        // 1. resolveActiveConsumerEmail must read tail (>64KB), skip gcp-paired OAuth, and return custom domain email
+        let resolved = AgyStatsService.resolveActiveConsumerEmail(cliDir: rootDir.path)
+        #expect(resolved == "alice@acme-custom.io")
+
+        // 2. loadAuthTransitions must record all mid-session transitions chronologically
+        AgyStatsService.clearCaches()
+        let transitions = AgyStatsService.loadAuthTransitions(logDir: logDir.path, defaultProject: nil)
+        let customTransitions = transitions.filter { $0.email == "alice@acme-custom.io" }
+        #expect(!customTransitions.isEmpty)
+        #expect(customTransitions.last?.isGcp == false)
+
+        let firstTransitions = transitions.filter { $0.email == "first.user@gmail.com" }
+        #expect(!firstTransitions.isEmpty)
+
+        // 3. loadStats must attribute queries after the mid-log /login to alice@acme-custom.io and invalidate cache on token switch
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let tsAfterSwitch = calendar.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 19, minute: 22, second: 0))!
+        let tsMs = Int64(tsAfterSwitch.timeIntervalSince1970 * 1000)
+        let historyLine = "{\"display\":\"post-switch query\",\"timestamp\":\(tsMs),\"workspace\":\"/tmp/ws\",\"conversationId\":\"conv-switch-1\"}\n"
+        try historyLine.write(to: rootDir.appendingPathComponent("history.jsonl"), atomically: true, encoding: .utf8)
+
+        let (stats1, _) = await AgyStatsService.loadStats(cliDir: rootDir.path, gcpCliDir: isolatedGcpDir)
+        let q1 = stats1.recentQueries.first(where: { $0.conversationId == "conv-switch-1" })
+        #expect(q1?.isGcp == false)
+        #expect(q1?.accountEmail == "alice@acme-custom.io")
+
+        // 4. Write antigravity-oauth-token with another custom domain and verify resolveActiveConsumerEmail + statsCache invalidation
+        let tokenJson = """
+        {"auth_method":"consumer","id_token_email":"bob@enterprise.org"}
+        """
+        try tokenJson.write(to: rootDir.appendingPathComponent("antigravity-oauth-token"), atomically: true, encoding: .utf8)
+        #expect(AgyStatsService.resolveActiveConsumerEmail(cliDir: rootDir.path) == "bob@enterprise.org")
+    }
+
+    @Test
+    func testResolveActiveConsumerEmailPreservesStartupAuthWithOver300KBTrailingLogs() throws {
+        let rootDir = FileManager.default.temporaryDirectory.appendingPathComponent("head-tail-auth-\(UUID().uuidString)")
+        let logDir = rootDir.appendingPathComponent("log")
+        try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: rootDir)
+            AgyStatsService.clearCaches()
+        }
+
+        let logFile = logDir.appendingPathComponent("cli-20261117_193000.log")
+        let paddingLine = "I1117 19:31:00.000000    1000 runner.go:100] Streaming model response chunk without any auth event padding data\n"
+        // > 300KB (> 262,144 byte tail window) of trailing non-auth log output
+        let filler = String(repeating: paddingLine, count: 3_200)
+        #expect(filler.utf8.count > 300_000)
+
+        let logContent = """
+        I1117 19:30:01.100000    1000 server_oauth.go:221] applyAuthResult: email=startup.user@custom.dev, authMethod=consumer, quotaProject=
+        I1117 19:30:01.100010    1000 server_oauth.go:226] OAuth: authenticated successfully as startup.user@custom.dev
+        \(filler)
+        """
+        try logContent.write(to: logFile, atomically: true, encoding: .utf8)
+
+        let cliLogSymlink = rootDir.appendingPathComponent("cli.log")
+        try FileManager.default.createSymbolicLink(at: cliLogSymlink, withDestinationURL: logFile)
+
+        AgyStatsService.clearCaches()
+        // 1. Startup consumer email in first 32KB must still resolve even when >300KB of trailing logs follow it
+        #expect(AgyStatsService.resolveActiveConsumerEmail(cliDir: rootDir.path) == "startup.user@custom.dev")
+        // 2. Second call hits memo cache and returns identical result
+        #expect(AgyStatsService.resolveActiveConsumerEmail(cliDir: rootDir.path) == "startup.user@custom.dev")
+
+        // 3. Appending a mid-session /login in the tail must invalidate memo cache and win over startup auth
+        let switchLine = "I1117 19:45:00.500000    1000 consumer_oauth.go:167] consumerOAuth: authenticated successfully as switched.user@acme.io\n"
+        let handle = try FileHandle(forWritingTo: logFile)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(switchLine.utf8))
+        try handle.close()
+
+        #expect(AgyStatsService.resolveActiveConsumerEmail(cliDir: rootDir.path) == "switched.user@acme.io")
+    }
+
+    @Test
+    func testLoadStatsPopulatesDiscoveredConsumerEmailsAndAccountQueries() async throws {
+        let rootDir = FileManager.default.temporaryDirectory.appendingPathComponent("discovered-emails-\(UUID().uuidString)")
+        let logDir = rootDir.appendingPathComponent("log")
+        let isolatedGcpDir = rootDir.appendingPathComponent("gcp-empty").path
+        try FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: rootDir)
+            AgyStatsService.clearCaches()
+        }
+
+        let logContent = """
+        I1117 19:10:00.000000    1000 server_oauth.go:221] applyAuthResult: email=used.account@acme.io, authMethod=consumer, quotaProject=
+        I1117 19:20:00.000000    1000 server_oauth.go:221] applyAuthResult: email=brandnew.unused@acme.io, authMethod=consumer, quotaProject=
+        """
+        try logContent.write(to: logDir.appendingPathComponent("cli-20261117_191000.log"), atomically: true, encoding: .utf8)
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let qDate = calendar.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 19, minute: 12, second: 0))!
+        let tsMs = Int64(qDate.timeIntervalSince1970 * 1000)
+        let historyLine = "{\"display\":\"hello world\",\"timestamp\":\(tsMs),\"workspace\":\"/tmp/ws\",\"conversationId\":\"conv-1\"}\n"
+        try historyLine.write(to: rootDir.appendingPathComponent("history.jsonl"), atomically: true, encoding: .utf8)
+
+        AgyStatsService.clearCaches()
+        let (stats, _) = await AgyStatsService.loadStats(cliDir: rootDir.path, gcpCliDir: isolatedGcpDir)
+
+        #expect(stats.discoveredConsumerEmails.contains("used.account@acme.io"))
+        #expect(stats.discoveredConsumerEmails.contains("brandnew.unused@acme.io"))
+        #expect(stats.accountQueryTotals["used.account@acme.io"] == 1)
+        #expect(stats.accountQueryTotals["brandnew.unused@acme.io"] == nil)
+        #expect(!stats.consumerSpendEntries.isEmpty)
+        #expect(stats.consumerSpendEntries.allSatisfy { $0.email == "used.account@acme.io" })
+    }
 }

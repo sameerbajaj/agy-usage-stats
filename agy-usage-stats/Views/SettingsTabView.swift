@@ -13,6 +13,7 @@ struct SettingsTabView: View {
     @State private var tempDir = ""
     
     @State private var isHoveredQuota = false
+    @State private var isHoveredAccounts = false
     @State private var isHoveredSpend = false
     @State private var isHoveredAppearance = false
     @State private var isHoveredSystem = false
@@ -24,6 +25,9 @@ struct SettingsTabView: View {
             VStack(spacing: 14) {
                 // Live Menu Bar Preview Mini-Card
                 menuBarPreviewSection
+
+                // Subscription Accounts & Credit Status
+                subscriptionAccountsSection
 
                 // Card 1: Subscription Quota
                 subscriptionQuotaSection
@@ -75,6 +79,56 @@ struct SettingsTabView: View {
             }
             .padding(.vertical, 8)
             .themedCardStyle(theme: theme, isHovered: false)
+        }
+    }
+
+    // MARK: - Subscription Accounts & Credit Status
+    private var subscriptionAccountsSection: some View {
+        let summaries = viewModel.subscriptionAccountSummaries
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("subscription accounts & credit status")
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+                if !summaries.isEmpty {
+                    Text("\(summaries.count) account\(summaries.count == 1 ? "" : "s")")
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
+                }
+            }
+            .padding(.horizontal, 4)
+
+            VStack(alignment: .leading, spacing: 9) {
+                if summaries.isEmpty {
+                    Text("No subscription accounts detected yet. Run agy /login in terminal to connect an account.")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(Array(summaries.enumerated()), id: \.element.id) { index, summary in
+                        if index > 0 {
+                            Rectangle().fill(theme.divider).frame(height: 0.75)
+                        }
+                        SubscriptionAccountRowView(
+                            summary: summary,
+                            viewModel: viewModel,
+                            theme: theme
+                        )
+                    }
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                Text("Switch accounts anytime in terminal via agy /login — active quota & spend attribution switch automatically.")
+                    .font(.system(size: 8.5, weight: .regular))
+                    .foregroundStyle(theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .themedCardStyle(theme: theme, isHovered: isHoveredAccounts)
+            .onHover { h in isHoveredAccounts = h }
         }
     }
     
@@ -506,5 +560,243 @@ struct SettingsTabView: View {
             .themedCardStyle(theme: theme, isHovered: isHoveredSystem)
             .onHover { h in isHoveredSystem = h }
         }
+    }
+}
+
+private struct SubscriptionAccountRowView: View {
+    let summary: SubscriptionAccountSummary
+    @Bindable var viewModel: AgyStatsViewModel
+    let theme: ThemeColors
+
+    @State private var isAddingPool = false
+    @State private var draftPoolText = ""
+
+    private var compactPlanLabel: String? {
+        guard let raw = summary.plan?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        let lower = raw.lowercased()
+        if lower.contains("ultra") { return "ULTRA" }
+        if lower.contains("pro") { return "PRO" }
+        if lower.contains("free") { return "FREE" }
+        return raw.uppercased()
+    }
+
+    private var statusBadge: (text: String, foreground: Color, background: Color) {
+        if summary.isActive {
+            let text = summary.hasAnyUsageToday ? "ACTIVE · IN USE" : "ACTIVE · UNTOUCHED"
+            return (text, theme.costGreen, theme.costGreen.opacity(0.14))
+        }
+        if !summary.hasAnyHistoricalUsage {
+            return ("UNUSED · $0.00", theme.textSecondary, theme.badgeBackground)
+        }
+        if !summary.hasAnyUsageToday {
+            return ("UNUSED TODAY", theme.costGreen.opacity(0.9), theme.costGreen.opacity(0.10))
+        }
+        let usedText = summary.todayCost > 0.0005
+            ? String(format: "USED · $%.2f TODAY", summary.todayCost)
+            : "QUOTA USED"
+        return (usedText, theme.claudeAccent, theme.claudeAccent.opacity(0.14))
+    }
+
+    private var quotaAndCreditsLine: String {
+        guard let q = summary.quotaInfo, !q.groups.isEmpty else {
+            return "Quota snapshot pending (open an agy session on this account to sync live limits)"
+        }
+        var line = "Quota: \(q.compactQuotaSummary)"
+        if let aiCredits = summary.googleOneAiCredits {
+            if aiCredits > 0 {
+                let delta = summary.googleOneAiCreditsUsed > 0
+                    ? " (\(summary.googleOneAiCreditsUsed) used)"
+                    : " (untouched)"
+                line += " · AI Credits: \(aiCredits) left\(delta)"
+            } else {
+                line += " · 0 overage credits"
+            }
+        }
+        return line
+    }
+
+    private var usageLine: String {
+        if summary.hasAnyHistoricalUsage {
+            return String(
+                format: "Usage: $%.2f today (%d q) · $%.2f 7d · $%.2f total",
+                summary.todayCost,
+                summary.todayQueries,
+                summary.weeklyCost,
+                summary.totalCost
+            )
+        }
+        return "Usage: $0.00 · 0 queries recorded on this account"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            // Top line: indicator + email + plan pill + status badge
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(summary.isActive ? theme.costGreen : theme.textTertiary.opacity(0.6))
+                    .frame(width: 6, height: 6)
+
+                Text(summary.email)
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                if let planLabel = compactPlanLabel {
+                    Text(planLabel)
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.geminiAccent)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(theme.geminiAccent.opacity(0.14)))
+                }
+
+                Spacer(minLength: 4)
+
+                let badge = statusBadge
+                Text(badge.text)
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(badge.foreground)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(badge.background))
+            }
+
+            // Second line: Quota & AI Credits
+            Text(quotaAndCreditsLine)
+                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(summary.quotaInfo?.groups.isEmpty == false ? theme.textSecondary : theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Third line: Token Spend & Optional Credit Pool
+            HStack(alignment: .center, spacing: 6) {
+                Text(usageLine)
+                    .font(.system(size: 8.5, weight: .regular, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 4)
+
+                if summary.creditPool <= 0 && !isAddingPool {
+                    Button {
+                        draftPoolText = ""
+                        isAddingPool = true
+                    } label: {
+                        Text("+ Track Credit $")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundStyle(theme.linkBlue)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if summary.creditPool > 0 {
+                let remainingFraction = max(0.0, min(1.0, summary.creditRemaining / summary.creditPool))
+                VStack(alignment: .leading, spacing: 4) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2.5)
+                                .fill(theme.progressTrack)
+                            RoundedRectangle(cornerRadius: 2.5)
+                                .fill(remainingFraction > 0.25 ? theme.costGreen : theme.claudeAccent)
+                                .frame(width: max(0, geo.size.width * CGFloat(remainingFraction)))
+                        }
+                    }
+                    .frame(height: 4)
+
+                    HStack(spacing: 6) {
+                        Text(String(format: "$%.2f left ($%.2f used)", summary.creditRemaining, summary.costSinceBaseline))
+                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.costGreen)
+
+                        Spacer()
+
+                        Text("Pool $")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+
+                        TextField(
+                            "0",
+                            value: Binding(
+                                get: { summary.creditPool },
+                                set: { viewModel.setAccountCreditPool($0, for: summary.email) }
+                            ),
+                            format: .number
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .frame(width: 56)
+                        .multilineTextAlignment(.trailing)
+                        .controlSize(.mini)
+
+                        Button {
+                            viewModel.resetAccountCreditBaseline(for: summary.email)
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 8.5, weight: .bold))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Reset credit usage baseline to now")
+
+                        Button {
+                            viewModel.setAccountCreditPool(0, for: summary.email)
+                            isAddingPool = false
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(theme.textTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove credit pool tracking")
+                    }
+                }
+                .padding(.top, 2)
+            } else if isAddingPool {
+                HStack(spacing: 6) {
+                    Text("Credit Pool ($)")
+                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
+
+                    TextField("100", text: $draftPoolText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .frame(width: 64)
+                        .multilineTextAlignment(.trailing)
+                        .controlSize(.mini)
+                        .onSubmit {
+                            commitDraftPool()
+                        }
+
+                    Button("Save") {
+                        commitDraftPool()
+                    }
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.costGreen)
+                    .buttonStyle(.plain)
+
+                    Button("Cancel") {
+                        isAddingPool = false
+                    }
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private func commitDraftPool() {
+        let cleaned = draftPoolText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let val = Double(cleaned), val > 0 {
+            viewModel.setAccountCreditPool(val, for: summary.email)
+        }
+        isAddingPool = false
     }
 }

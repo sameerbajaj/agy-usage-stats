@@ -262,15 +262,24 @@ public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
     public let email: String?
     public let plan: String?
     public let groups: [AgyQuotaGroup]
+    public let googleOneAiCredits: Int?
+    public let minimumCreditAmountForUsage: Int?
+    public let lastUpdated: Date?
 
     public init(
         email: String? = nil,
         plan: String? = nil,
-        groups: [AgyQuotaGroup]
+        groups: [AgyQuotaGroup],
+        googleOneAiCredits: Int? = nil,
+        minimumCreditAmountForUsage: Int? = nil,
+        lastUpdated: Date? = nil
     ) {
         self.email = email
         self.plan = plan
         self.groups = groups
+        self.googleOneAiCredits = googleOneAiCredits
+        self.minimumCreditAmountForUsage = minimumCreditAmountForUsage
+        self.lastUpdated = lastUpdated
     }
 
     private static let iso8601Formatter = ISO8601DateFormatter()
@@ -301,8 +310,47 @@ public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
         return AgyQuotaInfo(
             email: email,
             plan: plan,
-            groups: updatedGroups
+            groups: updatedGroups,
+            googleOneAiCredits: googleOneAiCredits,
+            minimumCreditAmountForUsage: minimumCreditAmountForUsage,
+            lastUpdated: lastUpdated
         )
+    }
+
+    public var hasUsedAnyQuota: Bool {
+        groups.flatMap(\.buckets).contains { !$0.disabled && ($0.remainingFraction ?? 1.0) < 0.999 }
+    }
+
+    public var compactQuotaSummary: String {
+        let nonDisabledBuckets = groups.flatMap(\.buckets).filter { !$0.disabled }
+        guard !nonDisabledBuckets.isEmpty else { return "100% untouched" }
+        if !hasUsedAnyQuota {
+            return "100% untouched"
+        }
+        let parts: [String] = groups.compactMap { group in
+            let fractions = group.buckets.filter { !$0.disabled }.compactMap(\.remainingFraction)
+            guard let minFraction = fractions.min() else { return nil }
+            let pct = Int((minFraction * 100.0).rounded())
+            let lower = group.displayName.lowercased()
+            let shortName: String
+            if lower.contains("carbon") {
+                shortName = "Carbon"
+            } else if lower.contains("argon") {
+                shortName = "Argon"
+            } else if lower.contains("hydrogen") {
+                shortName = "Hydrogen"
+            } else if lower.contains("gemini") {
+                shortName = "Gemini"
+            } else if lower.contains("claude") || lower.contains("gpt") {
+                shortName = "Claude"
+            } else {
+                shortName = group.displayName
+                    .replacingOccurrences(of: " Models", with: "")
+                    .replacingOccurrences(of: " MODELS", with: "")
+            }
+            return "\(shortName) \(pct)%"
+        }
+        return parts.isEmpty ? "100% untouched" : parts.joined(separator: " · ")
     }
 }
 
@@ -322,6 +370,8 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     public var quotaCost: Double
     public var accountCostBreakdown: [String: Double]
     public var accountQueryBreakdown: [String: Int]
+    public var accountModelBreakdown: [String: [String: Double]] = [:]
+    public var accountTokenBreakdown: [String: Int] = [:]
     public var gcpModelBreakdown: [String: Double]
     public var quotaModelBreakdown: [String: Double]
     public var gcpInputTokens: Int
@@ -346,6 +396,8 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         quotaCost: Double = 0.0,
         accountCostBreakdown: [String: Double] = [:],
         accountQueryBreakdown: [String: Int] = [:],
+        accountModelBreakdown: [String: [String: Double]] = [:],
+        accountTokenBreakdown: [String: Int] = [:],
         gcpModelBreakdown: [String: Double] = [:],
         quotaModelBreakdown: [String: Double] = [:],
         gcpInputTokens: Int = 0,
@@ -369,6 +421,8 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
         self.quotaCost = quotaCost
         self.accountCostBreakdown = accountCostBreakdown
         self.accountQueryBreakdown = accountQueryBreakdown
+        self.accountModelBreakdown = accountModelBreakdown
+        self.accountTokenBreakdown = accountTokenBreakdown
         self.gcpModelBreakdown = gcpModelBreakdown
         self.quotaModelBreakdown = quotaModelBreakdown
         self.gcpInputTokens = gcpInputTokens
@@ -385,6 +439,18 @@ public struct GcpSpendEntry: Codable, Equatable, Hashable, Sendable {
     public let cost: Double
     
     public init(timestamp: Double, cost: Double) {
+        self.timestamp = timestamp
+        self.cost = cost
+    }
+}
+
+public struct AccountSpendEntry: Codable, Equatable, Hashable, Sendable {
+    public let email: String
+    public let timestamp: TimeInterval
+    public let cost: Double
+
+    public init(email: String, timestamp: TimeInterval, cost: Double) {
+        self.email = email
         self.timestamp = timestamp
         self.cost = cost
     }
@@ -426,6 +492,11 @@ public struct AgyUsageStats: Codable, Equatable {
     public var accountCostTotals: [String: Double]
     public var accountTodayTotals: [String: Double]
     public var accountWeeklyTotals: [String: Double]
+    public var accountQueryTodayTotals: [String: Int] = [:]
+    public var accountQueryWeeklyTotals: [String: Int] = [:]
+    public var accountQueryTotals: [String: Int] = [:]
+    public var consumerSpendEntries: [AccountSpendEntry] = []
+    public var discoveredConsumerEmails: [String] = []
     
     public static let empty = AgyUsageStats(
         totalQueries: 0,
@@ -454,7 +525,12 @@ public struct AgyUsageStats: Codable, Equatable {
         availableAccounts: [],
         accountCostTotals: [:],
         accountTodayTotals: [:],
-        accountWeeklyTotals: [:]
+        accountWeeklyTotals: [:],
+        accountQueryTodayTotals: [:],
+        accountQueryWeeklyTotals: [:],
+        accountQueryTotals: [:],
+        consumerSpendEntries: [],
+        discoveredConsumerEmails: []
     )
 }
 

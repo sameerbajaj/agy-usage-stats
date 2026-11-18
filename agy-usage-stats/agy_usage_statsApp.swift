@@ -93,6 +93,16 @@ struct MenuBarLabel: View {
 
     private var menuBarTooltip: String {
         var lines: [String] = ["Antigravity CLI Stats"]
+        let subEmail = viewModel.stats.quotaInfo?.email ?? viewModel.activeConsumerEmail
+        if let subEmail, !subEmail.isEmpty {
+            if let plan = viewModel.stats.quotaInfo?.plan, !plan.isEmpty {
+                lines.append("Account: \(subEmail) (\(plan))")
+            } else {
+                lines.append("Account: \(subEmail)")
+            }
+        } else if let plan = viewModel.stats.quotaInfo?.plan, !plan.isEmpty {
+            lines.append("Account: \(plan)")
+        }
         lines.append("Active: \(viewModel.activeModelDisplayName)")
         if let g = viewModel.geminiUsageFraction {
             lines.append(String(format: "Gemini: %.0f%%", g * 100))

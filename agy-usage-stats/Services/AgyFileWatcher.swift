@@ -23,6 +23,9 @@ public final class AgyFileWatcher {
         let gcpHistSize: Int64?
         let gcpDirMod: Date?
         let gcpConvContentSig: AgyStatsService.DirectoryContentSignature
+        let cliLogTargetPath: String?
+        let activeConsumerEmail: String?
+        let oauthTokenMod: Date?
     }
     
     private let queue = DispatchQueue(label: "com.antigravity.agy-usage-stats.filewatcher", qos: .utility)
@@ -31,17 +34,27 @@ public final class AgyFileWatcher {
     private var gcpHistorySource: DispatchSourceFileSystemObject?
     private var convDirSource: DispatchSourceFileSystemObject?
     private var gcpConvDirSource: DispatchSourceFileSystemObject?
+    private var logDirSource: DispatchSourceFileSystemObject?
+    private var cliLogSource: DispatchSourceFileSystemObject?
+    private var cliDirSource: DispatchSourceFileSystemObject?
     private var historyFd: Int32 = -1
     private var gcpHistoryFd: Int32 = -1
     private var convDirFd: Int32 = -1
     private var gcpConvDirFd: Int32 = -1
+    private var logDirFd: Int32 = -1
+    private var cliLogFd: Int32 = -1
+    private var cliDirFd: Int32 = -1
+    private var watchedCliLogTargetPath: String?
     private var lastSignature: FileWatcherSignature?
     private var debounceWorkItem: DispatchWorkItem?
+
+    private var expandedCliDir: String {
+        let cliDir = cliDirOverride ?? AgyStatsService.getDefaultCliDir()
+        return cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
+    }
     
     public var historyFilePath: String {
-        let cliDir = cliDirOverride ?? AgyStatsService.getDefaultCliDir()
-        let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
-        return (expanded as NSString).appendingPathComponent("history.jsonl")
+        return (expandedCliDir as NSString).appendingPathComponent("history.jsonl")
     }
     
     public var gcpHistoryFilePath: String {
@@ -49,13 +62,23 @@ public final class AgyFileWatcher {
     }
     
     public var conversationsDirPath: String {
-        let cliDir = cliDirOverride ?? AgyStatsService.getDefaultCliDir()
-        let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
-        return (expanded as NSString).appendingPathComponent("conversations")
+        return (expandedCliDir as NSString).appendingPathComponent("conversations")
     }
     
     public var gcpConversationsDirPath: String {
         return "\(NSHomeDirectory())/.agy-gcp-home/.gemini/antigravity-cli/conversations"
+    }
+
+    public var logDirPath: String {
+        return (expandedCliDir as NSString).appendingPathComponent("log")
+    }
+
+    public var cliLogFilePath: String {
+        return (expandedCliDir as NSString).appendingPathComponent("cli.log")
+    }
+
+    public var oauthTokenFilePath: String {
+        return (expandedCliDir as NSString).appendingPathComponent("antigravity-oauth-token")
     }
     
     public init() {}
@@ -131,8 +154,43 @@ public final class AgyFileWatcher {
                 self.gcpConvDirSource = gdSource
                 gdSource.resume()
             }
+
+            // 5. Kernel-level kqueue notifications for log directory (/login & OAuth switches)
+            let logPath = self.logDirPath
+            let lFd = open(logPath, O_EVTONLY)
+            if lFd >= 0 {
+                self.logDirFd = lFd
+                let lSource = DispatchSource.makeFileSystemObjectSource(fileDescriptor: lFd, eventMask: [.write, .extend, .attrib, .link], queue: self.queue)
+                lSource.setEventHandler { [weak self] in
+                    self?.checkFile()
+                }
+                lSource.setCancelHandler {
+                    close(lFd)
+                }
+                self.logDirSource = lSource
+                lSource.resume()
+            }
+
+            // 6. Kernel-level kqueue notifications for cliDir (antigravity-oauth-token / cli.log symlink updates)
+            let cliRootPath = self.expandedCliDir
+            let cFd = open(cliRootPath, O_EVTONLY)
+            if cFd >= 0 {
+                self.cliDirFd = cFd
+                let cSource = DispatchSource.makeFileSystemObjectSource(fileDescriptor: cFd, eventMask: [.write, .extend, .attrib, .link], queue: self.queue)
+                cSource.setEventHandler { [weak self] in
+                    self?.checkFile()
+                }
+                cSource.setCancelHandler {
+                    close(cFd)
+                }
+                self.cliDirSource = cSource
+                cSource.resume()
+            }
+
+            // 7. Kernel-level kqueue notifications for cli.log target file
+            self.rebindCliLogSourceIfNeeded()
             
-            // 5. Low-overhead background fallback timer (15.0s with 3s leeway)
+            // 8. Low-overhead background fallback timer (15.0s with 3s leeway)
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
             timer.schedule(deadline: .now() + 15.0, repeating: 15.0, leeway: .seconds(3))
             timer.setEventHandler { [weak self] in
@@ -156,16 +214,53 @@ public final class AgyFileWatcher {
             self?.convDirSource = nil
             self?.gcpConvDirSource?.cancel()
             self?.gcpConvDirSource = nil
+            self?.logDirSource?.cancel()
+            self?.logDirSource = nil
+            self?.cliLogSource?.cancel()
+            self?.cliLogSource = nil
+            self?.cliDirSource?.cancel()
+            self?.cliDirSource = nil
             self?.historyFd = -1
             self?.gcpHistoryFd = -1
             self?.convDirFd = -1
             self?.gcpConvDirFd = -1
+            self?.logDirFd = -1
+            self?.cliLogFd = -1
+            self?.cliDirFd = -1
+            self?.watchedCliLogTargetPath = nil
             self?.debounceWorkItem?.cancel()
             self?.debounceWorkItem = nil
         }
     }
+
+    private func rebindCliLogSourceIfNeeded() {
+        let resolved = URL(fileURLWithPath: cliLogFilePath).resolvingSymlinksInPath().path
+        if resolved == watchedCliLogTargetPath && cliLogSource != nil {
+            return
+        }
+        cliLogSource?.cancel()
+        cliLogSource = nil
+        cliLogFd = -1
+        watchedCliLogTargetPath = nil
+
+        let fd = open(resolved, O_EVTONLY)
+        if fd >= 0 {
+            cliLogFd = fd
+            watchedCliLogTargetPath = resolved
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .extend, .attrib], queue: queue)
+            source.setEventHandler { [weak self] in
+                self?.checkFile()
+            }
+            source.setCancelHandler {
+                close(fd)
+            }
+            cliLogSource = source
+            source.resume()
+        }
+    }
     
     private func checkFile() {
+        rebindCliLogSourceIfNeeded()
         let current = currentSignature()
         if current != lastSignature {
             lastSignature = current
@@ -197,6 +292,13 @@ public final class AgyFileWatcher {
         let gcpDirAttrs = try? fm.attributesOfItem(atPath: gcpConversationsDirPath)
         let gcpDirMod = gcpDirAttrs?[.modificationDate] as? Date
         let gcpConvContentSig = AgyStatsService.directoryContentSignature(atPath: gcpConversationsDirPath)
+
+        let cliLogExists = fm.fileExists(atPath: cliLogFilePath)
+        let resolvedCliLogPath = cliLogExists ? URL(fileURLWithPath: cliLogFilePath).resolvingSymlinksInPath().path : nil
+        let activeConsumerEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: expandedCliDir)
+
+        let oauthAttrs = try? fm.attributesOfItem(atPath: oauthTokenFilePath)
+        let oauthTokenMod = oauthAttrs?[.modificationDate] as? Date
         
         return FileWatcherSignature(
             histMod: histMod,
@@ -206,7 +308,10 @@ public final class AgyFileWatcher {
             gcpHistMod: gcpMod,
             gcpHistSize: gcpSize,
             gcpDirMod: gcpDirMod,
-            gcpConvContentSig: gcpConvContentSig
+            gcpConvContentSig: gcpConvContentSig,
+            cliLogTargetPath: resolvedCliLogPath,
+            activeConsumerEmail: activeConsumerEmail,
+            oauthTokenMod: oauthTokenMod
         )
     }
 }

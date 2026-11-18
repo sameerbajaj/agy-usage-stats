@@ -22,6 +22,7 @@ public struct OverviewTabView: View {
     
     @State private var selectedTimeframe: CostTimeframe = .today
     @AppStorage("agy_selectedAccountFilter") private var selectedAccount: AccountFilter = .all
+    @State private var selectedSubscriptionEmail: String? = nil
     @State private var selectedBucketId: String? = nil
     @State private var hoveredBucketId: String? = nil
     
@@ -44,6 +45,11 @@ public struct OverviewTabView: View {
     }()
     
     private static let iso8601Formatter = ISO8601DateFormatter()
+    private static let snapshotRelativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
     
     private var isDark: Bool { colorScheme == .dark }
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
@@ -192,9 +198,112 @@ public struct OverviewTabView: View {
         return indices
     }
     
+    private var effectiveSelectedSubscriptionEmail: String? {
+        guard selectedAccount == .subscription,
+              let sel = selectedSubscriptionEmail?.lowercased(),
+              viewModel.subscriptionAccountSummaries.contains(where: { $0.id == sel }) else {
+            return nil
+        }
+        return sel
+    }
+
+    private func accountCost(in bucket: UsageTimeBucket, emailKey: String) -> Double {
+        bucket.accountCostBreakdown.reduce(0.0) { partial, item in
+            item.key.lowercased() == emailKey ? partial + item.value : partial
+        }
+    }
+
+    private func accountQueries(in bucket: UsageTimeBucket, emailKey: String) -> Int {
+        bucket.accountQueryBreakdown.reduce(0) { partial, item in
+            item.key.lowercased() == emailKey ? partial + item.value : partial
+        }
+    }
+
+    private func accountTokens(in bucket: UsageTimeBucket, emailKey: String) -> Int {
+        let direct = bucket.accountTokenBreakdown.reduce(0) { partial, item in
+            item.key.lowercased() == emailKey ? partial + item.value : partial
+        }
+        if direct > 0 { return direct }
+        let cost = accountCost(in: bucket, emailKey: emailKey)
+        if cost > 0 && bucket.quotaCost > 0 {
+            let quotaTokens = bucket.quotaInputTokens + bucket.quotaOutputTokens
+            return Int(Double(quotaTokens) * (cost / bucket.quotaCost))
+        }
+        return 0
+    }
+
+    private func accountModelBreakdown(in bucket: UsageTimeBucket, emailKey: String) -> [String: Double] {
+        var result: [String: Double] = [:]
+        for (acc, models) in bucket.accountModelBreakdown where acc.lowercased() == emailKey {
+            for (rawModel, cost) in models where cost > 0 {
+                let canonical = canonicalModelDisplayName(from: rawModel)
+                result[canonical, default: 0.0] += cost
+            }
+        }
+        if !result.isEmpty {
+            return result
+        }
+        let cost = accountCost(in: bucket, emailKey: emailKey)
+        if cost > 0 && bucket.quotaCost > 0 {
+            let ratio = cost / bucket.quotaCost
+            for (model, modelCost) in bucket.consolidatedQuotaModelBreakdown {
+                result[model, default: 0.0] += modelCost * ratio
+            }
+        }
+        return result
+    }
+
+    private func effectiveBucketCost(_ bucket: UsageTimeBucket) -> Double {
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            return accountCost(in: bucket, emailKey: selEmail)
+        }
+        return bucketCost(bucket)
+    }
+
+    private func effectiveBucketTokens(_ bucket: UsageTimeBucket) -> Int {
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            return accountTokens(in: bucket, emailKey: selEmail)
+        }
+        return bucketTokens(bucket)
+    }
+
+    private func effectiveBucketQueries(_ bucket: UsageTimeBucket) -> Int {
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            return accountQueries(in: bucket, emailKey: selEmail)
+        }
+        return bucketQueries(bucket)
+    }
+
+    private var effectivePeakBucket: UsageTimeBucket? {
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            let nonZero = activeBuckets.filter { accountCost(in: $0, emailKey: selEmail) > 0 }
+            return nonZero.max { accountCost(in: $0, emailKey: selEmail) < accountCost(in: $1, emailKey: selEmail) }
+        }
+        return peakBucket
+    }
+
+    private func timeframeSpend(for summary: SubscriptionAccountSummary) -> Double {
+        if let pinned = pinnedBucket {
+            return accountCost(in: pinned, emailKey: summary.id)
+        }
+        let bucketSum = activeBuckets.reduce(0.0) { $0 + accountCost(in: $1, emailKey: summary.id) }
+        if selectedTimeframe == .all {
+            return max(bucketSum, summary.totalCost)
+        }
+        return bucketSum
+    }
+
     private var totalCost: Double {
         if let pinned = pinnedBucket {
-            return bucketCost(pinned)
+            return effectiveBucketCost(pinned)
+        }
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            let bucketSum = activeBuckets.reduce(0.0) { $0 + accountCost(in: $1, emailKey: selEmail) }
+            if selectedTimeframe == .all,
+               let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail }) {
+                return max(bucketSum, summary.totalCost)
+            }
+            return bucketSum
         }
         switch selectedAccount {
         case .all:
@@ -217,7 +326,10 @@ public struct OverviewTabView: View {
     
     private var totalTokens: Int {
         if let pinned = pinnedBucket {
-            return bucketTokens(pinned)
+            return effectiveBucketTokens(pinned)
+        }
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            return activeBuckets.reduce(0) { $0 + accountTokens(in: $1, emailKey: selEmail) }
         }
         switch selectedAccount {
         case .all:
@@ -235,7 +347,15 @@ public struct OverviewTabView: View {
     
     private var totalQueries: Int {
         if let pinned = pinnedBucket {
-            return bucketQueries(pinned)
+            return effectiveBucketQueries(pinned)
+        }
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            let bucketSum = activeBuckets.reduce(0) { $0 + accountQueries(in: $1, emailKey: selEmail) }
+            if selectedTimeframe == .all,
+               let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail }) {
+                return max(bucketSum, summary.totalQueries)
+            }
+            return bucketSum
         }
         switch selectedAccount {
         case .all:
@@ -260,7 +380,16 @@ public struct OverviewTabView: View {
     
     private var modelRows: [ModelRowData] {
         let breakdown: [String: Double]
-        if let pinned = pinnedBucket {
+        if let selEmail = effectiveSelectedSubscriptionEmail {
+            let sourceBuckets = pinnedBucket.map { [$0] } ?? activeBuckets
+            var combined: [String: Double] = [:]
+            for bucket in sourceBuckets {
+                for (model, cost) in accountModelBreakdown(in: bucket, emailKey: selEmail) {
+                    combined[model, default: 0.0] += cost
+                }
+            }
+            breakdown = combined
+        } else if let pinned = pinnedBucket {
             breakdown = bucketModelBreakdown(pinned)
         } else {
             switch selectedAccount {
@@ -301,6 +430,10 @@ public struct OverviewTabView: View {
                 
                 // Account Context Subheader
                 accountContextSubheader
+
+                if selectedAccount == .subscription && viewModel.subscriptionAccountSummaries.count > 1 {
+                    subscriptionAccountFilterStrip
+                }
                 
                 // Quota or GCP Cloud Credit Section
                 if selectedAccount == .gcp {
@@ -395,14 +528,32 @@ public struct OverviewTabView: View {
         HStack {
             switch selectedAccount {
             case .subscription:
-                if let email = viewModel.stats.quotaInfo?.email, !email.isEmpty {
-                    Text("Account: \(email) (Personal Subscription)")
+                if let selEmail = effectiveSelectedSubscriptionEmail,
+                   let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail }) {
+                    let planLabel = (summary.plan?.isEmpty == false)
+                        ? summary.plan!
+                        : (summary.isActive ? "Personal Subscription" : "Cached Account")
+                    Text("Account: \(summary.email) (\(planLabel))")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 } else {
-                    Text("Account: Consumer Subscription Quota")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
+                    let email = viewModel.stats.quotaInfo?.email ?? viewModel.activeConsumerEmail
+                    let planLabel = (viewModel.stats.quotaInfo?.plan?.isEmpty == false)
+                        ? viewModel.stats.quotaInfo!.plan!
+                        : "Personal Subscription"
+                    if let email, !email.isEmpty {
+                        Text("Account: \(email) (\(planLabel))")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text("Account: Consumer Subscription Quota")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                    }
                 }
             case .gcp:
                 Text("Account: Google Cloud Platform (\(viewModel.stats.gcpProject ?? "clawdbot-485304"))")
@@ -410,21 +561,119 @@ public struct OverviewTabView: View {
                     .foregroundStyle(Color.blue)
             case .all:
                 HStack(spacing: 6) {
+                    let email = viewModel.stats.quotaInfo?.email ?? viewModel.activeConsumerEmail
+                    let plan = viewModel.stats.quotaInfo?.plan
                     Circle().fill(theme.costGreen).frame(width: 4, height: 4)
-                    Text("Subscription: Active")
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
+                    if let email, !email.isEmpty {
+                        let subLabel: String = {
+                            if let plan, !plan.isEmpty, plan.count <= 16 {
+                                return "Sub: \(email) (\(plan))"
+                            }
+                            return "Sub: \(email)"
+                        }()
+                        Text(subLabel)
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text("Subscription: Active")
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                    }
                     Text("·")
                         .foregroundStyle(theme.textTertiary)
                     Circle().fill(Color.blue).frame(width: 4, height: 4)
                     Text("GCP: \(viewModel.stats.gcpProject ?? "clawdbot-485304") Ready")
                         .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
             Spacer()
         }
         .padding(.horizontal, 2)
+    }
+
+    private var subscriptionAccountFilterStrip: some View {
+        let summaries = viewModel.subscriptionAccountSummaries
+        let localPartCounts = summaries.reduce(into: [String: Int]()) { counts, s in
+            let local = s.email.split(separator: "@").first.map(String.init) ?? s.email
+            counts[local.lowercased(), default: 0] += 1
+        }
+
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 5) {
+                subscriptionFilterPill(
+                    title: "All Subs",
+                    isSelected: effectiveSelectedSubscriptionEmail == nil,
+                    showActiveDot: false,
+                    isUnused: false
+                ) {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                        selectedSubscriptionEmail = nil
+                        selectedBucketId = nil
+                        hoveredBucketId = nil
+                    }
+                }
+
+                ForEach(summaries) { summary in
+                    let localPart = summary.email.split(separator: "@").first.map(String.init) ?? summary.email
+                    let hasDuplicateLocal = (localPartCounts[localPart.lowercased()] ?? 0) > 1
+                    let baseName = hasDuplicateLocal ? summary.email : localPart
+                    let isUnused = !summary.hasAnyHistoricalUsage
+                    let title = isUnused ? "\(baseName) (Unused)" : baseName
+
+                    subscriptionFilterPill(
+                        title: title,
+                        isSelected: effectiveSelectedSubscriptionEmail == summary.id,
+                        showActiveDot: summary.isActive,
+                        isUnused: isUnused
+                    ) {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                            selectedSubscriptionEmail = summary.id
+                            selectedBucketId = nil
+                            hoveredBucketId = nil
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private func subscriptionFilterPill(
+        title: String,
+        isSelected: Bool,
+        showActiveDot: Bool,
+        isUnused: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if showActiveDot {
+                    Circle()
+                        .fill(theme.costGreen)
+                        .frame(width: 4.5, height: 4.5)
+                }
+                Text(title)
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(isSelected ? theme.textPrimary : (isUnused ? theme.textTertiary : theme.textSecondary))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3.5)
+            .background(
+                Capsule()
+                    .fill(isSelected ? theme.cardFillHovered : theme.surfaceSecondary)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(isSelected ? theme.cardStrokeHovered : theme.cardStroke.opacity(0.4), lineWidth: 0.6)
+            )
+        }
+        .buttonStyle(.plain)
     }
     
     // MARK: - Google Cloud Platform Telemetry Card
@@ -569,16 +818,64 @@ public struct OverviewTabView: View {
     // MARK: - Terminal-Identical Quota Groups Section
     
     private var quotaGroupsSection: some View {
-        VStack(spacing: 10) {
-            if let quota = viewModel.stats.quotaInfo, !quota.groups.isEmpty {
+        let selectedSummary: SubscriptionAccountSummary? = {
+            guard let selEmail = effectiveSelectedSubscriptionEmail else { return nil }
+            return viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail })
+        }()
+
+        let activeOrSelectedQuota: AgyQuotaInfo? = {
+            if let selectedSummary {
+                if selectedSummary.isActive {
+                    return viewModel.stats.quotaInfo ?? selectedSummary.quotaInfo
+                }
+                return selectedSummary.quotaInfo
+            }
+            return viewModel.stats.quotaInfo
+        }()
+
+        let isCachedSnapshot = (selectedSummary != nil && selectedSummary?.isActive == false)
+
+        return VStack(spacing: 10) {
+            if isCachedSnapshot, let quota = activeOrSelectedQuota, !quota.groups.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundStyle(theme.claudeAccent)
+                    let updatedLabel: String = {
+                        if let updated = quota.lastUpdated {
+                            return "Cached snapshot · \(Self.snapshotRelativeFormatter.localizedString(for: updated, relativeTo: Date()))"
+                        }
+                        return "Cached snapshot"
+                    }()
+                    Text(updatedLabel)
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.claudeAccent)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(theme.claudeAccent.opacity(0.10))
+                )
+            }
+
+            if let quota = activeOrSelectedQuota, !quota.groups.isEmpty {
                 ForEach(quota.groups) { group in
                     quotaGroupCard(group)
                 }
             } else {
                 HStack {
-                    Text("No active quota sessions detected. Running via direct API / local state.")
+                    let emptyText: String = {
+                        if let selectedSummary, !selectedSummary.isActive {
+                            return "No quota snapshot cached yet for \(selectedSummary.email). Open an agy session on this account to sync live limits."
+                        }
+                        return "No active quota sessions detected. Running via direct API / local state."
+                    }()
+                    Text(emptyText)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                 }
                 .padding(12)
@@ -736,6 +1033,10 @@ public struct OverviewTabView: View {
                             if let pinned = pinnedBucket {
                                 return "\(pinned.shortLabel.uppercased()) SPEND"
                             }
+                            if let selEmail = effectiveSelectedSubscriptionEmail {
+                                let local = selEmail.split(separator: "@").first.map(String.init) ?? selEmail
+                                return local.uppercased()
+                            }
                             return selectedAccount == .gcp ? "GCP CREDIT" : (selectedAccount == .subscription ? "SUBSCRIPTION" : "TOTAL")
                         }()
                         
@@ -798,6 +1099,19 @@ public struct OverviewTabView: View {
                                 .foregroundStyle(Color.blue)
                         }
                     }
+                }
+
+                if (selectedAccount == .all || (selectedAccount == .subscription && effectiveSelectedSubscriptionEmail == nil)) && viewModel.subscriptionAccountSummaries.count > 1 {
+                    let accountParts = viewModel.subscriptionAccountSummaries.map { summary in
+                        let spend = timeframeSpend(for: summary)
+                        return spend < 0.005
+                            ? "\(summary.email): $0.00 (unused)"
+                            : String(format: "\(summary.email): $%.2f", spend)
+                    }
+                    Text("↳ " + accountParts.joined(separator: " · "))
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.vertical, 2)
@@ -917,7 +1231,7 @@ public struct OverviewTabView: View {
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(theme.textTertiary)
                     
-                    Text(String(format: "$%.2f", bucketCost(inspected)))
+                    Text(String(format: "$%.2f", effectiveBucketCost(inspected)))
                         .font(.system(size: 9, weight: .black, design: .monospaced))
                         .foregroundStyle(selectedAccount == .gcp ? Color.blue : theme.costGreen)
                     
@@ -925,7 +1239,7 @@ public struct OverviewTabView: View {
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(theme.textTertiary)
                     
-                    Text("\(formatCompactTokens(bucketTokens(inspected))) · \(bucketQueries(inspected))q")
+                    Text("\(formatCompactTokens(effectiveBucketTokens(inspected))) · \(effectiveBucketQueries(inspected))q")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
                 }
@@ -960,8 +1274,8 @@ public struct OverviewTabView: View {
                     )
                 }
                 .buttonStyle(.plain)
-            } else if let peak = peakBucket {
-                Text(String(format: "PEAK: $%.2f (%@)", bucketCost(peak), Self.shortDateFormatter.string(from: peak.date)))
+            } else if let peak = effectivePeakBucket {
+                Text(String(format: "PEAK: $%.2f (%@)", effectiveBucketCost(peak), Self.shortDateFormatter.string(from: peak.date)))
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundStyle(theme.costGreen)
             }
@@ -971,18 +1285,18 @@ public struct OverviewTabView: View {
     private var dailySpendBarCanvas: some View {
         GeometryReader { geo in
             let canvasHeight = geo.size.height
-            let maxCost = max(0.0001, activeBuckets.map { bucketCost($0) }.max() ?? 0.0)
+            let maxCost = max(0.0001, activeBuckets.map { effectiveBucketCost($0) }.max() ?? 0.0)
             let spacing: CGFloat = selectedTimeframe == .week ? 6.0 : 2.5
             let maxBarWidth: CGFloat = selectedTimeframe == .week ? 34 : (selectedTimeframe == .month ? 12 : 8)
             let cornerRadius: CGFloat = selectedTimeframe == .week ? 3 : 2
             
             HStack(alignment: .bottom, spacing: spacing) {
                 ForEach(activeBuckets) { bucket in
-                    let cost = bucketCost(bucket)
+                    let cost = effectiveBucketCost(bucket)
                     let isHovered = (hoveredBucketId == bucket.id)
                     let isPinned = (selectedBucketId == bucket.id)
                     let isInspected = isHovered || isPinned
-                    let isPeak = (peakBucket?.id == bucket.id)
+                    let isPeak = (effectivePeakBucket?.id == bucket.id)
                     
                     let barHeight: CGFloat = {
                         if cost <= 0 {

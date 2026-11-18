@@ -61,6 +61,7 @@ public enum AgyStatsService {
         let fileCount: Int
         let newestName: String?
         let newestModDate: Date?
+        let newestSize: Int64?
         let defaultProject: String?
         let cachedAt: Date
         let transitions: [AuthTransition]
@@ -69,9 +70,7 @@ public enum AgyStatsService {
     private struct LogFileEntry {
         let modDate: Date
         let size: Int64
-        let isGcp: Bool
-        let project: String?
-        let email: String?
+        let transitions: [AuthTransition]
     }
     
     private struct PrecomputedAuthState {
@@ -145,11 +144,26 @@ public enum AgyStatsService {
         let gcpHistorySize: Int64
         let gcpConversationsDirModDate: Date
         let gcpConversationsSig: DirectoryContentSignature
+        let activeConsumerEmail: String?
+        let oauthTokenModDate: Date
         let stats: AgyUsageStats
     }
     
     private static var statsCache: StatsCacheEntry? = nil
     private static let statsCacheLock = NSLock()
+
+    private struct ConsumerEmailCacheEntry: Sendable {
+        let expandedCliDir: String
+        let oauthTokenModDate: Date
+        let resolvedCliLogPath: String?
+        let cliLogModDate: Date
+        let cliLogSize: Int64
+        let logDirModDate: Date
+        let email: String?
+    }
+
+    private static var consumerEmailCache: [String: ConsumerEmailCacheEntry] = [:]
+    private static let consumerEmailCacheLock = NSLock()
     
     public static func clearCaches() {
         conversationCacheLock.lock()
@@ -179,6 +193,10 @@ public enum AgyStatsService {
         statsCacheLock.lock()
         statsCache = nil
         statsCacheLock.unlock()
+
+        consumerEmailCacheLock.lock()
+        consumerEmailCache.removeAll()
+        consumerEmailCacheLock.unlock()
         
         AgyQuotaService.clearCache()
     }
@@ -349,8 +367,12 @@ public enum AgyStatsService {
             let gcpConvSig = directoryContentSignature(atPath: gcpConversationsDir)
             
             let settings = loadSettings(at: settingsPath)
+            let activeConsumerEmail = resolveActiveConsumerEmail(cliDir: expandedDir)
             
-            // Fast cache check: if history.jsonl, conversations dir, GCP dual-box files, and settings haven't changed today, return immediately
+            let oauthTokenPath = (expandedDir as NSString).appendingPathComponent("antigravity-oauth-token")
+            let oauthTokenModDate = (try? fm.attributesOfItem(atPath: oauthTokenPath))?[.modificationDate] as? Date ?? Date.distantPast
+            
+            // Fast cache check: if history.jsonl, conversations dir, GCP dual-box files, active consumer email/oauth token, and settings haven't changed today, return immediately
             statsCacheLock.lock()
             if let cached = statsCache,
                cached.cliDir == expandedDir,
@@ -364,12 +386,14 @@ public enum AgyStatsService {
                cached.gcpHistoryModDate == gcpHistMod,
                cached.gcpHistorySize == gcpHistSize,
                cached.gcpConversationsDirModDate == gcpConvDirMod,
-               cached.gcpConversationsSig == gcpConvSig {
+               cached.gcpConversationsSig == gcpConvSig,
+               cached.activeConsumerEmail == activeConsumerEmail,
+               cached.oauthTokenModDate == oauthTokenModDate {
                 var cachedStats = cached.stats
                 statsCacheLock.unlock()
                 
                 // Fetch fresh quota without blocking UI if already cached
-                if let quota = await AgyQuotaService.fetchQuota() {
+                if let quota = await AgyQuotaService.fetchQuota(expectedEmail: activeConsumerEmail) {
                     cachedStats.quotaInfo = quota
                 } else if cachedStats.quotaInfo == nil {
                     cachedStats.quotaInfo = existingQuota
@@ -380,7 +404,7 @@ public enum AgyStatsService {
             
             let tStart = ContinuousClock.now
             // Kick off quota fetch in background concurrently
-            async let quotaTask = AgyQuotaService.fetchQuota()
+            async let quotaTask = AgyQuotaService.fetchQuota(expectedEmail: activeConsumerEmail)
             
             // Load Settings & Auth Transitions
             let tokenAuth = loadActiveAuthMethod(cliDir: expandedDir)
@@ -410,7 +434,7 @@ public enum AgyStatsService {
                         if isConsumer {
                             copy.isGcp = false
                             copy.gcpProject = nil
-                            copy.accountEmail = "sameerbajaj24@gmail.com"
+                            copy.accountEmail = activeConsumerEmail ?? "sameerbajaj24@gmail.com"
                         } else {
                             copy.isGcp = true
                             copy.gcpProject = resolvedGcpProject
@@ -706,7 +730,7 @@ public enum AgyStatsService {
                 let isGcp = !isConsumerConv && (q.isGcp || authState.isGcp)
                 newQ.isGcp = isGcp
                 newQ.gcpProject = isGcp ? (q.gcpProject ?? authState.gcpProject ?? "clawdbot-485304") : nil
-                newQ.accountEmail = isGcp ? nil : (authState.email ?? "sameerbajaj24@gmail.com")
+                newQ.accountEmail = isGcp ? nil : (authState.email ?? activeConsumerEmail ?? "sameerbajaj24@gmail.com")
                 queriesWithMeta.append(newQ)
             }
             
@@ -735,7 +759,16 @@ public enum AgyStatsService {
             statsCacheLock.lock()
             let previousCachedQuota = statsCache?.stats.quotaInfo
             statsCacheLock.unlock()
-            let quotaInfo = fetchedQuota ?? existingQuota ?? previousCachedQuota
+            let safePreviousQuota: AgyQuotaInfo? = {
+                guard let prev = previousCachedQuota else { return nil }
+                if let expected = activeConsumerEmail?.lowercased(),
+                   let prevEmail = prev.email?.lowercased(),
+                   prevEmail != expected {
+                    return nil
+                }
+                return prev
+            }()
+            let quotaInfo = fetchedQuota ?? existingQuota ?? safePreviousQuota
             
             if let quotaInfo = quotaInfo {
                 print("AgyStatsService: Resolved quota: plan = \(quotaInfo.plan ?? "nil"), email = \(quotaInfo.email ?? "nil"), groups count = \(quotaInfo.groups.count)")
@@ -760,6 +793,10 @@ public enum AgyStatsService {
             var accountCostTotals: [String: Double] = [:]
             var accountTodayTotals: [String: Double] = [:]
             var accountWeeklyTotals: [String: Double] = [:]
+            var accountQueryTodayTotals: [String: Int] = [:]
+            var accountQueryWeeklyTotals: [String: Int] = [:]
+            var accountQueryTotals: [String: Int] = [:]
+            var consumerSpendEntries: [AccountSpendEntry] = []
             
             let dayKeyFormatter = Self.dayKeyFormatter
             let dayLabelFormatter = Self.dayLabelFormatter
@@ -900,6 +937,8 @@ public enum AgyStatsService {
                 var modelQueryBreakdown: [String: Int] = [:]
                 var accountCostBreakdown: [String: Double] = [:]
                 var accountQueryBreakdown: [String: Int] = [:]
+                var accountModelBreakdown: [String: [String: Double]] = [:]
+                var accountTokenBreakdown: [String: Int] = [:]
                 var gcpModelBreakdown: [String: Double] = [:]
                 var quotaModelBreakdown: [String: Double] = [:]
                 var gcpInputTokens: Int = 0
@@ -932,6 +971,8 @@ public enum AgyStatsService {
                         quotaCost: quotaCost,
                         accountCostBreakdown: accountCostBreakdown,
                         accountQueryBreakdown: accountQueryBreakdown,
+                        accountModelBreakdown: accountModelBreakdown,
+                        accountTokenBreakdown: accountTokenBreakdown,
                         gcpModelBreakdown: gcpModelBreakdown,
                         quotaModelBreakdown: quotaModelBreakdown,
                         gcpInputTokens: gcpInputTokens,
@@ -960,8 +1001,16 @@ public enum AgyStatsService {
             for q in queriesWithMeta {
                 let authState = authForDate(q.timestamp)
                 let isGcp = q.isGcp
-                let accName = isGcp ? (q.gcpProject != nil ? "GCP (\(q.gcpProject!))" : authState.accountDisplayName) : authState.accountDisplayName
+                let accName = isGcp ? (q.gcpProject != nil ? "GCP (\(q.gcpProject!))" : authState.accountDisplayName) : (q.accountEmail ?? authState.accountDisplayName)
                 
+                accountQueryTotals[accName, default: 0] += 1
+                if q.timestamp >= startOfToday {
+                    accountQueryTodayTotals[accName, default: 0] += 1
+                }
+                if q.timestamp >= sevenDaysAgo {
+                    accountQueryWeeklyTotals[accName, default: 0] += 1
+                }
+
                 let dInfo = getDateInfo(for: q.timestamp)
                 let dayKey = dInfo.dayKey
                 let dayBucket: MutableBucket
@@ -998,6 +1047,8 @@ public enum AgyStatsService {
                         dayBucket.outputTokens += outTokens
                         dayBucket.modelBreakdown[model.name, default: 0.0] += cost
                         dayBucket.accountCostBreakdown[accName, default: 0.0] += cost
+                        dayBucket.accountModelBreakdown[accName, default: [:]][model.name, default: 0.0] += cost
+                        dayBucket.accountTokenBreakdown[accName, default: 0] += (inTokens + outTokens)
                         totalCost += cost
                         accountCostTotals[accName, default: 0.0] += cost
                         if isGcp {
@@ -1015,6 +1066,7 @@ public enum AgyStatsService {
                             dayBucket.quotaOutputTokens += outTokens
                             dayBucket.quotaModelBreakdown[model.name, default: 0.0] += cost
                             quotaTotalCost += cost
+                            consumerSpendEntries.append(AccountSpendEntry(email: accName.lowercased(), timestamp: q.timestamp.timeIntervalSince1970, cost: cost))
                             if q.timestamp >= startOfToday { quotaTodayCost += cost }
                             if q.timestamp >= sevenDaysAgo { quotaWeekCost += cost }
                         }
@@ -1086,7 +1138,7 @@ public enum AgyStatsService {
                 
                 let authState = authForDate(genDate)
                 let isGcp = !gen.isExplicitConsumer && (gen.isGcpOrigin || authState.isGcp)
-                let accName = isGcp ? (gen.isGcpOrigin ? "GCP (\(resolvedGcpProject))" : authState.accountDisplayName) : (authState.email ?? "sameerbajaj24@gmail.com")
+                let accName = isGcp ? (gen.isGcpOrigin ? "GCP (\(resolvedGcpProject))" : authState.accountDisplayName) : (authState.email ?? activeConsumerEmail ?? quotaInfo?.email ?? "sameerbajaj24@gmail.com")
                 let regionalMultiplier = isGcp ? Self.gcpRegionalMultiplier : 1.0
 
                 let pTokens = gen.inputTokens ?? 0
@@ -1121,6 +1173,7 @@ public enum AgyStatsService {
                     gcpSpendEntries.append(GcpSpendEntry(timestamp: genDate.timeIntervalSince1970, cost: cost))
                 } else {
                     quotaTotalCost += cost
+                    consumerSpendEntries.append(AccountSpendEntry(email: accName.lowercased(), timestamp: genDate.timeIntervalSince1970, cost: cost))
                 }
                 
                 if genDate >= startOfToday {
@@ -1159,6 +1212,8 @@ public enum AgyStatsService {
                 dayBucket.outputTokens += outTokens
                 dayBucket.modelBreakdown[model.name, default: 0.0] += cost
                 dayBucket.accountCostBreakdown[accName, default: 0.0] += cost
+                dayBucket.accountModelBreakdown[accName, default: [:]][model.name, default: 0.0] += cost
+                dayBucket.accountTokenBreakdown[accName, default: 0] += (inTokens + outTokens)
                 if isGcp {
                     dayBucket.gcpCost += cost
                     dayBucket.gcpInputTokens += inTokens
@@ -1225,6 +1280,32 @@ public enum AgyStatsService {
             
             let sortedDaily = dailyBuckets.values.map { $0.toUsageTimeBucket() }.sorted { $0.date < $1.date }
             let sortedMonthly = monthlyBuckets.values.map { $0.toUsageTimeBucket() }.sorted { $0.date < $1.date }
+
+            var discoveredByLower: [String: String] = [:]
+            func registerConsumerEmail(_ candidate: String?) {
+                guard let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !trimmed.isEmpty,
+                      trimmed.contains("@"),
+                      !trimmed.hasPrefix("GCP ("),
+                      trimmed != "Google Cloud API",
+                      trimmed != "Account Quota" else { return }
+                let key = trimmed.lowercased()
+                if discoveredByLower[key] == nil {
+                    discoveredByLower[key] = trimmed
+                }
+            }
+            for transition in authTransitions {
+                registerConsumerEmail(transition.email)
+            }
+            registerConsumerEmail(activeConsumerEmail)
+            registerConsumerEmail(quotaInfo?.email)
+            for key in accountCostTotals.keys {
+                registerConsumerEmail(key)
+            }
+            for key in accountQueryTotals.keys {
+                registerConsumerEmail(key)
+            }
+            let discoveredConsumerEmails = discoveredByLower.values.sorted { $0.lowercased() < $1.lowercased() }
             
             let stats = AgyUsageStats(
                 totalQueries: queries.count,
@@ -1254,7 +1335,12 @@ public enum AgyStatsService {
                 availableAccounts: Array(accountCostTotals.keys).sorted(),
                 accountCostTotals: accountCostTotals,
                 accountTodayTotals: accountTodayTotals,
-                accountWeeklyTotals: accountWeeklyTotals
+                accountWeeklyTotals: accountWeeklyTotals,
+                accountQueryTodayTotals: accountQueryTodayTotals,
+                accountQueryWeeklyTotals: accountQueryWeeklyTotals,
+                accountQueryTotals: accountQueryTotals,
+                consumerSpendEntries: consumerSpendEntries,
+                discoveredConsumerEmails: discoveredConsumerEmails
             )
             
             statsCacheLock.lock()
@@ -1271,6 +1357,8 @@ public enum AgyStatsService {
                 gcpHistorySize: gcpHistSize,
                 gcpConversationsDirModDate: gcpConvDirMod,
                 gcpConversationsSig: gcpConvSig,
+                activeConsumerEmail: activeConsumerEmail,
+                oauthTokenModDate: oauthTokenModDate,
                 stats: stats
             )
             statsCacheLock.unlock()
@@ -1320,7 +1408,457 @@ public enum AgyStatsService {
         public let accountDisplayName: String
     }
     
-    private static func loadAuthTransitions(logDir: String, defaultProject: String?) -> [AuthTransition] {
+    private static let applyAuthRegex = try? NSRegularExpression(
+        pattern: #"applyAuthResult:\s*email=([^,\s]+),\s*authMethod=(consumer|gcp)(?:,\s*quotaProject=([^\s,]*))?"#
+    )
+    private static let consumerOAuthRegex = try? NSRegularExpression(
+        pattern: #"consumerOAuth:\s*authenticated successfully as ([^\s]+)"#
+    )
+    private static let oauthSuccessRegex = try? NSRegularExpression(
+        pattern: #"(?:^|\]|\s)OAuth:\s*authenticated successfully as ([^\s]+)"#
+    )
+    private static let genericEmailRegex = try? NSRegularExpression(
+        pattern: #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#
+    )
+
+    private struct ParsedLogAuthEvent {
+        let timestamp: Date?
+        let isGcp: Bool
+        let email: String?
+        let project: String?
+        let isConsumerOAuth: Bool
+    }
+
+    private static func cleanExtractedEmail(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(
+            in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,;:\"'()[]<>"))
+        )
+        guard !trimmed.isEmpty, let regex = genericEmailRegex else { return nil }
+        let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+        guard let match = regex.firstMatch(in: trimmed, range: range),
+              let r = Range(match.range, in: trimmed) else {
+            return nil
+        }
+        return String(trimmed[r])
+    }
+
+    private static func extractFirstValidEmail(in line: String) -> String? {
+        guard let regex = genericEmailRegex else { return nil }
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+        guard let match = regex.firstMatch(in: line, range: range),
+              let r = Range(match.range, in: line) else {
+            return nil
+        }
+        return String(line[r])
+    }
+
+    private static func parseGlogTimestamp(line: String, year: Int, calendar: Calendar) -> Date? {
+        guard line.count >= 14 else { return nil }
+        let prefix = Array(line.prefix(21))
+        guard let level = prefix.first, "IWEF".contains(level),
+              prefix[5] == " ", prefix[8] == ":", prefix[11] == ":" else {
+            return nil
+        }
+        guard let month = Int(String(prefix[1...2])),
+              let day = Int(String(prefix[3...4])),
+              let hour = Int(String(prefix[6...7])),
+              let minute = Int(String(prefix[9...10])),
+              let second = Int(String(prefix[12...13])) else {
+            return nil
+        }
+        var nanosecond = 0
+        if prefix.count > 15 && prefix[14] == "." {
+            var fracDigits = ""
+            for ch in prefix[15...] {
+                if ch.isNumber {
+                    fracDigits.append(ch)
+                } else {
+                    break
+                }
+            }
+            if !fracDigits.isEmpty {
+                let padded = String(fracDigits.prefix(9)).padding(toLength: 9, withPad: "0", startingAt: 0)
+                nanosecond = Int(padded) ?? 0
+            }
+        }
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        comps.day = day
+        comps.hour = hour
+        comps.minute = minute
+        comps.second = second
+        comps.nanosecond = nanosecond
+        return calendar.date(from: comps)
+    }
+
+    private static func readTailText(atPath path: String, maxBytes: Int = 262_144) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return nil }
+        defer { try? handle.close() }
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        let offset: UInt64 = fileSize > UInt64(maxBytes) ? fileSize - UInt64(maxBytes) : 0
+        try? handle.seek(toOffset: offset)
+        var data = handle.readDataToEndOfFile()
+        if offset > 0, let newlineIdx = data.firstIndex(of: 0x0A) {
+            let nextIdx = data.index(after: newlineIdx)
+            if nextIdx <= data.endIndex {
+                data = data.subdata(in: nextIdx..<data.endIndex)
+            }
+        }
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+    }
+
+    private static func readHeadAndTailText(atPath path: String, headBytes: Int = 32_768, tailBytes: Int = 262_144) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return nil }
+        defer { try? handle.close() }
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        if fileSize <= UInt64(tailBytes) {
+            try? handle.seek(toOffset: 0)
+            let data = handle.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+        }
+
+        try? handle.seek(toOffset: 0)
+        var headData = handle.readData(ofLength: headBytes)
+        if headData.count == headBytes, let lastNewline = headData.lastIndex(of: 0x0A) {
+            headData = headData.subdata(in: headData.startIndex..<lastNewline)
+        }
+        let headText = String(data: headData, encoding: .utf8) ?? String(data: headData, encoding: .isoLatin1) ?? ""
+        let headEndOffset = UInt64(headData.count)
+
+        let desiredTailOffset = fileSize - UInt64(tailBytes)
+        let tailOffset = max(headEndOffset, desiredTailOffset)
+        try? handle.seek(toOffset: tailOffset)
+        var tailData = handle.readDataToEndOfFile()
+        if tailOffset > headEndOffset, let firstNewline = tailData.firstIndex(of: 0x0A) {
+            let nextIdx = tailData.index(after: firstNewline)
+            if nextIdx <= tailData.endIndex {
+                tailData = tailData.subdata(in: nextIdx..<tailData.endIndex)
+            }
+        }
+        let tailText = String(data: tailData, encoding: .utf8) ?? String(data: tailData, encoding: .isoLatin1) ?? ""
+
+        if headText.isEmpty { return tailText }
+        if tailText.isEmpty { return headText }
+        return headText + "\n" + tailText
+    }
+
+    private static func readLogTextForTransitions(atPath path: String, fileSize: Int64) -> String? {
+        let maxFullRead: Int64 = 2_097_152
+        if fileSize <= maxFullRead {
+            guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return nil }
+            defer { try? handle.close() }
+            let data = handle.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+        }
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return nil }
+        defer { try? handle.close() }
+        let headData = handle.readData(ofLength: 65536)
+        let headText = String(data: headData, encoding: .utf8) ?? String(data: headData, encoding: .isoLatin1) ?? ""
+        let tailText = readTailText(atPath: path, maxBytes: 524_288) ?? ""
+        return headText + "\n" + tailText
+    }
+
+    private static func extractLogYear(fileName: String, fallbackDate: Date, calendar: Calendar) -> Int {
+        if fileName.hasPrefix("cli-") && fileName.count >= 12 {
+            let startIdx = fileName.index(fileName.startIndex, offsetBy: 4)
+            let endIdx = fileName.index(startIdx, offsetBy: 4)
+            if let y = Int(fileName[startIdx..<endIdx]) {
+                return y
+            }
+        }
+        return calendar.component(.year, from: fallbackDate)
+    }
+
+    private static func parseAuthEvents(
+        in text: String,
+        year: Int,
+        defaultProject: String?,
+        calendar: Calendar,
+        includeLegacyMarkers: Bool
+    ) -> [ParsedLogAuthEvent] {
+        var events: [ParsedLogAuthEvent] = []
+        var linesSinceGcpApplyAuth = 0
+
+        for line in text.components(separatedBy: .newlines) {
+            if line.isEmpty || line.contains("HandleUserInput") {
+                if linesSinceGcpApplyAuth > 0 { linesSinceGcpApplyAuth -= 1 }
+                continue
+            }
+
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            let lineTs = parseGlogTimestamp(line: line, year: year, calendar: calendar)
+
+            if let regex = applyAuthRegex,
+               let match = regex.firstMatch(in: line, range: range),
+               let emailRange = Range(match.range(at: 1), in: line),
+               let methodRange = Range(match.range(at: 2), in: line) {
+                let email = cleanExtractedEmail(String(line[emailRange]))
+                let method = String(line[methodRange])
+                var project: String? = nil
+                if match.range(at: 3).location != NSNotFound,
+                   let projRange = Range(match.range(at: 3), in: line) {
+                    let rawProj = String(line[projRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !rawProj.isEmpty {
+                        project = rawProj
+                    }
+                }
+                if method == "gcp" {
+                    linesSinceGcpApplyAuth = 3
+                    events.append(ParsedLogAuthEvent(
+                        timestamp: lineTs,
+                        isGcp: true,
+                        email: email,
+                        project: project ?? defaultProject ?? "clawdbot-485304",
+                        isConsumerOAuth: false
+                    ))
+                } else {
+                    linesSinceGcpApplyAuth = 0
+                    events.append(ParsedLogAuthEvent(
+                        timestamp: lineTs,
+                        isGcp: false,
+                        email: email,
+                        project: nil,
+                        isConsumerOAuth: true
+                    ))
+                }
+                continue
+            }
+
+            if let regex = consumerOAuthRegex,
+               let match = regex.firstMatch(in: line, range: range),
+               let emailRange = Range(match.range(at: 1), in: line) {
+                linesSinceGcpApplyAuth = 0
+                if let email = cleanExtractedEmail(String(line[emailRange])) {
+                    events.append(ParsedLogAuthEvent(
+                        timestamp: lineTs,
+                        isGcp: false,
+                        email: email,
+                        project: nil,
+                        isConsumerOAuth: true
+                    ))
+                }
+                continue
+            }
+
+            if let regex = oauthSuccessRegex,
+               let match = regex.firstMatch(in: line, range: range),
+               let emailRange = Range(match.range(at: 1), in: line) {
+                if line.contains("authMethod=gcp") || linesSinceGcpApplyAuth > 0 {
+                    if linesSinceGcpApplyAuth > 0 { linesSinceGcpApplyAuth -= 1 }
+                    continue
+                }
+                if let email = cleanExtractedEmail(String(line[emailRange])) {
+                    events.append(ParsedLogAuthEvent(
+                        timestamp: lineTs,
+                        isGcp: false,
+                        email: email,
+                        project: nil,
+                        isConsumerOAuth: true
+                    ))
+                }
+                continue
+            }
+
+            if includeLegacyMarkers {
+                if line.contains("authMethod=gcp") || line.contains("gcp_setup.go") || line.contains("[Auth State Transition]") || line.contains("GCP setup completed") || line.contains("aiplatform.googleapis.com") || line.contains("aiplatform.us.rep.googleapis.com") {
+                    linesSinceGcpApplyAuth = 3
+                    events.append(ParsedLogAuthEvent(
+                        timestamp: lineTs,
+                        isGcp: true,
+                        email: extractFirstValidEmail(in: line),
+                        project: defaultProject ?? "clawdbot-485304",
+                        isConsumerOAuth: false
+                    ))
+                    continue
+                }
+                if line.contains("authMethod=consumer") || line.contains("daily-cloudcode-pa.googleapis.com") {
+                    linesSinceGcpApplyAuth = 0
+                    events.append(ParsedLogAuthEvent(
+                        timestamp: lineTs,
+                        isGcp: false,
+                        email: extractFirstValidEmail(in: line),
+                        project: nil,
+                        isConsumerOAuth: false
+                    ))
+                    continue
+                }
+            }
+
+            if linesSinceGcpApplyAuth > 0 {
+                linesSinceGcpApplyAuth -= 1
+            }
+        }
+
+        return events
+    }
+
+    public static func resolveActiveConsumerEmail(cliDir: String? = nil) -> String? {
+        let expandedCliDir = (cliDir ?? getDefaultCliDir()).replacingOccurrences(of: "~", with: NSHomeDirectory())
+        let fm = FileManager.default
+
+        let tokenPath = (expandedCliDir as NSString).appendingPathComponent("antigravity-oauth-token")
+        let oauthTokenModDate = (try? fm.attributesOfItem(atPath: tokenPath))?[.modificationDate] as? Date ?? Date.distantPast
+
+        let cliLogPath = (expandedCliDir as NSString).appendingPathComponent("cli.log")
+        let cliLogExists = fm.fileExists(atPath: cliLogPath)
+        let resolvedCliLogPath = cliLogExists ? URL(fileURLWithPath: cliLogPath).resolvingSymlinksInPath().path : nil
+        let cliLogAttrs = resolvedCliLogPath.flatMap { try? fm.attributesOfItem(atPath: $0) }
+        let cliLogModDate = cliLogAttrs?[.modificationDate] as? Date ?? Date.distantPast
+        let cliLogSize = (cliLogAttrs?[.size] as? NSNumber)?.int64Value ?? 0
+
+        let logDir = (expandedCliDir as NSString).appendingPathComponent("log")
+        let logDirModDate = (try? fm.attributesOfItem(atPath: logDir))?[.modificationDate] as? Date ?? Date.distantPast
+
+        consumerEmailCacheLock.lock()
+        if let cached = consumerEmailCache[expandedCliDir],
+           cached.oauthTokenModDate == oauthTokenModDate,
+           cached.resolvedCliLogPath == resolvedCliLogPath,
+           cached.cliLogModDate == cliLogModDate,
+           cached.cliLogSize == cliLogSize,
+           cached.logDirModDate == logDirModDate {
+            let cachedEmail = cached.email
+            consumerEmailCacheLock.unlock()
+            return cachedEmail
+        }
+        consumerEmailCacheLock.unlock()
+
+        func cacheAndReturn(_ email: String?) -> String? {
+            let entry = ConsumerEmailCacheEntry(
+                expandedCliDir: expandedCliDir,
+                oauthTokenModDate: oauthTokenModDate,
+                resolvedCliLogPath: resolvedCliLogPath,
+                cliLogModDate: cliLogModDate,
+                cliLogSize: cliLogSize,
+                logDirModDate: logDirModDate,
+                email: email
+            )
+            consumerEmailCacheLock.lock()
+            consumerEmailCache[expandedCliDir] = entry
+            consumerEmailCacheLock.unlock()
+            return email
+        }
+
+        // 1. Check antigravity-oauth-token JSON first
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: tokenPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let authMethod = json["auth_method"] as? String,
+           authMethod == "consumer" {
+            let rawEmail = (json["id_token_email"] as? String) ?? (json["email"] as? String)
+            if let email = rawEmail.flatMap({ cleanExtractedEmail($0) }), !email.isEmpty {
+                return cacheAndReturn(email)
+            }
+        }
+
+        // 2. Inspect <expandedCliDir>/cli.log and up to 3 newest cli-*.log files in <expandedCliDir>/log/
+        // Pre-sort lexicographically descending and stat only the top 8 to avoid O(N) stat across 1,500+ logs.
+        struct CandidateLogFile {
+            let resolvedPath: String
+            let fileName: String
+            let modDate: Date
+            let rank: Int
+        }
+
+        var candidates: [CandidateLogFile] = []
+        var seenPaths = Set<String>()
+
+        if let resolved = resolvedCliLogPath {
+            seenPaths.insert(resolved)
+            candidates.append(CandidateLogFile(
+                resolvedPath: resolved,
+                fileName: (resolved as NSString).lastPathComponent,
+                modDate: cliLogModDate,
+                rank: 0
+            ))
+        }
+
+        if let files = try? fm.contentsOfDirectory(atPath: logDir) {
+            let topFilenames = files
+                .filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }
+                .sorted(by: >)
+                .prefix(8)
+
+            let logFilesWithMod: [(path: String, fileName: String, modDate: Date)] = topFilenames
+                .map { file in
+                    let fullPath = (logDir as NSString).appendingPathComponent(file)
+                    let mod = (try? fm.attributesOfItem(atPath: fullPath))?[.modificationDate] as? Date ?? Date.distantPast
+                    return (path: fullPath, fileName: file, modDate: mod)
+                }
+                .sorted { lhs, rhs in
+                    if lhs.modDate != rhs.modDate {
+                        return lhs.modDate > rhs.modDate
+                    }
+                    return lhs.fileName > rhs.fileName
+                }
+
+            for entry in logFilesWithMod.prefix(3) {
+                let resolved = URL(fileURLWithPath: entry.path).resolvingSymlinksInPath().path
+                if seenPaths.insert(resolved).inserted {
+                    candidates.append(CandidateLogFile(
+                        resolvedPath: resolved,
+                        fileName: entry.fileName,
+                        modDate: entry.modDate,
+                        rank: candidates.count
+                    ))
+                }
+            }
+        }
+
+        guard !candidates.isEmpty else { return cacheAndReturn(nil) }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+
+        struct ConsumerMatch {
+            let email: String
+            let timestamp: Date?
+            let modDate: Date
+            let fileRank: Int
+            let occurrenceIndex: Int
+        }
+
+        var matches: [ConsumerMatch] = []
+        for candidate in candidates {
+            guard let logText = readHeadAndTailText(atPath: candidate.resolvedPath, headBytes: 32_768, tailBytes: 262_144) else { continue }
+            let year = extractLogYear(fileName: candidate.fileName, fallbackDate: candidate.modDate, calendar: calendar)
+            let events = parseAuthEvents(
+                in: logText,
+                year: year,
+                defaultProject: nil,
+                calendar: calendar,
+                includeLegacyMarkers: false
+            )
+            for (idx, event) in events.enumerated() where event.isConsumerOAuth && !event.isGcp {
+                if let email = event.email, !email.isEmpty {
+                    matches.append(ConsumerMatch(
+                        email: email,
+                        timestamp: event.timestamp,
+                        modDate: candidate.modDate,
+                        fileRank: candidate.rank,
+                        occurrenceIndex: idx
+                    ))
+                }
+            }
+        }
+
+        guard !matches.isEmpty else { return cacheAndReturn(nil) }
+
+        let latest = matches.max { lhs, rhs in
+            if let lTs = lhs.timestamp, let rTs = rhs.timestamp, lTs != rTs {
+                return lTs < rTs
+            }
+            if lhs.modDate != rhs.modDate {
+                return lhs.modDate < rhs.modDate
+            }
+            if lhs.fileRank != rhs.fileRank {
+                return lhs.fileRank > rhs.fileRank
+            }
+            return lhs.occurrenceIndex < rhs.occurrenceIndex
+        }
+        return cacheAndReturn(latest?.email)
+    }
+
+    public static func loadAuthTransitions(logDir: String, defaultProject: String? = nil) -> [AuthTransition] {
         let historicalTransitions: [AuthTransition] = [
             AuthTransition(timestamp: Date.distantPast, isGcp: false, email: "sameerbajaj24@gmail.com", gcpProject: nil),
             AuthTransition(timestamp: Date(timeIntervalSince1970: 1788408335), isGcp: true, email: "sameerbajaj24@gmail.com", gcpProject: defaultProject ?? "clawdbot-485304"),
@@ -1338,34 +1876,35 @@ public enum AgyStatsService {
         guard !logFiles.isEmpty else { return historicalTransitions }
         let newestFile = logFiles.last!
         let newestPath = (logDir as NSString).appendingPathComponent(newestFile)
-        let newestMod = (try? fm.attributesOfItem(atPath: newestPath))?[.modificationDate] as? Date
+        let newestAttrs = try? fm.attributesOfItem(atPath: newestPath)
+        let newestMod = newestAttrs?[.modificationDate] as? Date
+        let newestSize = (newestAttrs?[.size] as? NSNumber)?.int64Value
         
         let now = Date()
         authCacheLock.lock()
         if let cached = authCache,
-           cached.defaultProject == defaultProject {
-            // Fast TTL check: if checked within last 30s, reuse transitions immediately
+           cached.defaultProject == defaultProject,
+           cached.fileCount == logFiles.count,
+           cached.newestName == newestFile,
+           cached.newestModDate == newestMod,
+           cached.newestSize == newestSize {
             if now.timeIntervalSince(cached.cachedAt) < 30.0 {
                 let res = cached.transitions
                 authCacheLock.unlock()
                 return res
             }
-            // If beyond 30s, check if file count, newest file, and newest mod date match
-            if cached.fileCount == logFiles.count,
-               cached.newestName == newestFile,
-               cached.newestModDate == newestMod {
-                authCache = AuthCacheEntry(
-                    fileCount: cached.fileCount,
-                    newestName: cached.newestName,
-                    newestModDate: cached.newestModDate,
-                    defaultProject: defaultProject,
-                    cachedAt: now,
-                    transitions: cached.transitions
-                )
-                let res = cached.transitions
-                authCacheLock.unlock()
-                return res
-            }
+            authCache = AuthCacheEntry(
+                fileCount: cached.fileCount,
+                newestName: cached.newestName,
+                newestModDate: cached.newestModDate,
+                newestSize: cached.newestSize,
+                defaultProject: defaultProject,
+                cachedAt: now,
+                transitions: cached.transitions
+            )
+            let res = cached.transitions
+            authCacheLock.unlock()
+            return res
         }
         authCacheLock.unlock()
         
@@ -1374,7 +1913,8 @@ public enum AgyStatsService {
         var lastEmail: String? = historicalTransitions.last?.email
         var lastProject: String? = historicalTransitions.last?.gcpProject
         
-        let emailRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
         
         for file in logFiles {
             let stripped = file.replacingOccurrences(of: "cli-", with: "").replacingOccurrences(of: ".log", with: "")
@@ -1385,72 +1925,59 @@ public enum AgyStatsService {
             let fileMod = attrs?[.modificationDate] as? Date ?? Date.distantPast
             let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
             
-            var isGcp: Bool
-            var project: String?
-            var email: String?
+            let fileTransitions: [AuthTransition]
             
             logFileCacheLock.lock()
-            if let cachedLog = logFileCache[file],
+            if let cachedLog = logFileCache[fullPath],
                cachedLog.modDate == fileMod,
                cachedLog.size == fileSize {
-                isGcp = cachedLog.isGcp
-                project = cachedLog.project
-                email = cachedLog.email
+                fileTransitions = cachedLog.transitions
                 logFileCacheLock.unlock()
             } else {
                 logFileCacheLock.unlock()
-                guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: fullPath)) else { continue }
-                let data = handle.readData(ofLength: 65536)
-                try? handle.close()
-                
-                guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { continue }
-                isGcp = false
-                for line in text.components(separatedBy: .newlines) {
-                    if line.contains("HandleUserInput") { continue }
-                    if line.contains("authMethod=consumer") || line.contains("daily-cloudcode-pa.googleapis.com") {
-                        isGcp = false
-                        break
-                    }
-                    if line.contains("authMethod=gcp") || line.contains("gcp_setup.go") || line.contains("[Auth State Transition]") || line.contains("GCP setup completed") || line.contains("aiplatform.googleapis.com") || line.contains("aiplatform.us.rep.googleapis.com") {
-                        isGcp = true
-                        break
-                    }
+                guard let text = readLogTextForTransitions(atPath: fullPath, fileSize: fileSize) else { continue }
+                let year = extractLogYear(fileName: file, fallbackDate: date, calendar: calendar)
+                let events = parseAuthEvents(
+                    in: text,
+                    year: year,
+                    defaultProject: defaultProject,
+                    calendar: calendar,
+                    includeLegacyMarkers: true
+                )
+
+                var parsedTransitions: [AuthTransition] = []
+                for event in events {
+                    parsedTransitions.append(AuthTransition(
+                        timestamp: event.timestamp ?? date,
+                        isGcp: event.isGcp,
+                        email: event.email,
+                        gcpProject: event.project
+                    ))
                 }
-                project = isGcp ? (defaultProject ?? "clawdbot-485304") : nil
-                
-                if let regex = emailRegex {
-                    let range = NSRange(text.startIndex..., in: text)
-                    let matches = regex.matches(in: text, range: range)
-                    for match in matches {
-                        if let r = Range(match.range, in: text) {
-                            let candidate = String(text[r])
-                            if candidate.contains("sameer") || candidate.contains("rowan") || candidate.contains("gmail") {
-                                email = candidate
-                                break
-                            }
-                        }
-                    }
-                }
-                if email == nil {
-                    email = lastEmail ?? "sameerbajaj24@gmail.com"
-                }
+                fileTransitions = parsedTransitions
                 
                 logFileCacheLock.lock()
-                logFileCache[file] = LogFileEntry(
+                logFileCache[fullPath] = LogFileEntry(
                     modDate: fileMod,
                     size: fileSize,
-                    isGcp: isGcp,
-                    project: project,
-                    email: email
+                    transitions: fileTransitions
                 )
                 logFileCacheLock.unlock()
             }
             
-            if lastIsGcp != isGcp || (email != nil && email != lastEmail) || project != lastProject {
-                transitions.append(AuthTransition(timestamp: date, isGcp: isGcp, email: email, gcpProject: project))
-                lastIsGcp = isGcp
-                lastEmail = email
-                lastProject = project
+            for t in fileTransitions {
+                let resolvedEmail = t.email ?? lastEmail
+                if lastIsGcp != t.isGcp || (resolvedEmail != nil && resolvedEmail != lastEmail) || t.gcpProject != lastProject {
+                    transitions.append(AuthTransition(
+                        timestamp: t.timestamp,
+                        isGcp: t.isGcp,
+                        email: resolvedEmail,
+                        gcpProject: t.gcpProject
+                    ))
+                    lastIsGcp = t.isGcp
+                    lastEmail = resolvedEmail
+                    lastProject = t.gcpProject
+                }
             }
         }
         transitions.sort { $0.timestamp < $1.timestamp }
@@ -1460,6 +1987,7 @@ public enum AgyStatsService {
             fileCount: logFiles.count,
             newestName: newestFile,
             newestModDate: newestMod,
+            newestSize: newestSize,
             defaultProject: defaultProject,
             cachedAt: now,
             transitions: transitions
@@ -1678,47 +2206,59 @@ public enum AgyStatsService {
         if let data = try? Data(contentsOf: URL(fileURLWithPath: tokenPath)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let authMethod = json["auth_method"] as? String
-            let email = (json["id_token_email"] as? String) ?? (json["email"] as? String)
+            let rawEmail = (json["id_token_email"] as? String) ?? (json["email"] as? String)
+            let email = rawEmail.flatMap { cleanExtractedEmail($0) }
             let project = (json["project_id"] as? String) ?? (json["quota_project"] as? String)
             if authMethod == "gcp" {
                 return (true, email, project, false)
             } else if authMethod == "consumer" {
-                return (false, email ?? "sameerbajaj24@gmail.com", nil, true)
+                return (false, email ?? resolveActiveConsumerEmail(cliDir: cliDir), nil, true)
             }
         }
-        
+
+        let fm = FileManager.default
+        let cliLogPath = (cliDir as NSString).appendingPathComponent("cli.log")
         let logDir = (cliDir as NSString).appendingPathComponent("log")
-        if let files = try? FileManager.default.contentsOfDirectory(atPath: logDir) {
+        var candidatePath: String? = nil
+        var candidateName = "cli.log"
+
+        if fm.fileExists(atPath: cliLogPath) {
+            let resolved = URL(fileURLWithPath: cliLogPath).resolvingSymlinksInPath().path
+            candidatePath = resolved
+            candidateName = (resolved as NSString).lastPathComponent
+        } else if let files = try? fm.contentsOfDirectory(atPath: logDir) {
             let logFiles = files.filter { $0.hasPrefix("cli-") && $0.hasSuffix(".log") }.sorted()
             if let newest = logFiles.last {
-                let p = (logDir as NSString).appendingPathComponent(newest)
-                if let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: p)) {
-                    let d = handle.readData(ofLength: 65536)
-                    try? handle.close()
-                    if let text = String(data: d, encoding: .utf8) ?? String(data: d, encoding: .ascii) {
-                        var detectedEmail: String?
-                        if let emailRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}") {
-                            let matches = emailRegex.matches(in: text, range: NSRange(text.startIndex..., in: text))
-                            for m in matches {
-                                if let r = Range(m.range, in: text) {
-                                    let cand = String(text[r])
-                                    if cand.contains("sameer") || cand.contains("gmail") {
-                                        detectedEmail = cand
-                                        break
-                                    }
-                                }
-                            }
-                        }
-                        if text.contains("authMethod=gcp") || text.contains("aiplatform") {
-                            return (true, detectedEmail, nil, false)
-                        } else if text.contains("authMethod=consumer") || text.contains("daily-cloudcode-pa.googleapis.com") {
-                            return (false, detectedEmail ?? "sameerbajaj24@gmail.com", nil, true)
-                        }
-                    }
+                candidatePath = (logDir as NSString).appendingPathComponent(newest)
+                candidateName = newest
+            }
+        }
+
+        if let path = candidatePath, let tailText = readTailText(atPath: path, maxBytes: 262_144) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone.current
+            let modDate = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? Date()
+            let year = extractLogYear(fileName: candidateName, fallbackDate: modDate, calendar: calendar)
+            let events = parseAuthEvents(
+                in: tailText,
+                year: year,
+                defaultProject: nil,
+                calendar: calendar,
+                includeLegacyMarkers: true
+            )
+            if let lastEvent = events.last {
+                if lastEvent.isGcp {
+                    return (true, lastEvent.email, lastEvent.project, false)
+                } else {
+                    return (false, lastEvent.email ?? resolveActiveConsumerEmail(cliDir: cliDir), nil, true)
                 }
             }
         }
-        
+
+        if let consumerEmail = resolveActiveConsumerEmail(cliDir: cliDir) {
+            return (false, consumerEmail, nil, true)
+        }
+
         return (false, nil, nil, false)
     }
 

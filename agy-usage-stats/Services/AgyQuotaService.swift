@@ -99,6 +99,48 @@ public actor AgyQuotaService {
         }
     }
 
+    public struct AvailableCreditPayload: Decodable, Sendable {
+        public let creditType: String?
+        public let creditAmount: Int?
+        public let minimumCreditAmountForUsage: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case creditType
+            case creditAmount
+            case minimumCreditAmountForUsage
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.creditType = try container.decodeIfPresent(String.self, forKey: .creditType)
+            self.creditAmount = Self.decodeFlexibleInt(from: container, forKey: .creditAmount)
+            self.minimumCreditAmountForUsage = Self.decodeFlexibleInt(from: container, forKey: .minimumCreditAmountForUsage)
+        }
+
+        private static func decodeFlexibleInt(
+            from container: KeyedDecodingContainer<CodingKeys>,
+            forKey key: CodingKeys
+        ) -> Int? {
+            if let intVal = try? container.decodeIfPresent(Int.self, forKey: key) {
+                return intVal
+            }
+            if let strVal = try? container.decodeIfPresent(String.self, forKey: key) {
+                return Int(strVal.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            if let doubleVal = try? container.decodeIfPresent(Double.self, forKey: key) {
+                return Int(doubleVal)
+            }
+            return nil
+        }
+    }
+
+    public struct DecodedUserStatus: Equatable, Sendable {
+        public let email: String?
+        public let plan: String?
+        public let googleOneAiCredits: Int?
+        public let minimumCreditAmountForUsage: Int?
+    }
+
     private struct UserStatusResponse: Decodable {
         let userStatus: UserStatus?
     }
@@ -110,6 +152,34 @@ public actor AgyQuotaService {
 
     private struct UserTier: Decodable {
         let name: String?
+        let availableCredits: [AvailableCreditPayload]?
+    }
+
+    public static func decodeUserStatus(from data: Data) -> DecodedUserStatus? {
+        guard let statusResp = try? JSONDecoder().decode(UserStatusResponse.self, from: data),
+              let status = statusResp.userStatus else {
+            return nil
+        }
+        let creditsList = status.userTier?.availableCredits ?? []
+        let googleOneEntries = creditsList.filter {
+            $0.creditType?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "GOOGLE_ONE_AI"
+        }
+        let googleOneAiCredits: Int?
+        let minCreditAmount: Int?
+        if googleOneEntries.isEmpty {
+            googleOneAiCredits = nil
+            minCreditAmount = creditsList.compactMap(\.minimumCreditAmountForUsage).first
+        } else {
+            googleOneAiCredits = googleOneEntries.reduce(0) { $0 + ($1.creditAmount ?? 0) }
+            minCreditAmount = googleOneEntries.compactMap(\.minimumCreditAmountForUsage).first
+                ?? creditsList.compactMap(\.minimumCreditAmountForUsage).first
+        }
+        return DecodedUserStatus(
+            email: status.email,
+            plan: status.userTier?.name,
+            googleOneAiCredits: googleOneAiCredits,
+            minimumCreditAmountForUsage: minCreditAmount
+        )
     }
 
     private struct CachedQuota {
@@ -124,12 +194,21 @@ public actor AgyQuotaService {
     }
 
     private static let persistedQuotaKey = "agy.lastKnownSubscriptionQuota"
+    private static let persistedQuotasByEmailKey = "agy.persistedQuotasByEmail"
+    private static let peakGoogleOneAiCreditsKey = "agy.peakGoogleOneAiCreditsByEmail"
     private static var _lastKnownSubscriptionQuota: AgyQuotaInfo? = {
         if let data = UserDefaults.standard.data(forKey: persistedQuotaKey),
            let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
             return decoded
         }
         return nil
+    }()
+    private static var _persistedQuotasByEmail: [String: AgyQuotaInfo] = {
+        if let data = UserDefaults.standard.data(forKey: persistedQuotasByEmailKey),
+           let decoded = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: data) {
+            return decoded
+        }
+        return [:]
     }()
 
     public static var lastKnownSubscriptionQuota: AgyQuotaInfo? {
@@ -174,27 +253,209 @@ public actor AgyQuotaService {
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }()
 
-    private static func loadPersistedQuotaUnlocked(now: Date = Date()) -> AgyQuotaInfo? {
+    private static func normalizeEmailKey(_ email: String?) -> String? {
+        guard let trimmed = email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func loadPersistedQuotaUnlocked(
+        expectedEmail: String? = nil,
+        now: Date = Date()
+    ) -> AgyQuotaInfo? {
         if let data = UserDefaults.standard.data(forKey: persistedQuotaKey),
            let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
             _lastKnownSubscriptionQuota = decoded
-            return decoded.normalizedForCurrentTime(now: now)
         }
+        if let dictData = UserDefaults.standard.data(forKey: persistedQuotasByEmailKey),
+           let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
+            _persistedQuotasByEmail = decodedDict
+        }
+
+        if let targetEmail = normalizeEmailKey(expectedEmail) {
+            if let emailMatch = _persistedQuotasByEmail[targetEmail] {
+                return emailMatch.normalizedForCurrentTime(now: now)
+            }
+            if let last = _lastKnownSubscriptionQuota,
+               normalizeEmailKey(last.email) == targetEmail {
+                return last.normalizedForCurrentTime(now: now)
+            }
+            return nil
+        }
+
         return _lastKnownSubscriptionQuota?.normalizedForCurrentTime(now: now)
     }
 
-    public static func loadPersistedQuota(now: Date = Date()) -> AgyQuotaInfo? {
-        quotaLock.lock()
-        defer { quotaLock.unlock() }
-        return loadPersistedQuotaUnlocked(now: now)
+    public static func loadPersistedQuota(
+        expectedEmail: String? = nil,
+        now: Date = Date(),
+        userDefaults: UserDefaults = .standard
+    ) -> AgyQuotaInfo? {
+        if userDefaults === UserDefaults.standard {
+            quotaLock.lock()
+            defer { quotaLock.unlock() }
+            return loadPersistedQuotaUnlocked(expectedEmail: expectedEmail, now: now)
+        }
+
+        var dict: [String: AgyQuotaInfo] = [:]
+        if let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+           let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
+            dict = decodedDict
+        }
+        var lastKnown: AgyQuotaInfo? = nil
+        if let data = userDefaults.data(forKey: persistedQuotaKey),
+           let decoded = try? JSONDecoder().decode(AgyQuotaInfo.self, from: data) {
+            lastKnown = decoded
+        }
+
+        if let targetEmail = normalizeEmailKey(expectedEmail) {
+            if let emailMatch = dict[targetEmail] {
+                return emailMatch.normalizedForCurrentTime(now: now)
+            }
+            if let last = lastKnown, normalizeEmailKey(last.email) == targetEmail {
+                return last.normalizedForCurrentTime(now: now)
+            }
+            return nil
+        }
+
+        return lastKnown?.normalizedForCurrentTime(now: now)
     }
 
-    public static func savePersistedQuota(_ info: AgyQuotaInfo) {
-        quotaLock.lock()
-        _lastKnownSubscriptionQuota = info
-        quotaLock.unlock()
+    private static func loadPeakGoogleOneAiCreditsDict(from userDefaults: UserDefaults) -> [String: Int] {
+        guard let raw = userDefaults.dictionary(forKey: peakGoogleOneAiCreditsKey) else {
+            return [:]
+        }
+        var result: [String: Int] = [:]
+        for (key, value) in raw {
+            if let intVal = value as? Int {
+                result[key] = intVal
+            } else if let numVal = value as? NSNumber {
+                result[key] = numVal.intValue
+            }
+        }
+        return result
+    }
+
+    private static func updatePeakGoogleOneAiCredits(
+        emailKey: String,
+        credits: Int,
+        userDefaults: UserDefaults
+    ) {
+        var peaks = loadPeakGoogleOneAiCreditsDict(from: userDefaults)
+        let existing = peaks[emailKey]
+        let newPeak = existing.map { max($0, credits) } ?? credits
+        if existing != newPeak {
+            peaks[emailKey] = newPeak
+            userDefaults.set(peaks, forKey: peakGoogleOneAiCreditsKey)
+        }
+    }
+
+    public static func peakGoogleOneAiCredits(
+        forEmail: String,
+        userDefaults: UserDefaults = .standard
+    ) -> Int? {
+        guard let emailKey = normalizeEmailKey(forEmail) else { return nil }
+        if userDefaults === UserDefaults.standard {
+            quotaLock.lock()
+            defer { quotaLock.unlock() }
+            return loadPeakGoogleOneAiCreditsDict(from: userDefaults)[emailKey]
+        }
+        return loadPeakGoogleOneAiCreditsDict(from: userDefaults)[emailKey]
+    }
+
+    public static func allPersistedQuotas(
+        now: Date = Date(),
+        userDefaults: UserDefaults = .standard
+    ) -> [String: AgyQuotaInfo] {
+        if userDefaults === UserDefaults.standard {
+            quotaLock.lock()
+            if let dictData = UserDefaults.standard.data(forKey: persistedQuotasByEmailKey),
+               let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
+                _persistedQuotasByEmail = decodedDict
+            }
+            let snapshot = _persistedQuotasByEmail
+            quotaLock.unlock()
+            return snapshot.mapValues { $0.normalizedForCurrentTime(now: now) }
+        }
+
+        guard let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+              let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) else {
+            return [:]
+        }
+        return decodedDict.mapValues { $0.normalizedForCurrentTime(now: now) }
+    }
+
+    public static func saveQuotaSnapshotForAccount(_ info: AgyQuotaInfo, userDefaults: UserDefaults = .standard) {
+        guard let emailKey = normalizeEmailKey(info.email) else { return }
+        if userDefaults === UserDefaults.standard {
+            quotaLock.lock()
+            _persistedQuotasByEmail[emailKey] = info
+            let dictSnapshot = _persistedQuotasByEmail
+            if let credits = info.googleOneAiCredits {
+                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+            }
+            quotaLock.unlock()
+
+            if let dictData = try? JSONEncoder().encode(dictSnapshot) {
+                userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
+            }
+            return
+        }
+
+        var dict: [String: AgyQuotaInfo] = [:]
+        if let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+           let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
+            dict = decodedDict
+        }
+        dict[emailKey] = info
+        if let credits = info.googleOneAiCredits {
+            updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+        }
+        if let dictData = try? JSONEncoder().encode(dict) {
+            userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
+        }
+    }
+
+    public static func savePersistedQuota(_ info: AgyQuotaInfo, userDefaults: UserDefaults = .standard) {
+        if userDefaults === UserDefaults.standard {
+            quotaLock.lock()
+            _lastKnownSubscriptionQuota = info
+            if let emailKey = normalizeEmailKey(info.email) {
+                _persistedQuotasByEmail[emailKey] = info
+                if let credits = info.googleOneAiCredits {
+                    updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+                }
+            }
+            let dictSnapshot = _persistedQuotasByEmail
+            quotaLock.unlock()
+
+            if let data = try? JSONEncoder().encode(info) {
+                userDefaults.set(data, forKey: persistedQuotaKey)
+            }
+            if let dictData = try? JSONEncoder().encode(dictSnapshot) {
+                userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
+            }
+            return
+        }
+
+        var dict: [String: AgyQuotaInfo] = [:]
+        if let dictData = userDefaults.data(forKey: persistedQuotasByEmailKey),
+           let decodedDict = try? JSONDecoder().decode([String: AgyQuotaInfo].self, from: dictData) {
+            dict = decodedDict
+        }
+        if let emailKey = normalizeEmailKey(info.email) {
+            dict[emailKey] = info
+            if let credits = info.googleOneAiCredits {
+                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: userDefaults)
+            }
+        }
         if let data = try? JSONEncoder().encode(info) {
-            UserDefaults.standard.set(data, forKey: persistedQuotaKey)
+            userDefaults.set(data, forKey: persistedQuotaKey)
+        }
+        if let dictData = try? JSONEncoder().encode(dict) {
+            userDefaults.set(dictData, forKey: persistedQuotasByEmailKey)
         }
     }
 
@@ -208,12 +469,16 @@ public actor AgyQuotaService {
         quotaLock.unlock()
     }
 
-    public static func fetchQuota(forceRefresh: Bool = false) async -> AgyQuotaInfo? {
+    public static func fetchQuota(forceRefresh: Bool = false, expectedEmail: String? = nil) async -> AgyQuotaInfo? {
+        let resolvedExpectedEmail = expectedEmail ?? AgyStatsService.resolveActiveConsumerEmail()
+        let targetEmail = normalizeEmailKey(resolvedExpectedEmail)
+
         if !forceRefresh {
             quotaLock.lock()
             if let cached = cachedQuota {
                 let ttl = cached.info != nil ? cacheTTL : nilCacheTTL
-                if Date().timeIntervalSince(cached.timestamp) < ttl {
+                let emailMatches = targetEmail == nil || normalizeEmailKey(cached.info?.email) == targetEmail
+                if emailMatches && Date().timeIntervalSince(cached.timestamp) < ttl {
                     let info = cached.info?.normalizedForCurrentTime()
                     quotaLock.unlock()
                     return info
@@ -228,29 +493,48 @@ public actor AgyQuotaService {
             let knownPort = lastActivePort
             quotaLock.unlock()
 
+            var invalidatedStalePort = false
             if let port = knownPort {
                 if let info = await fetchFromPort(port), !info.groups.isEmpty {
-                    savePersistedQuota(info)
-                    quotaLock.lock()
-                    cachedQuota = CachedQuota(info: info, timestamp: Date())
-                    quotaLock.unlock()
-                    return info
+                    if targetEmail == nil || normalizeEmailKey(info.email) == targetEmail {
+                        savePersistedQuota(info)
+                        quotaLock.lock()
+                        cachedQuota = CachedQuota(info: info, timestamp: Date())
+                        quotaLock.unlock()
+                        return info
+                    } else {
+                        invalidatedStalePort = true
+                        quotaLock.lock()
+                        if lastActivePort == port {
+                            lastActivePort = nil
+                        }
+                        quotaLock.unlock()
+                    }
                 }
             }
 
-            let detectedPorts = detectAgyPorts(forceRefresh: forceRefresh)
-            let portsToProbe = detectedPorts.filter { $0 != knownPort }
+            let detectedPorts = detectAgyPorts(forceRefresh: forceRefresh || invalidatedStalePort)
+            let portsToProbe = invalidatedStalePort ? detectedPorts : detectedPorts.filter { $0 != knownPort }
+
+            let fallbackClosure: () -> AgyQuotaInfo? = {
+                if let targetEmail {
+                    return loadPersistedQuotaUnlocked(expectedEmail: targetEmail)?.normalizedForCurrentTime()
+                        ?? AgyQuotaInfo(email: resolvedExpectedEmail, plan: nil, groups: [])
+                }
+                return (cachedQuota?.info ?? _lastKnownSubscriptionQuota ?? loadPersistedQuotaUnlocked())?.normalizedForCurrentTime()
+            }
+
             guard !portsToProbe.isEmpty else {
                 quotaLock.lock()
                 lastActivePort = nil
-                let fallback = (cachedQuota?.info ?? _lastKnownSubscriptionQuota ?? loadPersistedQuotaUnlocked())?.normalizedForCurrentTime()
+                let fallback = fallbackClosure()
                 cachedQuota = CachedQuota(info: fallback, timestamp: Date())
                 quotaLock.unlock()
                 return fallback
             }
 
-            // Probe detected ports in parallel until a group-bearing result arrives
-            let found = await probePorts(portsToProbe) { port in
+            // Probe detected ports in parallel, prioritizing expectedEmail when set
+            let found = await probePorts(portsToProbe, expectedEmail: resolvedExpectedEmail) { port in
                 await fetchFromPort(port)
             }
 
@@ -263,7 +547,7 @@ public actor AgyQuotaService {
                 return info
             } else {
                 lastActivePort = nil
-                let fallback = (cachedQuota?.info ?? _lastKnownSubscriptionQuota ?? loadPersistedQuotaUnlocked())?.normalizedForCurrentTime()
+                let fallback = fallbackClosure()
                 cachedQuota = CachedQuota(info: fallback, timestamp: Date())
                 quotaLock.unlock()
                 return fallback
@@ -273,23 +557,87 @@ public actor AgyQuotaService {
 
     public static func probePorts(
         _ ports: [Int],
+        expectedEmail: String? = nil,
         fetcher: @escaping @Sendable (Int) async -> AgyQuotaInfo?
     ) async -> (Int, AgyQuotaInfo)? {
-        await withTaskGroup(of: (Int, AgyQuotaInfo?).self) { group in
-            for port in ports {
+        guard !ports.isEmpty else { return nil }
+        let targetEmail = normalizeEmailKey(expectedEmail)
+
+        return await withTaskGroup(of: (Int, Int, AgyQuotaInfo?).self) { group in
+            for (index, port) in ports.enumerated() {
                 group.addTask {
                     let info = await fetcher(port)
-                    return (port, info)
+                    return (index, port, info)
                 }
             }
-            for await (port, info) in group {
-                if let info = info, !info.groups.isEmpty {
+
+            var bestFallback: (index: Int, port: Int, info: AgyQuotaInfo)? = nil
+
+            for await (index, port, info) in group {
+                guard let info = info, !info.groups.isEmpty else { continue }
+
+                if let targetEmail {
+                    if normalizeEmailKey(info.email) == targetEmail {
+                        group.cancelAll()
+                        return (port, info)
+                    }
+                    if bestFallback == nil || index < bestFallback!.index {
+                        bestFallback = (index, port, info)
+                    }
+                } else {
                     group.cancelAll()
                     return (port, info)
                 }
             }
+
+            if let fallback = bestFallback {
+                return (fallback.port, fallback.info)
+            }
             return nil
         }
+    }
+
+    public static func parsePsElapsedSeconds(_ etime: String) -> Int {
+        let trimmed = etime.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return Int.max }
+
+        let daySplit = trimmed.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let days: Int
+        let timePart: Substring
+        if daySplit.count == 2 {
+            guard let d = Int(daySplit[0]), d >= 0 else { return Int.max }
+            days = d
+            timePart = daySplit[1]
+        } else {
+            days = 0
+            timePart = daySplit[0]
+        }
+
+        let timeComponents = timePart.split(separator: ":", omittingEmptySubsequences: false)
+        let hours: Int
+        let minutes: Int
+        let seconds: Int
+        switch timeComponents.count {
+        case 2:
+            guard let m = Int(timeComponents[0]), let s = Int(timeComponents[1]), m >= 0, s >= 0 else {
+                return Int.max
+            }
+            hours = 0
+            minutes = m
+            seconds = s
+        case 3:
+            guard let h = Int(timeComponents[0]), let m = Int(timeComponents[1]), let s = Int(timeComponents[2]),
+                  h >= 0, m >= 0, s >= 0 else {
+                return Int.max
+            }
+            hours = h
+            minutes = m
+            seconds = s
+        default:
+            return Int.max
+        }
+
+        return days * 86_400 + hours * 3_600 + minutes * 60 + seconds
     }
 
     public static func detectAgyPorts(forceRefresh: Bool = false) -> [Int] {
@@ -346,22 +694,24 @@ public actor AgyQuotaService {
             return []
         }
 
-        // Run at most ONE batched ps call to filter out .agy-gcp-home and extract CSRF tokens
+        // Run at most ONE batched ps call to filter out .agy-gcp-home, capture process elapsed time, and extract CSRF tokens
         let pidArg = candidatePids.prefix(50).map(String.init).joined(separator: ",")
         var gcpPids = Set<Int>()
         var pidToCsrf: [Int: String] = [:]
+        var pidToElapsed: [Int: Int] = [:]
 
-        if let psOutput = runCommand(executable: "/bin/ps", arguments: ["-E", "-o", "pid=,command=", "-p", pidArg]) ??
-                          runCommand(executable: "/bin/ps", arguments: ["-o", "pid=,command=", "-p", pidArg]) {
+        if let psOutput = runCommand(executable: "/bin/ps", arguments: ["-E", "-o", "pid=,etime=,command=", "-p", pidArg]) ??
+                          runCommand(executable: "/bin/ps", arguments: ["-o", "pid=,etime=,command=", "-p", pidArg]) {
             let csrfRegex = try? NSRegularExpression(pattern: #"--csrf_token=([^\s]+)"#)
             let envCsrfRegex = try? NSRegularExpression(pattern: #"ANTIGRAVITY_CSRF_TOKEN=([^\s]+)"#)
 
             for psLine in psOutput.components(separatedBy: .newlines) {
                 let trimmed = psLine.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
-                let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-                guard parts.count == 2, let pid = Int(parts[0]) else { continue }
-                let cmdAndEnv = String(parts[1])
+                let parts = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+                guard parts.count == 3, let pid = Int(parts[0]) else { continue }
+                pidToElapsed[pid] = parsePsElapsedSeconds(String(parts[1]))
+                let cmdAndEnv = String(parts[2])
 
                 if cmdAndEnv.contains(".agy-gcp-home") {
                     gcpPids.insert(pid)
@@ -379,20 +729,21 @@ public actor AgyQuotaService {
             }
         }
 
-        var primaryPorts: [Int] = []
-        var secondaryPorts: [Int] = []
+        var primaryEntries: [(port: Int, elapsed: Int, index: Int)] = []
+        var secondaryEntries: [(port: Int, elapsed: Int, index: Int)] = []
         var seenPorts = Set<Int>()
         var portToCsrf: [Int: String] = [:]
 
-        for item in discovered {
+        for (index, item) in discovered.enumerated() {
             if gcpPids.contains(item.pid) { continue }
             if seenPorts.contains(item.port) { continue }
             seenPorts.insert(item.port)
 
+            let elapsed = pidToElapsed[item.pid] ?? Int.max
             if item.is10u {
-                primaryPorts.append(item.port)
+                primaryEntries.append((port: item.port, elapsed: elapsed, index: index))
             } else {
-                secondaryPorts.append(item.port)
+                secondaryEntries.append((port: item.port, elapsed: elapsed, index: index))
             }
 
             if let token = pidToCsrf[item.pid] {
@@ -400,7 +751,10 @@ public actor AgyQuotaService {
             }
         }
 
-        let ports = primaryPorts + secondaryPorts
+        primaryEntries.sort { ($0.elapsed, $0.index) < ($1.elapsed, $1.index) }
+        secondaryEntries.sort { ($0.elapsed, $0.index) < ($1.elapsed, $1.index) }
+
+        let ports = primaryEntries.map(\.port) + secondaryEntries.map(\.port)
         quotaLock.lock()
         cachedDetectedPorts = CachedPorts(ports: ports, portToCsrf: portToCsrf, timestamp: Date())
         quotaLock.unlock()
@@ -521,22 +875,46 @@ public actor AgyQuotaService {
 
             var email: String? = nil
             var plan: String? = nil
+            var googleOneAiCredits: Int? = nil
+            var minimumCreditAmountForUsage: Int? = nil
 
             if let (statusData, _) = try? await statusTask,
-               let statusResp = try? decoder.decode(UserStatusResponse.self, from: statusData) {
-                email = statusResp.userStatus?.email
-                plan = statusResp.userStatus?.userTier?.name
+               let decodedStatus = decodeUserStatus(from: statusData) {
+                email = decodedStatus.email
+                plan = decodedStatus.plan
+                googleOneAiCredits = decodedStatus.googleOneAiCredits
+                minimumCreditAmountForUsage = decodedStatus.minimumCreditAmountForUsage
             }
+
+            let now = Date()
 
             // If groups is empty, but status call succeeded (e.g. GCP direct project mode or pay-as-you-go)
             if groups.isEmpty {
                 if email != nil || plan != nil {
-                    return AgyQuotaInfo(email: email, plan: plan, groups: [])
+                    return AgyQuotaInfo(
+                        email: email,
+                        plan: plan,
+                        groups: [],
+                        googleOneAiCredits: googleOneAiCredits,
+                        minimumCreditAmountForUsage: minimumCreditAmountForUsage,
+                        lastUpdated: now
+                    )
                 }
                 return nil
             }
 
-            return AgyQuotaInfo(email: email, plan: plan, groups: groups)
+            let info = AgyQuotaInfo(
+                email: email,
+                plan: plan,
+                groups: groups,
+                googleOneAiCredits: googleOneAiCredits,
+                minimumCreditAmountForUsage: minimumCreditAmountForUsage,
+                lastUpdated: now
+            )
+            if normalizeEmailKey(email) != nil {
+                saveQuotaSnapshotForAccount(info)
+            }
+            return info
         } catch {
             return nil
         }

@@ -2269,6 +2269,415 @@ struct agy_usage_statsTests {
         #expect(UpdateChecker.lastInstalledRollingTimestamp == testTs)
         #expect(UserDefaults.standard.string(forKey: UpdateChecker.lastInstalledVersionKey) == testVer)
     }
+
+    // MARK: - Multi-Subscription Account Detection Tests
+
+    @Test func testParsePsElapsedSecondsSorting() {
+        let short = AgyQuotaService.parsePsElapsedSeconds("00:12")
+        let medium = AgyQuotaService.parsePsElapsedSeconds("05:30")
+        let hours = AgyQuotaService.parsePsElapsedSeconds("01:02:03")
+        let days = AgyQuotaService.parsePsElapsedSeconds("1-02:03:04")
+
+        #expect(short == 12)
+        #expect(medium == 330)
+        #expect(hours == 3_723)
+        #expect(days == 93_784)
+        #expect(short < medium)
+        #expect(medium < hours)
+        #expect(hours < days)
+        #expect(AgyQuotaService.parsePsElapsedSeconds("   00:12  ") == 12)
+        #expect(AgyQuotaService.parsePsElapsedSeconds("invalid") == Int.max)
+    }
+
+    @Test func testProbePortsSelectsExpectedEmailEvenWhenStalePortRespondsFaster() async {
+        let bucketA = AgyQuotaBucket(
+            bucketId: "gemini-weekly",
+            displayName: "Weekly Limit",
+            remainingFraction: 0.25,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+        let bucketB = AgyQuotaBucket(
+            bucketId: "gemini-weekly",
+            displayName: "Weekly Limit",
+            remainingFraction: 0.95,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: nil
+        )
+        let infoA = AgyQuotaInfo(
+            email: "accountA@gmail.com",
+            plan: "Google AI Pro",
+            groups: [AgyQuotaGroup(displayName: "Gemini", buckets: [bucketA])]
+        )
+        let infoB = AgyQuotaInfo(
+            email: "accountB@custom.io",
+            plan: "Google AI Ultra",
+            groups: [AgyQuotaGroup(displayName: "Gemini", buckets: [bucketB])]
+        )
+
+        // Port 3001 (stale account A) responds immediately; port 3002 (target account B) responds slower
+        let result = await AgyQuotaService.probePorts([3001, 3002], expectedEmail: "AccountB@custom.io") { port in
+            if port == 3001 {
+                return infoA
+            } else {
+                try? await Task.sleep(nanoseconds: 40_000_000)
+                return infoB
+            }
+        }
+
+        #expect(result != nil)
+        #expect(result?.0 == 3002)
+        #expect(result?.1.email == "accountB@custom.io")
+        #expect(result?.1.plan == "Google AI Ultra")
+    }
+
+    @Test func testProbePortsFallsBackToNewestProcessWhenNoPortMatchesExpectedEmail() async {
+        let bucket1 = AgyQuotaBucket(bucketId: "b1", displayName: "Weekly", remainingFraction: 0.8, disabled: false)
+        let bucket2 = AgyQuotaBucket(bucketId: "b2", displayName: "Weekly", remainingFraction: 0.4, disabled: false)
+        let newestInfo = AgyQuotaInfo(email: "newest@example.com", plan: "Pro", groups: [AgyQuotaGroup(displayName: "Gemini", buckets: [bucket1])])
+        let olderInfo = AgyQuotaInfo(email: "older@example.com", plan: "Pro", groups: [AgyQuotaGroup(displayName: "Gemini", buckets: [bucket2])])
+
+        // Ports array is sorted newest-first: [4001 (newest), 4002 (older)]
+        // Even if 4002 responds faster, fallback picks lowest index (4001)
+        let result = await AgyQuotaService.probePorts([4001, 4002], expectedEmail: "missing@example.com") { port in
+            if port == 4001 {
+                try? await Task.sleep(nanoseconds: 30_000_000)
+                return newestInfo
+            } else {
+                return olderInfo
+            }
+        }
+
+        #expect(result?.0 == 4001)
+        #expect(result?.1.email == "newest@example.com")
+    }
+
+    @Test func testPerEmailPersistedQuotaIsolation() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let bucketA = AgyQuotaBucket(bucketId: "a-5h", displayName: "5-Hour Limit", remainingFraction: 0.12, disabled: false)
+        let infoA = AgyQuotaInfo(
+            email: "AccountA@gmail.com",
+            plan: "Google AI Pro",
+            groups: [AgyQuotaGroup(displayName: "Gemini", buckets: [bucketA])]
+        )
+        AgyQuotaService.savePersistedQuota(infoA, userDefaults: isolatedDefaults)
+
+        // Loading Account A returns Account A's quota (case-insensitive)
+        let loadedA = AgyQuotaService.loadPersistedQuota(expectedEmail: "accounta@gmail.com", userDefaults: isolatedDefaults)
+        #expect(loadedA == infoA)
+
+        // Loading unseen Account B must NEVER leak Account A's persisted quota
+        let loadedB = AgyQuotaService.loadPersistedQuota(expectedEmail: "accountB@gmail.com", userDefaults: isolatedDefaults)
+        #expect(loadedB == nil)
+
+        // Save Account B and verify both coexist independently
+        let bucketB = AgyQuotaBucket(bucketId: "b-5h", displayName: "5-Hour Limit", remainingFraction: 0.99, disabled: false)
+        let infoB = AgyQuotaInfo(
+            email: "accountB@gmail.com",
+            plan: "Google AI Ultra",
+            groups: [AgyQuotaGroup(displayName: "Gemini", buckets: [bucketB])]
+        )
+        AgyQuotaService.savePersistedQuota(infoB, userDefaults: isolatedDefaults)
+
+        #expect(AgyQuotaService.loadPersistedQuota(expectedEmail: "accounta@gmail.com", userDefaults: isolatedDefaults) == infoA)
+        #expect(AgyQuotaService.loadPersistedQuota(expectedEmail: "accountb@gmail.com", userDefaults: isolatedDefaults) == infoB)
+    }
+
+    // MARK: - Multi-Account Credits & Summary UX Tests
+
+    @Test func testGetUserStatusAvailableCreditsDecodingAndPeakDelta() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        // 1. String creditAmount ("25000") + string minimumCreditAmountForUsage ("100")
+        let stringJson = """
+        {
+          "userStatus": {
+            "email": "CreditsUser@gmail.com",
+            "userTier": {
+              "name": "Google AI Ultra",
+              "availableCredits": [
+                {
+                  "creditType": "GOOGLE_ONE_AI",
+                  "creditAmount": "25000",
+                  "minimumCreditAmountForUsage": "100"
+                }
+              ]
+            }
+          }
+        }
+        """
+        let decodedString = AgyQuotaService.decodeUserStatus(from: Data(stringJson.utf8))
+        #expect(decodedString?.email == "CreditsUser@gmail.com")
+        #expect(decodedString?.plan == "Google AI Ultra")
+        #expect(decodedString?.googleOneAiCredits == 25000)
+        #expect(decodedString?.minimumCreditAmountForUsage == 100)
+
+        // 2. Integer creditAmount (500)
+        let intJson = """
+        {
+          "userStatus": {
+            "email": "int@gmail.com",
+            "userTier": {
+              "name": "Google AI Pro",
+              "availableCredits": [
+                {
+                  "creditType": "GOOGLE_ONE_AI",
+                  "creditAmount": 500
+                }
+              ]
+            }
+          }
+        }
+        """
+        let decodedInt = AgyQuotaService.decodeUserStatus(from: Data(intJson.utf8))
+        #expect(decodedInt?.googleOneAiCredits == 500)
+
+        // 3. Omitted creditAmount with GOOGLE_ONE_AI entry -> 0
+        let omittedAmountJson = """
+        {
+          "userStatus": {
+            "email": "zero@gmail.com",
+            "userTier": {
+              "name": "Google AI Pro",
+              "availableCredits": [
+                {
+                  "creditType": "GOOGLE_ONE_AI"
+                }
+              ]
+            }
+          }
+        }
+        """
+        let decodedOmitted = AgyQuotaService.decodeUserStatus(from: Data(omittedAmountJson.utf8))
+        #expect(decodedOmitted?.googleOneAiCredits == 0)
+
+        // 4. Absent availableCredits -> nil
+        let absentJson = """
+        {
+          "userStatus": {
+            "email": "none@gmail.com",
+            "userTier": { "name": "Free" }
+          }
+        }
+        """
+        let decodedAbsent = AgyQuotaService.decodeUserStatus(from: Data(absentJson.utf8))
+        #expect(decodedAbsent?.googleOneAiCredits == nil)
+
+        // 5. Peak tracking & delta calculation
+        let group = AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+            AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 1.0, disabled: false)
+        ])
+        let initialSnapshot = AgyQuotaInfo(
+            email: "CreditsUser@gmail.com",
+            plan: "Google AI Ultra",
+            groups: [group],
+            googleOneAiCredits: 25000,
+            minimumCreditAmountForUsage: 100,
+            lastUpdated: Date()
+        )
+        AgyQuotaService.saveQuotaSnapshotForAccount(initialSnapshot, userDefaults: isolatedDefaults)
+        #expect(AgyQuotaService.peakGoogleOneAiCredits(forEmail: "creditsuser@gmail.com", userDefaults: isolatedDefaults) == 25000)
+
+        let spentSnapshot = AgyQuotaInfo(
+            email: "creditsuser@gmail.com",
+            plan: "Google AI Ultra",
+            groups: [group],
+            googleOneAiCredits: 24650,
+            minimumCreditAmountForUsage: 100,
+            lastUpdated: Date()
+        )
+        AgyQuotaService.saveQuotaSnapshotForAccount(spentSnapshot, userDefaults: isolatedDefaults)
+        #expect(AgyQuotaService.peakGoogleOneAiCredits(forEmail: "creditsuser@gmail.com", userDefaults: isolatedDefaults) == 25000)
+
+        let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.activeConsumerEmail = "creditsuser@gmail.com"
+        vm.stats.quotaInfo = spentSnapshot
+        let summary = vm.subscriptionAccountSummaries.first(where: { $0.id == "creditsuser@gmail.com" })
+        #expect(summary?.googleOneAiCredits == 24650)
+        #expect(summary?.googleOneAiCreditsUsed == 350)
+    }
+
+    @Test func testQuotaInfoLegacyDecodingCompactSummaryAndSnapshotIsolation() throws {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        // Legacy JSON without googleOneAiCredits, minimumCreditAmountForUsage, or lastUpdated
+        let legacyJson = """
+        {
+          "email": "legacy@gmail.com",
+          "plan": "Google AI Pro",
+          "groups": [
+            {
+              "displayName": "Gemini Models",
+              "buckets": [
+                {
+                  "bucketId": "g-5h",
+                  "displayName": "5-Hour",
+                  "remainingFraction": 0.91,
+                  "disabled": false
+                },
+                {
+                  "bucketId": "g-week",
+                  "displayName": "Weekly",
+                  "remainingFraction": 0.95,
+                  "disabled": false
+                }
+              ]
+            },
+            {
+              "displayName": "Claude and GPT Models",
+              "buckets": [
+                {
+                  "bucketId": "c-5h",
+                  "displayName": "5-Hour",
+                  "remainingFraction": 1.0,
+                  "disabled": false
+                }
+              ]
+            }
+          ]
+        }
+        """
+        let decoded = try JSONDecoder().decode(AgyQuotaInfo.self, from: Data(legacyJson.utf8))
+        #expect(decoded.googleOneAiCredits == nil)
+        #expect(decoded.minimumCreditAmountForUsage == nil)
+        #expect(decoded.lastUpdated == nil)
+        #expect(decoded.hasUsedAnyQuota == true)
+        #expect(decoded.compactQuotaSummary == "Gemini 91% · Claude 100%")
+
+        let untouchedInfo = AgyQuotaInfo(
+            email: "untouched@gmail.com",
+            plan: "Pro",
+            groups: [
+                AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+                    AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 1.0, disabled: false),
+                    AgyQuotaBucket(bucketId: "disabled-b", displayName: "Disabled", remainingFraction: 0.0, disabled: true)
+                ])
+            ],
+            googleOneAiCredits: 1000,
+            lastUpdated: Date()
+        )
+        #expect(untouchedInfo.hasUsedAnyQuota == false)
+        #expect(untouchedInfo.compactQuotaSummary == "100% untouched")
+
+        // saveQuotaSnapshotForAccount must NOT overwrite default lastKnownSubscriptionQuota
+        AgyQuotaService.savePersistedQuota(decoded, userDefaults: isolatedDefaults)
+        AgyQuotaService.saveQuotaSnapshotForAccount(untouchedInfo, userDefaults: isolatedDefaults)
+
+        #expect(AgyQuotaService.loadPersistedQuota(userDefaults: isolatedDefaults)?.email == "legacy@gmail.com")
+        let all = AgyQuotaService.allPersistedQuotas(userDefaults: isolatedDefaults)
+        #expect(all.count == 2)
+        #expect(all["untouched@gmail.com"]?.googleOneAiCredits == 1000)
+    }
+
+    @Test func testSubscriptionAccountSummariesAndIsolatedCreditPoolMath() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.activeConsumerEmail = "active@gmail.com"
+
+        let activeQuota = AgyQuotaInfo(
+            email: "active@gmail.com",
+            plan: "Google AI Ultra",
+            groups: [
+                AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+                    AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 1.0, disabled: false)
+                ])
+            ],
+            googleOneAiCredits: 1500,
+            lastUpdated: Date()
+        )
+        let secondaryQuota = AgyQuotaInfo(
+            email: "secondary@custom.io",
+            plan: "Google AI Pro",
+            groups: [
+                AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+                    AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 0.72, disabled: false)
+                ])
+            ],
+            googleOneAiCredits: 500,
+            lastUpdated: Date()
+        )
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "secondary@custom.io", plan: "Google AI Pro", groups: secondaryQuota.groups, googleOneAiCredits: 600),
+            userDefaults: isolatedDefaults
+        )
+        AgyQuotaService.saveQuotaSnapshotForAccount(secondaryQuota, userDefaults: isolatedDefaults)
+
+        let nowTs = Date().timeIntervalSince1970
+        var stats = AgyUsageStats.empty
+        stats.quotaInfo = activeQuota
+        stats.discoveredConsumerEmails = ["active@gmail.com", "unused@gmail.com", "secondary@custom.io"]
+        stats.availableAccounts = ["GCP (clawdbot-485304)", "Google Cloud API", "Account Quota", "active@gmail.com", "secondary@custom.io"]
+        stats.accountCostTotals = ["active@gmail.com": 1.25, "secondary@custom.io": 9.50, "GCP (clawdbot-485304)": 42.00]
+        stats.accountTodayTotals = ["active@gmail.com": 0.50, "secondary@custom.io": 4.20]
+        stats.accountWeeklyTotals = ["active@gmail.com": 1.25, "secondary@custom.io": 9.50]
+        stats.accountQueryTotals = ["active@gmail.com": 5, "secondary@custom.io": 18]
+        stats.accountQueryTodayTotals = ["active@gmail.com": 2, "secondary@custom.io": 7]
+        stats.accountQueryWeeklyTotals = ["active@gmail.com": 5, "secondary@custom.io": 18]
+        stats.consumerSpendEntries = [
+            AccountSpendEntry(email: "secondary@custom.io", timestamp: nowTs - 120, cost: 4.20),
+            AccountSpendEntry(email: "active@gmail.com", timestamp: nowTs - 60, cost: 0.50)
+        ]
+        vm.stats = stats
+
+        let summaries = vm.subscriptionAccountSummaries
+        #expect(summaries.count == 3)
+        // GCP & placeholder names must never appear
+        #expect(!summaries.contains(where: { $0.email.contains("GCP") || $0.email == "Google Cloud API" || $0.email == "Account Quota" }))
+
+        // Sorting: active first, then todayCost desc (secondary), then unused
+        #expect(summaries[0].email == "active@gmail.com")
+        #expect(summaries[0].isActive == true)
+        #expect(summaries[0].hasAnyUsageToday == true)
+
+        #expect(summaries[1].email == "secondary@custom.io")
+        #expect(summaries[1].isActive == false)
+        #expect(summaries[1].todayCost == 4.20)
+        #expect(summaries[1].googleOneAiCredits == 500)
+        #expect(summaries[1].googleOneAiCreditsUsed == 100)
+
+        #expect(summaries[2].email == "unused@gmail.com")
+        #expect(summaries[2].isActive == false)
+        #expect(summaries[2].todayCost == 0.0)
+        #expect(summaries[2].totalQueries == 0)
+        #expect(summaries[2].hasAnyUsageToday == false)
+        #expect(summaries[2].hasAnyHistoricalUsage == false)
+
+        // Per-account credit pool baseline math: setting $100 pool snapshots now, so past entries are excluded
+        vm.setAccountCreditPool(100.0, for: "secondary@custom.io")
+        #expect(vm.accountCreditPool(for: "secondary@custom.io") == 100.0)
+        #expect(vm.accountCreditPool(for: "active@gmail.com") == 0.0)
+        #expect(vm.accountCostSinceBaseline(for: "secondary@custom.io") == 0.0)
+
+        // Spend occurring after baseline timestamp is subtracted cleanly
+        vm.stats.consumerSpendEntries.append(
+            AccountSpendEntry(email: "secondary@custom.io", timestamp: Date().timeIntervalSince1970 + 10, cost: 3.75)
+        )
+        #expect(abs(vm.accountCostSinceBaseline(for: "secondary@custom.io") - 3.75) < 0.0001)
+        let updatedSecondary = vm.subscriptionAccountSummaries.first(where: { $0.id == "secondary@custom.io" })
+        #expect(abs((updatedSecondary?.creditRemaining ?? 0) - 96.25) < 0.0001)
+
+        // Re-setting the exact same pool value does NOT wipe accumulated post-baseline spend
+        vm.setAccountCreditPool(100.0, for: "secondary@custom.io")
+        #expect(abs(vm.accountCostSinceBaseline(for: "secondary@custom.io") - 3.75) < 0.0001)
+
+        // Resetting baseline to now clears prior spend relative to new baseline
+        vm.stats.consumerSpendEntries[vm.stats.consumerSpendEntries.count - 1] =
+            AccountSpendEntry(email: "secondary@custom.io", timestamp: Date().timeIntervalSince1970 - 1, cost: 3.75)
+        vm.resetAccountCreditBaseline(for: "secondary@custom.io")
+        #expect(vm.accountCostSinceBaseline(for: "secondary@custom.io") == 0.0)
+    }
 }
 
 

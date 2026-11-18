@@ -80,6 +80,12 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - **Dual-Box Process & Menu Bar Isolation**: `detectAgyPorts()` uses a 5s TTL cache and a single batched `ps -E` query to exclude `.agy-gcp-home` processes (`agy-gcp`). `AgyStatsViewModel.activeModelDisplayName` filters `recentQueries` strictly to Consumer queries (`!$0.isGcp`) so `agy-gcp` activity never hijacks the menu bar model or subscription display while still tracking GCP costs in the GCP Credit section.
    - **Battery-Balanced Adaptive Polling & APFS Bulk Scan**: `AgyStatsViewModel` coalesces background polling into a single adaptive timer with `tolerance = 5.0` (15s interval within 120s of query/file activity, backing off to 60s when idle) and immediately transitions from 60s to 15s on `AgyFileWatcher` events. `AgyFileWatcher` uses kqueue vnode watchers (300ms debounce) with a 15s fallback timer (`leeway: .seconds(3)`), and `AgyStatsService.directoryContentSignature` uses `FileManager.contentsOfDirectory` (`getattrlistbulk`) to avoid per-file `stat` loops.
 
+10. **Multi-Subscription Account Detection**:
+   - `AgyStatsService.resolveActiveConsumerEmail` resolves the active consumer subscription email from `antigravity-oauth-token` or the 256KB tail of `cli.log` / 3 newest `cli-*.log` files (any valid email domain), and `loadAuthTransitions` tracks all mid-session `/login` transitions.
+   - `AgyQuotaService` sorts candidate ports newest-process-first via `parsePsElapsedSeconds` (`/bin/ps -E -o pid=,etime=,command=`), disambiguates multi-session ports against `expectedEmail`, invalidates stale `lastActivePort` on mismatch, and isolates offline fallbacks in `agy.persistedQuotasByEmail` so Account A never leaks onto Account B.
+   - `AgyFileWatcher` watches `<cliDir>/log`, `cli.log` target, and `antigravity-oauth-token` via kqueue so `/login` refreshes `AgyStatsViewModel.activeConsumerEmail` and the UI within `<500ms`.
+   - `SettingsTabView` & `OverviewTabView` surface per-account credit/usage differentiation (`SubscriptionAccountSummary`, `GOOGLE_ONE_AI` peak-delta credits, per-account credit pools, and single-email Subscription pill filtering with cached snapshots).
+
 ## Release & Deployment Workflow
 
 To publish updates and install the official build without triggering update banners:

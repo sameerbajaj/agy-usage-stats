@@ -105,6 +105,37 @@ public struct WeeklyLimitInfo {
     public let resetTimeDescription: String?
 }
 
+public struct SubscriptionAccountSummary: Identifiable, Equatable {
+    public let email: String
+    public var id: String { email.lowercased() }
+    public let isActive: Bool
+    public let plan: String?
+    public let quotaInfo: AgyQuotaInfo?
+    public let todayCost: Double
+    public let weeklyCost: Double
+    public let totalCost: Double
+    public let todayQueries: Int
+    public let weeklyQueries: Int
+    public let totalQueries: Int
+    public let googleOneAiCredits: Int?
+    public let googleOneAiCreditsUsed: Int
+    public let creditPool: Double
+    public let costSinceBaseline: Double
+    public let creditRemaining: Double
+
+    public var hasUsedQuotaNow: Bool {
+        quotaInfo?.hasUsedAnyQuota ?? false
+    }
+
+    public var hasAnyUsageToday: Bool {
+        todayCost > 0.0005 || todayQueries > 0 || hasUsedQuotaNow || googleOneAiCreditsUsed > 0
+    }
+
+    public var hasAnyHistoricalUsage: Bool {
+        totalCost > 0.0005 || totalQueries > 0 || hasAnyUsageToday
+    }
+}
+
 @Observable
 public final class AgyStatsViewModel {
     private let userDefaults: UserDefaults
@@ -114,6 +145,7 @@ public final class AgyStatsViewModel {
         didSet {
             userDefaults.set(cliDir, forKey: "agy_cliDir")
             AgyStatsService.clearCaches()
+            activeConsumerEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: cliDir)
             restartWatcher()
             Task { await refresh() }
         }
@@ -281,10 +313,174 @@ public final class AgyStatsViewModel {
         guard gcpCreditPool > 0.0 else { return 0.0 }
         return min(1.0, gcpCostSinceBaseline / gcpCreditPool)
     }
+
+    // Per-account optional credit pool tracking
+    private var accountCreditPools: [String: Double] = [:]
+    private var accountCreditBaselineTimestamps: [String: Double] = [:]
+
+    public func accountCreditPool(for email: String) -> Double {
+        let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return 0.0 }
+        return accountCreditPools[key] ?? 0.0
+    }
+
+    public func setAccountCreditPool(_ pool: Double, for email: String) {
+        let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return }
+        let sanitized = max(0.0, (pool * 100.0).rounded() / 100.0)
+        let old = accountCreditPools[key] ?? 0.0
+        if sanitized <= 0.0 {
+            accountCreditPools.removeValue(forKey: key)
+            accountCreditBaselineTimestamps.removeValue(forKey: key)
+        } else {
+            accountCreditPools[key] = sanitized
+            if abs(sanitized - old) > 0.001 {
+                accountCreditBaselineTimestamps[key] = Date().timeIntervalSince1970
+            }
+        }
+        userDefaults.set(accountCreditPools, forKey: "agy_accountCreditPools")
+        userDefaults.set(accountCreditBaselineTimestamps, forKey: "agy_accountCreditBaselineTimestamps")
+    }
+
+    public func resetAccountCreditBaseline(for email: String) {
+        let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return }
+        if (accountCreditPools[key] ?? 0.0) > 0.0 {
+            accountCreditBaselineTimestamps[key] = Date().timeIntervalSince1970
+        } else {
+            accountCreditBaselineTimestamps.removeValue(forKey: key)
+        }
+        userDefaults.set(accountCreditBaselineTimestamps, forKey: "agy_accountCreditBaselineTimestamps")
+    }
+
+    public func accountCostSinceBaseline(for email: String) -> Double {
+        let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return 0.0 }
+        let pool = accountCreditPools[key] ?? 0.0
+        guard pool > 0.0 else { return 0.0 }
+        let baselineTs = accountCreditBaselineTimestamps[key] ?? 0.0
+        return stats.consumerSpendEntries
+            .filter { $0.email.lowercased() == key && $0.timestamp > baselineTs }
+            .reduce(0.0) { $0 + $1.cost }
+    }
+
+    public var subscriptionAccountSummaries: [SubscriptionAccountSummary] {
+        var displayEmailByLower: [String: String] = [:]
+
+        func registerEmail(_ candidate: String?) {
+            guard let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !trimmed.isEmpty,
+                  trimmed.contains("@"),
+                  !trimmed.hasPrefix("GCP ("),
+                  trimmed != "Google Cloud API",
+                  trimmed != "Account Quota" else { return }
+            let key = trimmed.lowercased()
+            if displayEmailByLower[key] == nil {
+                displayEmailByLower[key] = trimmed
+            }
+        }
+
+        let persistedQuotas = AgyQuotaService.allPersistedQuotas(userDefaults: userDefaults)
+
+        for email in stats.discoveredConsumerEmails { registerEmail(email) }
+        for account in stats.availableAccounts { registerEmail(account) }
+        registerEmail(activeConsumerEmail)
+        registerEmail(stats.quotaInfo?.email)
+        for key in persistedQuotas.keys { registerEmail(key) }
+        if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !active.isEmpty, active.contains("@") {
+            displayEmailByLower[active.lowercased()] = active
+        }
+
+        let activeKey: String? = {
+            if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !active.isEmpty, active.contains("@") {
+                return active.lowercased()
+            }
+            if let quotaEmail = stats.quotaInfo?.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !quotaEmail.isEmpty, quotaEmail.contains("@") {
+                return quotaEmail.lowercased()
+            }
+            return nil
+        }()
+
+        func sumDouble(_ dict: [String: Double], key: String) -> Double {
+            dict.reduce(0.0) { partial, item in
+                item.key.lowercased() == key ? partial + item.value : partial
+            }
+        }
+
+        func sumInt(_ dict: [String: Int], key: String) -> Int {
+            dict.reduce(0) { partial, item in
+                item.key.lowercased() == key ? partial + item.value : partial
+            }
+        }
+
+        let summaries = displayEmailByLower.map { (key, displayEmail) -> SubscriptionAccountSummary in
+            let isActive = (key == activeKey)
+            let liveMatchingQuota: AgyQuotaInfo? = {
+                guard let q = stats.quotaInfo,
+                      q.email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == key else {
+                    return nil
+                }
+                return q
+            }()
+            let quota = isActive ? (liveMatchingQuota ?? persistedQuotas[key]) : (persistedQuotas[key] ?? liveMatchingQuota)
+            let todayCost = sumDouble(stats.accountTodayTotals, key: key)
+            let weeklyCost = sumDouble(stats.accountWeeklyTotals, key: key)
+            let totalCost = sumDouble(stats.accountCostTotals, key: key)
+            let todayQueries = sumInt(stats.accountQueryTodayTotals, key: key)
+            let weeklyQueries = sumInt(stats.accountQueryWeeklyTotals, key: key)
+            let totalQueries = sumInt(stats.accountQueryTotals, key: key)
+
+            let aiCredits = quota?.googleOneAiCredits
+            let aiCreditsUsed: Int = {
+                guard let current = aiCredits else { return 0 }
+                let peak = AgyQuotaService.peakGoogleOneAiCredits(forEmail: key, userDefaults: userDefaults) ?? current
+                return max(0, peak - current)
+            }()
+
+            let pool = accountCreditPool(for: key)
+            let sinceBaseline = accountCostSinceBaseline(for: key)
+            let remaining = pool > 0.0 ? max(0.0, pool - sinceBaseline) : 0.0
+
+            return SubscriptionAccountSummary(
+                email: displayEmail,
+                isActive: isActive,
+                plan: quota?.plan,
+                quotaInfo: quota,
+                todayCost: todayCost,
+                weeklyCost: weeklyCost,
+                totalCost: totalCost,
+                todayQueries: todayQueries,
+                weeklyQueries: weeklyQueries,
+                totalQueries: totalQueries,
+                googleOneAiCredits: aiCredits,
+                googleOneAiCreditsUsed: aiCreditsUsed,
+                creditPool: pool,
+                costSinceBaseline: sinceBaseline,
+                creditRemaining: remaining
+            )
+        }
+
+        return summaries.sorted { lhs, rhs in
+            if lhs.isActive != rhs.isActive {
+                return lhs.isActive && !rhs.isActive
+            }
+            if abs(lhs.todayCost - rhs.todayCost) > 0.0001 {
+                return lhs.todayCost > rhs.todayCost
+            }
+            if abs(lhs.totalCost - rhs.totalCost) > 0.0001 {
+                return lhs.totalCost > rhs.totalCost
+            }
+            return lhs.email.lowercased() < rhs.email.lowercased()
+        }
+    }
     
     // UI States
     public var stats: AgyUsageStats = .empty
     public var settings: AgySettings = .default
+    public var activeConsumerEmail: String? = nil
     public var isRefreshing = false
     public var isConnected = false
     public var searchQuery = String()
@@ -409,10 +605,38 @@ public final class AgyStatsViewModel {
         if userDefaults.object(forKey: "agy_gcpCreditBaselineCost") == nil && userDefaults.object(forKey: "agy_gcpCreditPool") != nil && self.gcpCreditPool > 0.0 && self.gcpCreditPool != 300.0 {
             self.gcpCreditBaselineNeedsMigration = true
         }
+
+        if let rawPools = userDefaults.dictionary(forKey: "agy_accountCreditPools") {
+            var loadedPools: [String: Double] = [:]
+            for (k, v) in rawPools {
+                let key = k.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !key.isEmpty else { continue }
+                if let d = v as? Double, d > 0 {
+                    loadedPools[key] = (d * 100.0).rounded() / 100.0
+                } else if let n = v as? NSNumber, n.doubleValue > 0 {
+                    loadedPools[key] = (n.doubleValue * 100.0).rounded() / 100.0
+                }
+            }
+            self.accountCreditPools = loadedPools
+        }
+        if let rawTimestamps = userDefaults.dictionary(forKey: "agy_accountCreditBaselineTimestamps") {
+            var loadedTimestamps: [String: Double] = [:]
+            for (k, v) in rawTimestamps {
+                let key = k.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !key.isEmpty else { continue }
+                if let d = v as? Double, d > 0 {
+                    loadedTimestamps[key] = d
+                } else if let n = v as? NSNumber, n.doubleValue > 0 {
+                    loadedTimestamps[key] = n.doubleValue
+                }
+            }
+            self.accountCreditBaselineTimestamps = loadedTimestamps
+        }
         
         let expanded = self.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         let path = (expanded as NSString).appendingPathComponent("history.jsonl")
         self.isConnected = FileManager.default.fileExists(atPath: path)
+        self.activeConsumerEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: self.cliDir)
     }
     
     private static let isoFormatter = ISO8601DateFormatter()
@@ -969,10 +1193,38 @@ public final class AgyStatsViewModel {
         quotaPollingTimer = timer
     }
     
+    private static func emailsDiffer(_ a: String?, _ b: String?) -> Bool {
+        let normA = a?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normB = b?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let cleanA = (normA?.isEmpty == false) ? normA : nil
+        let cleanB = (normB?.isEmpty == false) ? normB : nil
+        return cleanA != cleanB
+    }
+
     /// Fast-path quota refresh without re-reading or parsing history files (<1ms localhost request)
     public func refreshQuotaOnly(forceRefresh: Bool = false) async {
-        guard let quota = await AgyQuotaService.fetchQuota(forceRefresh: forceRefresh) else { return }
+        let resolvedEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: cliDir)
+        let (previousEmail, currentQuotaEmail) = await MainActor.run { () -> (String?, String?) in
+            let prev = self.activeConsumerEmail
+            if prev != resolvedEmail {
+                self.activeConsumerEmail = resolvedEmail
+            }
+            return (prev, self.stats.quotaInfo?.email)
+        }
+
+        let emailChanged = Self.emailsDiffer(previousEmail, resolvedEmail)
+        let quotaMismatches = resolvedEmail != nil && Self.emailsDiffer(currentQuotaEmail, resolvedEmail)
+        let shouldForce = forceRefresh || emailChanged || quotaMismatches
+
+        if emailChanged || quotaMismatches {
+            AgyQuotaService.clearCache(clearActivePort: true)
+        }
+
+        guard let quota = await AgyQuotaService.fetchQuota(forceRefresh: shouldForce, expectedEmail: resolvedEmail) else { return }
         await MainActor.run {
+            if self.activeConsumerEmail != resolvedEmail {
+                self.activeConsumerEmail = resolvedEmail
+            }
             if self.stats.quotaInfo != quota {
                 self.stats.quotaInfo = quota
             }
@@ -985,15 +1237,31 @@ public final class AgyStatsViewModel {
         await MainActor.run {
             isRefreshing = true
         }
+
+        let resolvedEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: cliDir)
+        let (previousEmail, currentQuota) = await MainActor.run { () -> (String?, AgyQuotaInfo?) in
+            let prev = self.activeConsumerEmail
+            if prev != resolvedEmail {
+                self.activeConsumerEmail = resolvedEmail
+            }
+            return (prev, self.stats.quotaInfo)
+        }
+
+        let emailChanged = Self.emailsDiffer(previousEmail, resolvedEmail)
+        let quotaMismatches = resolvedEmail != nil && Self.emailsDiffer(currentQuota?.email, resolvedEmail)
+        if emailChanged || quotaMismatches {
+            AgyQuotaService.clearCache(clearActivePort: true)
+        }
+        let safeExistingQuota: AgyQuotaInfo? = (emailChanged || quotaMismatches) ? nil : currentQuota
         
-        let (loadedStats, loadedSettings) = await AgyStatsService.loadStats(cliDir: cliDir, existingQuota: self.stats.quotaInfo)
+        let (loadedStats, loadedSettings) = await AgyStatsService.loadStats(cliDir: cliDir, existingQuota: safeExistingQuota)
         let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         let path = (expanded as NSString).appendingPathComponent("history.jsonl")
         let connected = FileManager.default.fileExists(atPath: path)
         
         await MainActor.run {
             var updatedStats = loadedStats
-            if updatedStats.quotaInfo == nil, let existingQuota = self.stats.quotaInfo {
+            if updatedStats.quotaInfo == nil, let existingQuota = safeExistingQuota {
                 updatedStats.quotaInfo = existingQuota
             }
             if self.stats != updatedStats {
