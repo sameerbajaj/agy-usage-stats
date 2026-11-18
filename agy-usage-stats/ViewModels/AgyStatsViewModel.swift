@@ -136,6 +136,23 @@ public struct SubscriptionAccountSummary: Identifiable, Equatable {
     }
 }
 
+public enum AccountTabItem: Identifiable, Equatable {
+    case subscription(email: String, label: String, tierBadge: String?, isActive: Bool)
+    case gcp(project: String)
+    case all
+
+    public var id: String {
+        switch self {
+        case .subscription(let email, _, _, _):
+            return "sub:\(email.lowercased())"
+        case .gcp:
+            return "gcp"
+        case .all:
+            return "all"
+        }
+    }
+}
+
 @Observable
 public final class AgyStatsViewModel {
     private let userDefaults: UserDefaults
@@ -515,6 +532,111 @@ public final class AgyStatsViewModel {
             }
             return lhs.email.lowercased() < rhs.email.lowercased()
         }
+    }
+
+    // MARK: - Option B Smart Account Tab Descriptors
+
+    private static func isPrimaryEligible(_ summary: SubscriptionAccountSummary) -> Bool {
+        summary.isActive
+            || summary.totalCost > 0.005
+            || summary.todayCost > 0.005
+            || summary.totalQueries > 0
+            || summary.hasUsedQuotaNow
+            || summary.googleOneAiCreditsUsed > 0
+    }
+
+    public static func shortTierName(for plan: String?) -> String? {
+        guard let raw = plan?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        let lower = raw.lowercased()
+        if lower.contains("ultra") { return "Ultra" }
+        if lower.contains("pro") { return "Pro" }
+        if lower.contains("free") { return "Free" }
+        return nil
+    }
+
+    private static func shortEmailHandle(for email: String, maxLength: Int = 9) -> String {
+        let local = email.split(separator: "@").first.map(String.init) ?? email
+        if local.count <= maxLength {
+            return local
+        }
+        let prefixCount = max(1, maxLength - 1)
+        return String(local.prefix(prefixCount)) + "…"
+    }
+
+    private static func disambiguatedEmailHandles(for summaries: [SubscriptionAccountSummary]) -> [String: String] {
+        var handles: [String: String] = [:]
+        for s in summaries {
+            handles[s.id] = shortEmailHandle(for: s.email)
+        }
+        let grouped = Dictionary(grouping: summaries) { handles[$0.id] ?? $0.email }
+        for (_, colliding) in grouped where colliding.count > 1 {
+            for s in colliding {
+                let parts = s.email.split(separator: "@", maxSplits: 1).map(String.init)
+                let local = parts.first ?? s.email
+                let domain = parts.count > 1 ? parts[1] : ""
+                let hasSameLocal = colliding.filter {
+                    ($0.email.split(separator: "@").first.map(String.init) ?? "").lowercased() == local.lowercased()
+                }.count > 1
+                if hasSameLocal && !domain.isEmpty {
+                    let domPrefix = String(domain.split(separator: ".").first ?? Substring(domain)).prefix(3)
+                    let localShort = String(local.prefix(4))
+                    handles[s.id] = "\(localShort)@\(domPrefix)"
+                } else if local.count > 9 {
+                    let head = String(local.prefix(5))
+                    let tail = String(local.suffix(3))
+                    handles[s.id] = "\(head)…\(tail)"
+                }
+            }
+        }
+        return handles
+    }
+
+    private var partitionedSubscriptionTabs: (primary: [AccountTabItem], overflow: [SubscriptionAccountSummary]) {
+        let summaries = subscriptionAccountSummaries
+        let primarySummaries = Array(summaries.filter { Self.isPrimaryEligible($0) }.prefix(3))
+        let primaryIds = Set(primarySummaries.map(\.id))
+        let overflow = summaries.filter { !primaryIds.contains($0.id) }
+
+        let tierNames = primarySummaries.map { Self.shortTierName(for: $0.plan) }
+        let nonNilTiers = tierNames.compactMap { $0 }
+        let allHaveTier = nonNilTiers.count == primarySummaries.count
+        let allTiersUnique = Set(nonNilTiers).count == nonNilTiers.count
+        let useTierLabels = !primarySummaries.isEmpty && allHaveTier && allTiersUnique
+
+        let fallbackHandles = Self.disambiguatedEmailHandles(for: primarySummaries)
+
+        let primaryItems: [AccountTabItem] = zip(primarySummaries, tierNames).map { summary, tierName in
+            let label = useTierLabels
+                ? (tierName ?? fallbackHandles[summary.id] ?? summary.email)
+                : (fallbackHandles[summary.id] ?? summary.email)
+            let tierBadge = tierName?.uppercased() ?? {
+                let raw = summary.plan?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return raw.isEmpty ? nil : raw.uppercased()
+            }()
+            return .subscription(
+                email: summary.email,
+                label: label,
+                tierBadge: tierBadge,
+                isActive: summary.isActive
+            )
+        }
+
+        return (primaryItems, overflow)
+    }
+
+    public var primaryAccountTabs: [AccountTabItem] {
+        var tabs = partitionedSubscriptionTabs.primary
+        if stats.gcpTotalCost > 0 || stats.gcpTodayCost > 0 || gcpCreditPool > 0 || stats.isGcpActive {
+            tabs.append(.gcp(project: stats.gcpProject ?? "clawdbot-485304"))
+        }
+        tabs.append(.all)
+        return tabs
+    }
+
+    public var overflowUnusedSubscriptions: [SubscriptionAccountSummary] {
+        partitionedSubscriptionTabs.overflow
     }
     
     // UI States

@@ -8,6 +8,7 @@ import AppKit
 
 struct SettingsTabView: View {
     @Bindable var viewModel: AgyStatsViewModel
+    var onBack: (() -> Void)? = nil
     @Environment(\.colorScheme) var colorScheme
     @State private var isEditingDir = false
     @State private var tempDir = ""
@@ -21,27 +22,64 @@ struct SettingsTabView: View {
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                // Live Menu Bar Preview Mini-Card
-                menuBarPreviewSection
+        VStack(spacing: 0) {
+            if let onBack {
+                HStack {
+                    Button(action: onBack) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 9.5, weight: .bold))
+                            Text("Back")
+                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundStyle(theme.textPrimary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule().fill(theme.surfaceSecondary)
+                        )
+                        .overlay(
+                            Capsule().stroke(theme.cardStroke, lineWidth: 0.75)
+                        )
+                    }
+                    .buttonStyle(.plain)
 
-                // Subscription Accounts & Credit Status
-                subscriptionAccountsSection
+                    Spacer()
 
-                // Card 1: Subscription Quota
-                subscriptionQuotaSection
-                
-                // Card 2: Cloud & API Spend
-                cloudAndSpendSection
+                    Text("PREFERENCES")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(theme.surfacePrimary)
 
-                // Card 3: Popover & Appearance
-                popoverAppearanceSection
-                
-                // Card 4: CLI Data Path & Updates
-                systemSection
+                Rectangle().fill(theme.divider).frame(height: 1)
             }
-            .padding(12)
+
+            ScrollView {
+                VStack(spacing: 14) {
+                    // Live Menu Bar Preview Mini-Card
+                    menuBarPreviewSection
+
+                    // Subscription Accounts & Credit Status
+                    subscriptionAccountsSection
+
+                    // Card 1: Subscription Quota
+                    subscriptionQuotaSection
+                    
+                    // Card 2: Cloud & API Spend
+                    cloudAndSpendSection
+
+                    // Card 3: Popover & Appearance
+                    popoverAppearanceSection
+                    
+                    // Card 4: CLI Data Path & Updates
+                    systemSection
+                }
+                .padding(12)
+            }
+            .background(theme.surfacePrimary)
         }
         .background(theme.surfacePrimary)
     }

@@ -2788,6 +2788,99 @@ struct agy_usage_statsTests {
         #expect(!vm.dismissedConsumerEmails.contains("old.unused@gmail.com"))
         #expect(vm.subscriptionAccountSummaries.contains(where: { $0.id == "old.unused@gmail.com" }))
     }
+
+    @Test func testOptionBAccountTabsPartitioningAndTierDisambiguation() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let group = AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+            AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 0.77, disabled: false)
+        ])
+
+        // 1. Unique tiers (Ultra + Pro) + 1 unused overflow + GCP -> [● Ultra, Pro, GCP, All], overflow = [unuseddev@acme.io]
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "ultradevuser@acme.io", plan: "Google AI Ultra", groups: [group]),
+            userDefaults: isolatedDefaults
+        )
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "prodevuser@acme.io", plan: "Google AI Pro", groups: [group]),
+            userDefaults: isolatedDefaults
+        )
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "unuseddev@acme.io", plan: "Google AI Pro", groups: [
+                AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+                    AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 1.0, disabled: false)
+                ])
+            ]),
+            userDefaults: isolatedDefaults
+        )
+
+        let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.activeConsumerEmail = "ultradevuser@acme.io"
+        vm.gcpCreditPool = 12.06
+
+        var stats = AgyUsageStats.empty
+        stats.discoveredConsumerEmails = ["ultradevuser@acme.io", "prodevuser@acme.io", "unuseddev@acme.io"]
+        stats.accountTodayTotals = ["ultradevuser@acme.io": 15.67, "prodevuser@acme.io": 1.44]
+        stats.accountCostTotals = ["ultradevuser@acme.io": 15.67, "prodevuser@acme.io": 1.44]
+        stats.accountQueryTotals = ["ultradevuser@acme.io": 28, "prodevuser@acme.io": 4]
+        stats.gcpProject = "cloud-proj-01"
+        stats.gcpTodayCost = 10.28
+        vm.stats = stats
+
+        let tabs = vm.primaryAccountTabs
+        #expect(tabs == [
+            .subscription(email: "ultradevuser@acme.io", label: "Ultra", tierBadge: "ULTRA", isActive: true),
+            .subscription(email: "prodevuser@acme.io", label: "Pro", tierBadge: "PRO", isActive: false),
+            .gcp(project: "cloud-proj-01"),
+            .all
+        ])
+        #expect(vm.overflowUnusedSubscriptions.map(\.id) == ["unuseddev@acme.io"])
+
+        // 2. Colliding tiers (two Pro accounts) -> disambiguated short handles <= 9 chars
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "ultradevuser@acme.io", plan: "Google AI Pro", groups: [group]),
+            userDefaults: isolatedDefaults
+        )
+        let collidingTabs = vm.primaryAccountTabs
+        #expect(collidingTabs == [
+            .subscription(email: "ultradevuser@acme.io", label: "ultradev…", tierBadge: "PRO", isActive: true),
+            .subscription(email: "prodevuser@acme.io", label: "prodevus…", tierBadge: "PRO", isActive: false),
+            .gcp(project: "cloud-proj-01"),
+            .all
+        ])
+
+        // 3. Top-3 cap on primary subscription accounts + omitting GCP when inactive/zero
+        vm.gcpCreditPool = 0.0
+        stats.gcpTodayCost = 0.0
+        stats.gcpTotalCost = 0.0
+        stats.gcpProject = nil
+        stats.discoveredConsumerEmails = [
+            "ultradevuser@acme.io",
+            "prodevuser@acme.io",
+            "third@acme.io",
+            "fourth@acme.io",
+            "unuseddev@acme.io"
+        ]
+        stats.accountCostTotals = [
+            "ultradevuser@acme.io": 20.0,
+            "prodevuser@acme.io": 10.0,
+            "third@acme.io": 5.0,
+            "fourth@acme.io": 1.0
+        ]
+        vm.stats = stats
+
+        let cappedTabs = vm.primaryAccountTabs
+        let subTabsCount = cappedTabs.filter {
+            if case .subscription = $0 { return true }
+            return false
+        }.count
+        #expect(subTabsCount == 3)
+        #expect(cappedTabs.last == .all)
+        #expect(!cappedTabs.contains(where: { $0.id == "gcp" }))
+        #expect(vm.overflowUnusedSubscriptions.map(\.id).sorted() == ["fourth@acme.io", "unuseddev@acme.io"])
+    }
 }
 
 

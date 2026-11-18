@@ -10,56 +10,68 @@ import SwiftUI
 public struct OverviewTabView: View {
     @Environment(\.colorScheme) var colorScheme
     let viewModel: AgyStatsViewModel
-    
+
     public enum CostTimeframe: String, CaseIterable, Identifiable {
         case today = "Today"
         case week = "Last 7 Days"
         case month = "Last 30 Days"
         case all = "All Costs"
-        
+
         public var id: String { rawValue }
+
+        var compactLabel: String {
+            switch self {
+            case .today: return "Today"
+            case .week: return "7d"
+            case .month: return "30d"
+            case .all: return "All"
+            }
+        }
     }
-    
+
+    private enum ResolvedTabSelection {
+        case subscription(SubscriptionAccountSummary)
+        case gcp(project: String)
+        case all
+    }
+
     @State private var selectedTimeframe: CostTimeframe = .today
-    @AppStorage("agy_selectedAccountFilter") private var selectedAccount: AccountFilter = .all
-    @State private var selectedSubscriptionEmail: String? = nil
+    @AppStorage("agy_selectedAccountTabId") private var selectedAccountTabId: String = "auto"
     @State private var selectedBucketId: String? = nil
     @State private var hoveredBucketId: String? = nil
-    
+
     private static let weekdayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "EEE"
         return f
     }()
-    
+
     private static let dayHeaderFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "EEE, MMM d"
         return f
     }()
-    
+
     private static let shortDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
         return f
     }()
-    
-    private static let iso8601Formatter = ISO8601DateFormatter()
+
     private static let snapshotRelativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .abbreviated
         return f
     }()
-    
-    private var isDark: Bool { colorScheme == .dark }
+
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
-    
+
     public init(viewModel: AgyStatsViewModel) {
         self.viewModel = viewModel
     }
-    
-    // MARK: - Cost & Token Computations
-    
+
+    // MARK: - Static Computation Helpers (Tested & Shared)
+
     public static func filterBuckets(for timeframe: CostTimeframe, in allBuckets: [UsageTimeBucket]) -> [UsageTimeBucket] {
         switch timeframe {
         case .today:
@@ -75,39 +87,12 @@ public struct OverviewTabView: View {
             return allBuckets
         }
     }
-    
+
     public static func pinnedBucket(for selectedId: String?, in buckets: [UsageTimeBucket]) -> UsageTimeBucket? {
         guard let id = selectedId else { return nil }
         return buckets.first(where: { $0.id == id })
     }
-    
-    private var activeBuckets: [UsageTimeBucket] {
-        Self.filterBuckets(for: selectedTimeframe, in: viewModel.stats.dailyUsage)
-    }
-    
-    // MARK: - Day Selection & Bucket Ingestion
-    
-    public var pinnedBucket: UsageTimeBucket? {
-        Self.pinnedBucket(for: selectedBucketId, in: activeBuckets)
-    }
-    
-    private var hoveredBucket: UsageTimeBucket? {
-        guard let id = hoveredBucketId else { return nil }
-        return activeBuckets.first(where: { $0.id == id })
-    }
-    
-    private var activeInspectedBucket: UsageTimeBucket? {
-        hoveredBucket ?? pinnedBucket
-    }
-    
-    private var inspectedBucket: UsageTimeBucket? {
-        hoveredBucket ?? pinnedBucket
-    }
-    
-    public var peakBucket: UsageTimeBucket? {
-        Self.computePeakBucket(in: activeBuckets, account: selectedAccount)
-    }
-    
+
     public static func bucketCost(_ bucket: UsageTimeBucket, account: AccountFilter) -> Double {
         switch account {
         case .all: return bucket.totalCost
@@ -115,7 +100,7 @@ public struct OverviewTabView: View {
         case .gcp: return bucket.gcpCost
         }
     }
-    
+
     public static func bucketTokens(_ bucket: UsageTimeBucket, account: AccountFilter) -> Int {
         switch account {
         case .all: return bucket.inputTokens + bucket.outputTokens
@@ -123,7 +108,7 @@ public struct OverviewTabView: View {
         case .gcp: return bucket.gcpInputTokens + bucket.gcpOutputTokens
         }
     }
-    
+
     public static func bucketQueries(_ bucket: UsageTimeBucket, account: AccountFilter) -> Int {
         switch account {
         case .all: return bucket.queryCount
@@ -131,7 +116,7 @@ public struct OverviewTabView: View {
         case .gcp: return bucket.gcpQueryCount
         }
     }
-    
+
     public static func bucketModelBreakdown(_ bucket: UsageTimeBucket, account: AccountFilter) -> [String: Double] {
         switch account {
         case .all: return bucket.consolidatedModelBreakdown
@@ -139,27 +124,11 @@ public struct OverviewTabView: View {
         case .gcp: return bucket.consolidatedGcpModelBreakdown
         }
     }
-    
+
     public static func peakBucket(in buckets: [UsageTimeBucket], account: AccountFilter) -> UsageTimeBucket? {
         computePeakBucket(in: buckets, account: account)
     }
-    
-    public func bucketCost(_ bucket: UsageTimeBucket, account: AccountFilter? = nil) -> Double {
-        Self.bucketCost(bucket, account: account ?? selectedAccount)
-    }
-    
-    public func bucketTokens(_ bucket: UsageTimeBucket, account: AccountFilter? = nil) -> Int {
-        Self.bucketTokens(bucket, account: account ?? selectedAccount)
-    }
-    
-    public func bucketQueries(_ bucket: UsageTimeBucket, account: AccountFilter? = nil) -> Int {
-        Self.bucketQueries(bucket, account: account ?? selectedAccount)
-    }
-    
-    public func bucketModelBreakdown(_ bucket: UsageTimeBucket, account: AccountFilter? = nil) -> [String: Double] {
-        Self.bucketModelBreakdown(bucket, account: account ?? selectedAccount)
-    }
-    
+
     public static func computePeakBucket(in buckets: [UsageTimeBucket], account: AccountFilter) -> UsageTimeBucket? {
         let nonZero = buckets.filter { b in
             switch account {
@@ -169,17 +138,10 @@ public struct OverviewTabView: View {
             }
         }
         return nonZero.max { a, b in
-            let costA: Double
-            let costB: Double
-            switch account {
-            case .all: costA = a.totalCost; costB = b.totalCost
-            case .subscription: costA = a.quotaCost; costB = b.quotaCost
-            case .gcp: costA = a.gcpCost; costB = b.gcpCost
-            }
-            return costA < costB
+            bucketCost(a, account: account) < bucketCost(b, account: account)
         }
     }
-    
+
     static func computeTickIndices(totalCount: Int) -> [Int] {
         guard totalCount > 1 else { return totalCount == 1 ? [0] : [] }
         if totalCount <= 7 {
@@ -197,90 +159,6 @@ public struct OverviewTabView: View {
         }
         return indices
     }
-    
-    private var effectiveSelectedSubscriptionEmail: String? {
-        guard selectedAccount == .subscription,
-              let sel = selectedSubscriptionEmail?.lowercased(),
-              viewModel.subscriptionAccountSummaries.contains(where: { $0.id == sel }) else {
-            return nil
-        }
-        return sel
-    }
-
-    private func accountCost(in bucket: UsageTimeBucket, emailKey: String) -> Double {
-        bucket.accountCostBreakdown.reduce(0.0) { partial, item in
-            item.key.lowercased() == emailKey ? partial + item.value : partial
-        }
-    }
-
-    private func accountQueries(in bucket: UsageTimeBucket, emailKey: String) -> Int {
-        bucket.accountQueryBreakdown.reduce(0) { partial, item in
-            item.key.lowercased() == emailKey ? partial + item.value : partial
-        }
-    }
-
-    private func accountTokens(in bucket: UsageTimeBucket, emailKey: String) -> Int {
-        let direct = bucket.accountTokenBreakdown.reduce(0) { partial, item in
-            item.key.lowercased() == emailKey ? partial + item.value : partial
-        }
-        if direct > 0 { return direct }
-        let cost = accountCost(in: bucket, emailKey: emailKey)
-        if cost > 0 && bucket.quotaCost > 0 {
-            let quotaTokens = bucket.quotaInputTokens + bucket.quotaOutputTokens
-            return Int(Double(quotaTokens) * (cost / bucket.quotaCost))
-        }
-        return 0
-    }
-
-    private func accountModelBreakdown(in bucket: UsageTimeBucket, emailKey: String) -> [String: Double] {
-        var result: [String: Double] = [:]
-        for (acc, models) in bucket.accountModelBreakdown where acc.lowercased() == emailKey {
-            for (rawModel, cost) in models where cost > 0 {
-                let canonical = canonicalModelDisplayName(from: rawModel)
-                result[canonical, default: 0.0] += cost
-            }
-        }
-        if !result.isEmpty {
-            return result
-        }
-        let cost = accountCost(in: bucket, emailKey: emailKey)
-        if cost > 0 && bucket.quotaCost > 0 {
-            let ratio = cost / bucket.quotaCost
-            for (model, modelCost) in bucket.consolidatedQuotaModelBreakdown {
-                result[model, default: 0.0] += modelCost * ratio
-            }
-        }
-        return result
-    }
-
-    private func effectiveBucketCost(_ bucket: UsageTimeBucket) -> Double {
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            return accountCost(in: bucket, emailKey: selEmail)
-        }
-        return bucketCost(bucket)
-    }
-
-    private func effectiveBucketTokens(_ bucket: UsageTimeBucket) -> Int {
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            return accountTokens(in: bucket, emailKey: selEmail)
-        }
-        return bucketTokens(bucket)
-    }
-
-    private func effectiveBucketQueries(_ bucket: UsageTimeBucket) -> Int {
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            return accountQueries(in: bucket, emailKey: selEmail)
-        }
-        return bucketQueries(bucket)
-    }
-
-    private var effectivePeakBucket: UsageTimeBucket? {
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            let nonZero = activeBuckets.filter { accountCost(in: $0, emailKey: selEmail) > 0 }
-            return nonZero.max { accountCost(in: $0, emailKey: selEmail) < accountCost(in: $1, emailKey: selEmail) }
-        }
-        return peakBucket
-    }
 
     public static func formattedActiveAccountSpendParts(
         summaries: [SubscriptionAccountSummary],
@@ -293,94 +171,297 @@ public struct OverviewTabView: View {
         }
     }
 
-    private func timeframeSpend(for summary: SubscriptionAccountSummary) -> Double {
-        if let pinned = pinnedBucket {
-            return accountCost(in: pinned, emailKey: summary.id)
+    public static func resolveSelectedTabId(
+        storedId: String,
+        primaryTabs: [AccountTabItem],
+        overflowSubscriptions: [SubscriptionAccountSummary]
+    ) -> String {
+        if storedId != "auto" {
+            if primaryTabs.contains(where: { $0.id == storedId }) {
+                return storedId
+            }
+            if storedId.hasPrefix("sub:") {
+                let emailKey = String(storedId.dropFirst(4)).lowercased()
+                if overflowSubscriptions.contains(where: { $0.id == emailKey }) {
+                    return "sub:\(emailKey)"
+                }
+            }
         }
-        let bucketSum = activeBuckets.reduce(0.0) { $0 + accountCost(in: $1, emailKey: summary.id) }
-        if selectedTimeframe == .all {
-            return max(bucketSum, summary.totalCost)
+
+        if let activeSub = primaryTabs.first(where: {
+            if case .subscription(_, _, _, let isActive) = $0 { return isActive }
+            return false
+        }) {
+            return activeSub.id
         }
-        return bucketSum
+        if let firstSub = primaryTabs.first(where: {
+            if case .subscription = $0 { return true }
+            return false
+        }) {
+            return firstSub.id
+        }
+        return AccountTabItem.all.id
+    }
+
+    public static func accountCost(in bucket: UsageTimeBucket, emailKey: String) -> Double {
+        let lower = emailKey.lowercased()
+        return bucket.accountCostBreakdown.reduce(0.0) { partial, item in
+            item.key.lowercased() == lower ? partial + item.value : partial
+        }
+    }
+
+    public static func accountQueries(in bucket: UsageTimeBucket, emailKey: String) -> Int {
+        let lower = emailKey.lowercased()
+        return bucket.accountQueryBreakdown.reduce(0) { partial, item in
+            item.key.lowercased() == lower ? partial + item.value : partial
+        }
+    }
+
+    public static func accountTokens(in bucket: UsageTimeBucket, emailKey: String) -> Int {
+        let lower = emailKey.lowercased()
+        let direct = bucket.accountTokenBreakdown.reduce(0) { partial, item in
+            item.key.lowercased() == lower ? partial + item.value : partial
+        }
+        if direct > 0 { return direct }
+        let cost = accountCost(in: bucket, emailKey: lower)
+        if cost > 0 && bucket.quotaCost > 0 {
+            let quotaTokens = bucket.quotaInputTokens + bucket.quotaOutputTokens
+            return Int(Double(quotaTokens) * (cost / bucket.quotaCost))
+        }
+        return 0
+    }
+
+    public static func accountModelBreakdown(in bucket: UsageTimeBucket, emailKey: String) -> [String: Double] {
+        let lower = emailKey.lowercased()
+        var result: [String: Double] = [:]
+        for (acc, models) in bucket.accountModelBreakdown where acc.lowercased() == lower {
+            for (rawModel, cost) in models where cost > 0 {
+                let canonical = canonicalModelDisplayName(from: rawModel)
+                result[canonical, default: 0.0] += cost
+            }
+        }
+        if !result.isEmpty {
+            return result
+        }
+        let cost = accountCost(in: bucket, emailKey: lower)
+        if cost > 0 && bucket.quotaCost > 0 {
+            let ratio = cost / bucket.quotaCost
+            for (model, modelCost) in bucket.consolidatedQuotaModelBreakdown {
+                result[model, default: 0.0] += modelCost * ratio
+            }
+        }
+        return result
+    }
+
+    public static func accountSummaryMetrics(
+        emailKey: String,
+        timeframe: CostTimeframe,
+        allBuckets: [UsageTimeBucket],
+        pinnedBucket: UsageTimeBucket? = nil,
+        summaryTotalCost: Double? = nil,
+        summaryTotalQueries: Int? = nil
+    ) -> (cost: Double, tokens: Int, queries: Int, modelBreakdown: [String: Double]) {
+        let filtered = filterBuckets(for: timeframe, in: allBuckets)
+        let sourceBuckets = pinnedBucket.map { [$0] } ?? filtered
+
+        var cost = sourceBuckets.reduce(0.0) { $0 + accountCost(in: $1, emailKey: emailKey) }
+        let tokens = sourceBuckets.reduce(0) { $0 + accountTokens(in: $1, emailKey: emailKey) }
+        var queries = sourceBuckets.reduce(0) { $0 + accountQueries(in: $1, emailKey: emailKey) }
+
+        if pinnedBucket == nil && timeframe == .all {
+            if let summaryTotalCost { cost = max(cost, summaryTotalCost) }
+            if let summaryTotalQueries { queries = max(queries, summaryTotalQueries) }
+        }
+
+        var breakdown: [String: Double] = [:]
+        for bucket in sourceBuckets {
+            for (model, modelCost) in accountModelBreakdown(in: bucket, emailKey: emailKey) {
+                breakdown[model, default: 0.0] += modelCost
+            }
+        }
+        return (cost, tokens, queries, breakdown)
+    }
+
+    // MARK: - Active Tab & Timeframe State
+
+    private var primaryTabs: [AccountTabItem] {
+        viewModel.primaryAccountTabs
+    }
+
+    private var overflowSubscriptions: [SubscriptionAccountSummary] {
+        viewModel.overflowUnusedSubscriptions
+    }
+
+    private var effectiveSelectedTabId: String {
+        Self.resolveSelectedTabId(
+            storedId: selectedAccountTabId,
+            primaryTabs: primaryTabs,
+            overflowSubscriptions: overflowSubscriptions
+        )
+    }
+
+    private var resolvedSelection: ResolvedTabSelection {
+        let activeId = effectiveSelectedTabId
+        if activeId == "gcp" {
+            return .gcp(project: viewModel.stats.gcpProject ?? "clawdbot-485304")
+        }
+        if activeId.hasPrefix("sub:") {
+            let emailKey = String(activeId.dropFirst(4)).lowercased()
+            if let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == emailKey }) {
+                return .subscription(summary)
+            }
+        }
+        return .all
+    }
+
+    private var currentAccountFilter: AccountFilter {
+        switch resolvedSelection {
+        case .subscription: return .subscription
+        case .gcp: return .gcp
+        case .all: return .all
+        }
+    }
+
+    private var activeBuckets: [UsageTimeBucket] {
+        Self.filterBuckets(for: selectedTimeframe, in: viewModel.stats.dailyUsage)
+    }
+
+    public var pinnedBucket: UsageTimeBucket? {
+        Self.pinnedBucket(for: selectedBucketId, in: activeBuckets)
+    }
+
+    private var hoveredBucket: UsageTimeBucket? {
+        guard let id = hoveredBucketId else { return nil }
+        return activeBuckets.first(where: { $0.id == id })
+    }
+
+    private var activeInspectedBucket: UsageTimeBucket? {
+        hoveredBucket ?? pinnedBucket
+    }
+
+    private func effectiveBucketCost(_ bucket: UsageTimeBucket) -> Double {
+        if case .subscription(let summary) = resolvedSelection {
+            return Self.accountCost(in: bucket, emailKey: summary.id)
+        }
+        return Self.bucketCost(bucket, account: currentAccountFilter)
+    }
+
+    private func effectiveBucketTokens(_ bucket: UsageTimeBucket) -> Int {
+        if case .subscription(let summary) = resolvedSelection {
+            return Self.accountTokens(in: bucket, emailKey: summary.id)
+        }
+        return Self.bucketTokens(bucket, account: currentAccountFilter)
+    }
+
+    private func effectiveBucketQueries(_ bucket: UsageTimeBucket) -> Int {
+        if case .subscription(let summary) = resolvedSelection {
+            return Self.accountQueries(in: bucket, emailKey: summary.id)
+        }
+        return Self.bucketQueries(bucket, account: currentAccountFilter)
+    }
+
+    private var effectivePeakBucket: UsageTimeBucket? {
+        if case .subscription(let summary) = resolvedSelection {
+            let nonZero = activeBuckets.filter { Self.accountCost(in: $0, emailKey: summary.id) > 0 }
+            return nonZero.max {
+                Self.accountCost(in: $0, emailKey: summary.id) < Self.accountCost(in: $1, emailKey: summary.id)
+            }
+        }
+        return Self.computePeakBucket(in: activeBuckets, account: currentAccountFilter)
     }
 
     private var totalCost: Double {
-        if let pinned = pinnedBucket {
-            return effectiveBucketCost(pinned)
-        }
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            let bucketSum = activeBuckets.reduce(0.0) { $0 + accountCost(in: $1, emailKey: selEmail) }
-            if selectedTimeframe == .all,
-               let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail }) {
-                return max(bucketSum, summary.totalCost)
+        switch resolvedSelection {
+        case .subscription(let summary):
+            let metrics = Self.accountSummaryMetrics(
+                emailKey: summary.id,
+                timeframe: selectedTimeframe,
+                allBuckets: viewModel.stats.dailyUsage,
+                pinnedBucket: pinnedBucket,
+                summaryTotalCost: summary.totalCost,
+                summaryTotalQueries: summary.totalQueries
+            )
+            if pinnedBucket == nil && selectedTimeframe == .today && activeBuckets.isEmpty {
+                return max(metrics.cost, summary.todayCost)
             }
-            return bucketSum
-        }
-        switch selectedAccount {
+            return metrics.cost
+        case .gcp:
+            if let pinned = pinnedBucket { return pinned.gcpCost }
+            if selectedTimeframe == .all && viewModel.stats.gcpTotalCost > activeBuckets.aggregatedGcpCost {
+                return viewModel.stats.gcpTotalCost
+            }
+            if selectedTimeframe == .today && activeBuckets.isEmpty {
+                return viewModel.stats.gcpTodayCost
+            }
+            return activeBuckets.aggregatedGcpCost
         case .all:
+            if let pinned = pinnedBucket { return pinned.totalCost }
             if selectedTimeframe == .all && viewModel.stats.totalCostEstimate > activeBuckets.aggregatedTotalCost {
                 return viewModel.stats.totalCostEstimate
             }
             return activeBuckets.aggregatedTotalCost
-        case .subscription:
-            if selectedTimeframe == .all && viewModel.stats.quotaTotalCost > activeBuckets.aggregatedQuotaCost {
-                return viewModel.stats.quotaTotalCost
-            }
-            return activeBuckets.aggregatedQuotaCost
-        case .gcp:
-            if selectedTimeframe == .all && viewModel.stats.gcpTotalCost > activeBuckets.aggregatedGcpCost {
-                return viewModel.stats.gcpTotalCost
-            }
-            return activeBuckets.aggregatedGcpCost
         }
     }
-    
+
     private var totalTokens: Int {
-        if let pinned = pinnedBucket {
-            return effectiveBucketTokens(pinned)
-        }
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            return activeBuckets.reduce(0) { $0 + accountTokens(in: $1, emailKey: selEmail) }
-        }
-        switch selectedAccount {
+        switch resolvedSelection {
+        case .subscription(let summary):
+            return Self.accountSummaryMetrics(
+                emailKey: summary.id,
+                timeframe: selectedTimeframe,
+                allBuckets: viewModel.stats.dailyUsage,
+                pinnedBucket: pinnedBucket,
+                summaryTotalCost: summary.totalCost,
+                summaryTotalQueries: summary.totalQueries
+            ).tokens
+        case .gcp:
+            if let pinned = pinnedBucket {
+                return Self.bucketTokens(pinned, account: .gcp)
+            }
+            return activeBuckets.aggregatedGcpTokens
         case .all:
+            if let pinned = pinnedBucket {
+                return Self.bucketTokens(pinned, account: .all)
+            }
             let tokens = activeBuckets.aggregatedInputTokens + activeBuckets.aggregatedOutputTokens
             if selectedTimeframe == .all && tokens == 0 && viewModel.stats.totalQueries > 0 {
                 return viewModel.stats.totalQueries * 85_000
             }
             return tokens
-        case .subscription:
-            return activeBuckets.aggregatedQuotaTokens
-        case .gcp:
-            return activeBuckets.aggregatedGcpTokens
         }
     }
-    
+
     private var totalQueries: Int {
-        if let pinned = pinnedBucket {
-            return effectiveBucketQueries(pinned)
-        }
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            let bucketSum = activeBuckets.reduce(0) { $0 + accountQueries(in: $1, emailKey: selEmail) }
-            if selectedTimeframe == .all,
-               let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail }) {
-                return max(bucketSum, summary.totalQueries)
+        switch resolvedSelection {
+        case .subscription(let summary):
+            let metrics = Self.accountSummaryMetrics(
+                emailKey: summary.id,
+                timeframe: selectedTimeframe,
+                allBuckets: viewModel.stats.dailyUsage,
+                pinnedBucket: pinnedBucket,
+                summaryTotalCost: summary.totalCost,
+                summaryTotalQueries: summary.totalQueries
+            )
+            if pinnedBucket == nil && selectedTimeframe == .today && activeBuckets.isEmpty {
+                return max(metrics.queries, summary.todayQueries)
             }
-            return bucketSum
-        }
-        switch selectedAccount {
+            return metrics.queries
+        case .gcp:
+            if let pinned = pinnedBucket {
+                return Self.bucketQueries(pinned, account: .gcp)
+            }
+            return activeBuckets.aggregatedGcpQueryCount
         case .all:
+            if let pinned = pinnedBucket {
+                return Self.bucketQueries(pinned, account: .all)
+            }
             if selectedTimeframe == .all {
                 return max(viewModel.stats.totalQueries, activeBuckets.aggregatedQueryCount)
             }
             return activeBuckets.aggregatedQueryCount
-        case .subscription:
-            return activeBuckets.aggregatedQuotaQueryCount
-        case .gcp:
-            return activeBuckets.aggregatedGcpQueryCount
         }
     }
-    
+
     private struct ModelRowData: Identifiable {
         let id: String
         let name: String
@@ -388,33 +469,36 @@ public struct OverviewTabView: View {
         let percentage: Double
         let tokens: Int
     }
-    
+
     private var modelRows: [ModelRowData] {
         let breakdown: [String: Double]
-        if let selEmail = effectiveSelectedSubscriptionEmail {
-            let sourceBuckets = pinnedBucket.map { [$0] } ?? activeBuckets
-            var combined: [String: Double] = [:]
-            for bucket in sourceBuckets {
-                for (model, cost) in accountModelBreakdown(in: bucket, emailKey: selEmail) {
-                    combined[model, default: 0.0] += cost
-                }
-            }
-            breakdown = combined
-        } else if let pinned = pinnedBucket {
-            breakdown = bucketModelBreakdown(pinned)
-        } else {
-            switch selectedAccount {
-            case .all:
-                breakdown = activeBuckets.aggregatedModelBreakdown
-            case .subscription:
-                breakdown = activeBuckets.aggregatedQuotaModelBreakdown
-            case .gcp:
+        switch resolvedSelection {
+        case .subscription(let summary):
+            breakdown = Self.accountSummaryMetrics(
+                emailKey: summary.id,
+                timeframe: selectedTimeframe,
+                allBuckets: viewModel.stats.dailyUsage,
+                pinnedBucket: pinnedBucket,
+                summaryTotalCost: summary.totalCost,
+                summaryTotalQueries: summary.totalQueries
+            ).modelBreakdown
+        case .gcp:
+            if let pinned = pinnedBucket {
+                breakdown = Self.bucketModelBreakdown(pinned, account: .gcp)
+            } else {
                 breakdown = activeBuckets.aggregatedGcpModelBreakdown
             }
+        case .all:
+            if let pinned = pinnedBucket {
+                breakdown = Self.bucketModelBreakdown(pinned, account: .all)
+            } else {
+                breakdown = activeBuckets.aggregatedModelBreakdown
+            }
         }
+
         let total = max(0.0001, totalCost)
         let totalToks = max(1, totalTokens)
-        
+
         return breakdown
             .filter { $0.value > 0 }
             .sorted { $0.value > $1.value }
@@ -430,592 +514,670 @@ public struct OverviewTabView: View {
                 )
             }
     }
-    
-    // MARK: - Main Body
-    
-    public var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                // Title & Account Header
-                titleRow
-                
-                // Account Context Subheader
-                accountContextSubheader
 
-                if selectedAccount == .subscription && viewModel.subscriptionAccountSummaries.count > 1 {
-                    subscriptionAccountFilterStrip
-                }
-                
-                // Quota or GCP Cloud Credit Section
-                if selectedAccount == .gcp {
-                    gcpCloudCreditCard
-                } else if selectedAccount == .all {
-                    quotaGroupsSection
-                    if viewModel.stats.gcpTotalCost > 0 || viewModel.stats.gcpTodayCost > 0 {
-                        gcpCloudCreditCard
+    // MARK: - Main Body
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            accountTabStrip
+
+            Rectangle()
+                .fill(theme.divider)
+                .frame(height: 1)
+
+            ScrollView {
+                VStack(spacing: 10) {
+                    switch resolvedSelection {
+                    case .subscription(let summary):
+                        subscriptionTabBody(summary: summary)
+                    case .gcp(let project):
+                        gcpTabBody(project: project)
+                    case .all:
+                        allTabBody
                     }
-                } else {
-                    quotaGroupsSection
                 }
-                
-                // Super Clean Model Cost Breakdown
-                costByModelSection
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .background(theme.surfacePrimary)
         }
         .background(theme.surfacePrimary)
         .onChange(of: selectedTimeframe) { _, _ in
             selectedBucketId = nil
             hoveredBucketId = nil
         }
-        .onChange(of: selectedAccount) { _, _ in
+        .onChange(of: selectedAccountTabId) { _, _ in
             selectedBucketId = nil
             hoveredBucketId = nil
         }
     }
-    
-    // MARK: - Title & Account Header
-    
-    private var titleRow: some View {
-        HStack(alignment: .center) {
-            Text("MODELS & QUOTA")
-                .font(.system(size: 11.5, weight: .black, design: .monospaced))
-                .foregroundStyle(theme.textPrimary)
-            
-            Spacer()
-            
-            // Direction 1: Segmented Account Capsule
+
+    // MARK: - Option B Sticky Account-First Top Tabs
+
+    private var accountTabStrip: some View {
+        let tabs = primaryTabs
+        let overflow = overflowSubscriptions
+        let activeId = effectiveSelectedTabId
+
+        return HStack(spacing: 5) {
             HStack(spacing: 2) {
-                ForEach(AccountFilter.allCases) { filter in
+                ForEach(tabs) { tab in
+                    let isSelected = (activeId == tab.id)
                     Button {
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                            selectedAccount = filter
-                            selectedBucketId = nil
-                            hoveredBucketId = nil
-                        }
+                        selectAccountTab(tab.id)
                     } label: {
-                        HStack(spacing: 3.5) {
-                            if filter == .subscription {
+                        HStack(spacing: 4) {
+                            if case .subscription(_, _, _, let isActive) = tab, isActive {
                                 Circle()
                                     .fill(theme.costGreen)
-                                    .frame(width: 4.5, height: 4.5)
-                            } else if filter == .gcp {
-                                Image(systemName: "cloud.fill")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(Color.blue)
+                                    .frame(width: 5, height: 5)
                             }
-                            
-                            Text(filter.rawValue)
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundStyle(selectedAccount == filter ? Color.primary : Color.secondary)
+                            Text(tabLabel(for: tab))
+                                .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium, design: .rounded))
+                                .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
+                                .lineLimit(1)
                         }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 24)
                         .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
                         .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(selectedAccount == filter ? theme.cardFillHovered : Color.clear)
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(isSelected ? theme.cardFillHovered : Color.clear)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 5)
-                                .stroke(selectedAccount == filter ? theme.cardStroke : Color.clear, lineWidth: 0.5)
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(isSelected ? theme.cardStroke : Color.clear, lineWidth: 0.75)
                         )
+                        .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(2)
+            .padding(3)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 8)
                     .fill(theme.surfaceSecondary)
             )
-        }
-        .padding(.bottom, 2)
-    }
-    
-    // MARK: - Account Context Subheader
-    
-    private var accountContextSubheader: some View {
-        HStack {
-            switch selectedAccount {
-            case .subscription:
-                if let selEmail = effectiveSelectedSubscriptionEmail,
-                   let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail }) {
-                    let planLabel = (summary.plan?.isEmpty == false)
-                        ? summary.plan!
-                        : (summary.isActive ? "Personal Subscription" : "Cached Account")
-                    Text("Account: \(summary.email) (\(planLabel))")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } else {
-                    let email = viewModel.stats.quotaInfo?.email ?? viewModel.activeConsumerEmail
-                    let planLabel = (viewModel.stats.quotaInfo?.plan?.isEmpty == false)
-                        ? viewModel.stats.quotaInfo!.plan!
-                        : "Personal Subscription"
-                    if let email, !email.isEmpty {
-                        Text("Account: \(email) (\(planLabel))")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else {
-                        Text("Account: Consumer Subscription Quota")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                }
-            case .gcp:
-                Text("Account: Google Cloud Platform (\(viewModel.stats.gcpProject ?? "clawdbot-485304"))")
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.blue)
-            case .all:
-                HStack(spacing: 6) {
-                    let email = viewModel.stats.quotaInfo?.email ?? viewModel.activeConsumerEmail
-                    let plan = viewModel.stats.quotaInfo?.plan
-                    Circle().fill(theme.costGreen).frame(width: 4, height: 4)
-                    if let email, !email.isEmpty {
-                        let subLabel: String = {
-                            if let plan, !plan.isEmpty, plan.count <= 16 {
-                                return "Sub: \(email) (\(plan))"
-                            }
-                            return "Sub: \(email)"
-                        }()
-                        Text(subLabel)
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else {
-                        Text("Subscription: Active")
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Text("·")
-                        .foregroundStyle(theme.textTertiary)
-                    Circle().fill(Color.blue).frame(width: 4, height: 4)
-                    Text("GCP: \(viewModel.stats.gcpProject ?? "clawdbot-485304") Ready")
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 2)
-    }
-
-    private var subscriptionAccountFilterStrip: some View {
-        let summaries = viewModel.subscriptionAccountSummaries
-        let localPartCounts = summaries.reduce(into: [String: Int]()) { counts, s in
-            let local = s.email.split(separator: "@").first.map(String.init) ?? s.email
-            counts[local.lowercased(), default: 0] += 1
-        }
-
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 5) {
-                subscriptionFilterPill(
-                    title: "All Subs",
-                    isSelected: effectiveSelectedSubscriptionEmail == nil,
-                    showActiveDot: false,
-                    isUnused: false
-                ) {
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                        selectedSubscriptionEmail = nil
-                        selectedBucketId = nil
-                        hoveredBucketId = nil
-                    }
-                }
-
-                ForEach(summaries) { summary in
-                    let localPart = summary.email.split(separator: "@").first.map(String.init) ?? summary.email
-                    let hasDuplicateLocal = (localPartCounts[localPart.lowercased()] ?? 0) > 1
-                    let baseName = hasDuplicateLocal ? summary.email : localPart
-                    let isUnused = !summary.hasAnyHistoricalUsage
-                    let title = isUnused ? "\(baseName) (Unused)" : baseName
-
-                    subscriptionFilterPill(
-                        title: title,
-                        isSelected: effectiveSelectedSubscriptionEmail == summary.id,
-                        showActiveDot: summary.isActive,
-                        isUnused: isUnused
-                    ) {
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                            selectedSubscriptionEmail = summary.id
-                            selectedBucketId = nil
-                            hoveredBucketId = nil
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 2)
-        }
-    }
-
-    private func subscriptionFilterPill(
-        title: String,
-        isSelected: Bool,
-        showActiveDot: Bool,
-        isUnused: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if showActiveDot {
-                    Circle()
-                        .fill(theme.costGreen)
-                        .frame(width: 4.5, height: 4.5)
-                }
-                Text(title)
-                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(isSelected ? theme.textPrimary : (isUnused ? theme.textTertiary : theme.textSecondary))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3.5)
-            .background(
-                Capsule()
-                    .fill(isSelected ? theme.cardFillHovered : theme.surfaceSecondary)
-            )
             .overlay(
-                Capsule()
-                    .stroke(isSelected ? theme.cardStrokeHovered : theme.cardStroke.opacity(0.4), lineWidth: 0.6)
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(theme.cardStroke.opacity(0.65), lineWidth: 0.75)
             )
-        }
-        .buttonStyle(.plain)
-    }
-    
-    // MARK: - Google Cloud Platform Telemetry Card
-    
-    private var gcpCloudCreditCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Header & Badge
-            HStack {
-                HStack(spacing: 5) {
-                    Image(systemName: "cloud.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color.blue)
-                    Text("GCP CLOUD SPEND")
-                        .font(.system(size: 10.5, weight: .black, design: .monospaced))
-                        .foregroundStyle(Color.blue)
-                }
-                
-                Spacer()
-                
-                Text("DIRECT VERTEX AI")
-                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.blue)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.blue.opacity(0.12)))
+
+            if !overflow.isEmpty {
+                overflowChip(overflow: overflow, activeId: activeId)
             }
-            
-            // Project & Region Details
-            HStack {
-                Text("Project: \(viewModel.stats.gcpProject ?? "clawdbot-485304")")
-                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.surfacePrimary)
+    }
+
+    @ViewBuilder
+    private func overflowChip(overflow: [SubscriptionAccountSummary], activeId: String) -> some View {
+        let isOverflowSelected = overflow.contains { "sub:\($0.id)" == activeId }
+
+        if overflow.count == 1, let single = overflow.first {
+            Button {
+                selectAccountTab("sub:\(single.id)")
+            } label: {
+                Text("+1")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(isOverflowSelected ? theme.geminiAccent : theme.textSecondary)
+                    .padding(.horizontal, 9)
+                    .frame(height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(isOverflowSelected ? theme.geminiAccent.opacity(0.16) : theme.surfaceSecondary)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(isOverflowSelected ? theme.geminiAccent.opacity(0.45) : theme.cardStroke.opacity(0.65), lineWidth: 0.75)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .help("\(single.email) (Unused)")
+        } else {
+            Menu {
+                ForEach(overflow) { sub in
+                    Button {
+                        selectAccountTab("sub:\(sub.id)")
+                    } label: {
+                        HStack {
+                            Text(sub.email)
+                            if let tier = AgyStatsViewModel.shortTierName(for: sub.plan) {
+                                Text("(\(tier))")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text("+\(overflow.count)")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(isOverflowSelected ? theme.geminiAccent : theme.textSecondary)
+                    .padding(.horizontal, 9)
+                    .frame(height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(isOverflowSelected ? theme.geminiAccent.opacity(0.16) : theme.surfaceSecondary)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(isOverflowSelected ? theme.geminiAccent.opacity(0.45) : theme.cardStroke.opacity(0.65), lineWidth: 0.75)
+                    )
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+    }
+
+    private func tabLabel(for tab: AccountTabItem) -> String {
+        switch tab {
+        case .subscription(_, let label, _, _):
+            return label
+        case .gcp:
+            return "GCP"
+        case .all:
+            return "All"
+        }
+    }
+
+    private func selectAccountTab(_ tabId: String) {
+        withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+            selectedAccountTabId = tabId
+            selectedBucketId = nil
+            hoveredBucketId = nil
+        }
+    }
+
+    // MARK: - Case 1: Subscription Account View
+
+    @ViewBuilder
+    private func subscriptionTabBody(summary: SubscriptionAccountSummary) -> some View {
+        subscriptionIdentityAndQuotaPanel(summary: summary)
+
+        if !summary.isActive && !summary.hasAnyHistoricalUsage {
+            unusedOverflowActionsPanel(summary: summary)
+        } else {
+            spendSummaryPanel(accentColor: theme.costGreen) {
+                if let pinned = pinnedBucket {
+                    return "\(pinned.label) · Pinned day"
+                }
+                if selectedTimeframe == .today {
+                    return summary.weeklyCost > 0.005
+                        ? String(format: "Today · 7d $%.2f", summary.weeklyCost)
+                        : "Today"
+                }
+                return "\(selectedTimeframe.rawValue) · \(activeBuckets.count)d"
+            }
+
+            modelsPanel(title: "SPEND BY MODEL")
+        }
+    }
+
+    private func subscriptionIdentityAndQuotaPanel(summary: SubscriptionAccountSummary) -> some View {
+        let quota: AgyQuotaInfo? = {
+            if summary.isActive {
+                return viewModel.stats.quotaInfo ?? summary.quotaInfo
+            }
+            return summary.quotaInfo
+        }()
+
+        let tierLabel: String? = {
+            if let short = AgyStatsViewModel.shortTierName(for: summary.plan) {
+                return short.uppercased()
+            }
+            if let raw = summary.plan?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+                return raw.uppercased()
+            }
+            return nil
+        }()
+
+        return VStack(spacing: 0) {
+            // Identity Header Row
+            HStack(spacing: 6) {
+                Text(summary.email)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(theme.textPrimary)
-                Spacer()
-                Text("Region: \(viewModel.stats.gcpLocation ?? "us") (1.10×)")
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(theme.textSecondary)
-                    .help("Vertex AI 'us' regional billing applies a 1.10× multiplier to base SKU token rates.")
-            }
-            
-            Rectangle().fill(theme.divider).frame(height: 0.5)
-            
-            let gcpTotalSpend = viewModel.stats.gcpTotalCost
-            let gcpTodaySpend = viewModel.stats.gcpTodayCost
-            let gcpWeekSpend = viewModel.stats.gcpWeeklyCost
-            let poolTotal = viewModel.gcpCreditPool
-            
-            if poolTotal > 0.0 {
-                let creditRemaining = viewModel.gcpCreditRemaining
-                let consumedFraction = viewModel.gcpCreditConsumedFraction
-                let poolConsumed = viewModel.gcpCostSinceBaseline
-                
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        let poolTitle = poolTotal.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "$%.0f CREDIT POOL", poolTotal) : String(format: "$%.2f CREDIT POOL", poolTotal)
-                        Text(poolTitle)
-                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                            .foregroundStyle(theme.textSecondary)
-                        Spacer()
-                        Text(String(format: "$%.2f remaining", creditRemaining))
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(theme.costGreen)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+
+                Spacer(minLength: 4)
+
+                HStack(spacing: 4) {
+                    if let tierLabel {
+                        let tierColor = tierLabel == "ULTRA" ? theme.geminiAccent : (tierLabel == "PRO" ? theme.costGreen : theme.textSecondary)
+                        pillBadge(tierLabel, foreground: tierColor, background: tierColor.opacity(0.14))
                     }
-                    
-                    // Progress Bar
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.primary.opacity(0.08))
-                            
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.blue)
-                                .frame(width: max(0, geo.size.width * CGFloat(consumedFraction)))
-                        }
-                    }
-                    .frame(height: 5.5)
-                    
-                    HStack {
-                        Text(String(format: "$%.2f spent today", gcpTodaySpend))
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textPrimary)
-                        Spacer()
-                        if viewModel.gcpCreditBaselineCost > 0.0 {
-                            Text(String(format: "$%.2f spent ($%.2f lifetime)", poolConsumed, gcpTotalSpend))
-                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(theme.textTertiary)
-                        } else {
-                            Text(String(format: "$%.2f total consumed (%.1f%%)", poolConsumed, consumedFraction * 100))
-                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(theme.textTertiary)
-                        }
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("SPENT TODAY")
-                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                                .foregroundStyle(theme.textSecondary)
-                            Text(String(format: "$%.2f", gcpTodaySpend))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(theme.textPrimary)
-                        }
-                        Spacer()
-                        VStack(alignment: .center, spacing: 2) {
-                            Text("SPENT THIS WEEK")
-                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                                .foregroundStyle(theme.textSecondary)
-                            Text(String(format: "$%.2f", gcpWeekSpend))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(theme.textPrimary)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("TOTAL GCP SPEND")
-                                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                                .foregroundStyle(theme.textSecondary)
-                            Text(String(format: "$%.2f", gcpTotalSpend))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.blue)
-                        }
+
+                    if summary.isActive {
+                        pillBadge("ACTIVE", foreground: theme.costGreen, background: theme.costGreen.opacity(0.14))
+                    } else if !summary.hasAnyHistoricalUsage {
+                        pillBadge("UNUSED", foreground: theme.textSecondary, background: theme.badgeBackground)
+                    } else {
+                        pillBadge("CACHED", foreground: theme.textSecondary, background: theme.badgeBackground)
                     }
                 }
             }
-            
-            Rectangle().fill(theme.divider).frame(height: 0.5)
-            
-            // Delegation Guard Info
-            HStack(spacing: 5) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(theme.claudeAccent)
-                Text("Delegation Guard: sub-agents run on free subscription via herdr")
-                    .font(.system(size: 8.5, weight: .medium))
-                    .foregroundStyle(theme.textSecondary)
-            }
-        }
-        .padding(12)
-        .themedCardStyle(theme: theme)
-    }
-    
-    // MARK: - Terminal-Identical Quota Groups Section
-    
-    private var quotaGroupsSection: some View {
-        let selectedSummary: SubscriptionAccountSummary? = {
-            guard let selEmail = effectiveSelectedSubscriptionEmail else { return nil }
-            return viewModel.subscriptionAccountSummaries.first(where: { $0.id == selEmail })
-        }()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
 
-        let activeOrSelectedQuota: AgyQuotaInfo? = {
-            if let selectedSummary {
-                if selectedSummary.isActive {
-                    return viewModel.stats.quotaInfo ?? selectedSummary.quotaInfo
-                }
-                return selectedSummary.quotaInfo
-            }
-            return viewModel.stats.quotaInfo
-        }()
+            Rectangle().fill(theme.divider).frame(height: 1)
 
-        let isCachedSnapshot = (selectedSummary != nil && selectedSummary?.isActive == false)
-
-        return VStack(spacing: 10) {
-            if isCachedSnapshot, let quota = activeOrSelectedQuota, !quota.groups.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 8.5, weight: .bold))
-                        .foregroundStyle(theme.claudeAccent)
-                    let updatedLabel: String = {
-                        if let updated = quota.lastUpdated {
-                            return "Cached snapshot · \(Self.snapshotRelativeFormatter.localizedString(for: updated, relativeTo: Date()))"
+            // Compact 2-Column Quota Grid
+            if let quota, !quota.groups.isEmpty {
+                let groups = quota.groups
+                VStack(spacing: 0) {
+                    ForEach(Array(stride(from: 0, to: groups.count, by: 2)), id: \.self) { startIndex in
+                        if startIndex > 0 {
+                            Rectangle().fill(theme.divider).frame(height: 1)
                         }
-                        return "Cached snapshot"
-                    }()
-                    Text(updatedLabel)
-                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.claudeAccent)
-                    Spacer()
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(theme.claudeAccent.opacity(0.10))
-                )
-            }
+                        let leftGroup = groups[startIndex]
+                        let rightGroup = (startIndex + 1 < groups.count) ? groups[startIndex + 1] : nil
 
-            if let quota = activeOrSelectedQuota, !quota.groups.isEmpty {
-                ForEach(quota.groups) { group in
-                    quotaGroupCard(group)
+                        HStack(alignment: .top, spacing: 0) {
+                            compactQuotaColumn(group: leftGroup)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+
+                            if let rightGroup {
+                                Rectangle()
+                                    .fill(theme.divider)
+                                    .frame(width: 1)
+
+                                compactQuotaColumn(group: rightGroup)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 9)
+                            }
+                        }
+                    }
                 }
             } else {
                 HStack {
-                    let emptyText: String = {
-                        if let selectedSummary, !selectedSummary.isActive {
-                            return "No quota snapshot cached yet for \(selectedSummary.email). Open an agy session on this account to sync live limits."
-                        }
-                        return "No active quota sessions detected. Running via direct API / local state."
-                    }()
-                    Text(emptyText)
-                        .font(.system(size: 10, weight: .medium))
+                    Text("No cached quota snapshot yet — run a turn in agy on this account")
+                        .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                 }
-                .padding(12)
-                .themedCardStyle(theme: theme)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-        }
-    }
-    
-    private func quotaGroupCard(_ group: AgyQuotaGroup) -> some View {
-        let isGemini = group.displayName.lowercased().contains("gemini") || group.displayName.lowercased().contains("argon") || group.displayName.lowercased().contains("carbon")
-        let groupAccent = isGemini ? theme.geminiAccent : theme.claudeAccent
-        
-        return VStack(alignment: .leading, spacing: 8) {
-            // Group Title
-            Text(group.displayName.uppercased())
-                .font(.system(size: 10.5, weight: .black, design: .monospaced))
-                .foregroundStyle(groupAccent)
-            
-            // Buckets within group
-            VStack(spacing: 8) {
-                ForEach(group.sortedBuckets) { bucket in
-                    quotaBucketRow(bucket, groupDisplayName: group.displayName)
-                }
-            }
-        }
-        .padding(12)
-        .themedCardStyle(theme: theme)
-    }
-    
-    private func quotaBucketRow(_ bucket: AgyQuotaBucket, groupDisplayName: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // Top: Name & Percentage
-            HStack(alignment: .center) {
-                Text(bucket.displayName)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(bucket.disabled ? theme.textTertiary : theme.textPrimary)
-                
-                Spacer()
-                
-                if bucket.disabled {
-                    Text("—")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.textTertiary)
-                } else if let fraction = bucket.remainingFraction {
-                    Text(String(format: "%.2f%%", fraction * 100.0))
-                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(healthColor(for: fraction))
-                } else {
-                    Text("unlimited")
-                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
-                }
-            }
-            
-            // Progress Bar
-            if !bucket.disabled, let fraction = bucket.remainingFraction {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.primary.opacity(0.08))
-                        
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(healthColor(for: fraction))
-                            .frame(width: max(0, geo.size.width * CGFloat(min(1.0, fraction))))
+
+            // Optional 1-line AI Credits / Pool footer
+            if (summary.googleOneAiCredits ?? 0) > 0 || summary.creditPool > 0 {
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                HStack(spacing: 8) {
+                    if let aiCredits = summary.googleOneAiCredits, aiCredits > 0 {
+                        let usedSuffix = summary.googleOneAiCreditsUsed > 0 ? " (\(summary.googleOneAiCreditsUsed) used)" : ""
+                        Text("AI Credits: \(aiCredits) left\(usedSuffix)")
+                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    if summary.creditPool > 0 {
+                        Text(String(format: "Pool: $%.2f left", summary.creditRemaining))
+                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.costGreen)
                     }
                 }
-                .frame(height: 5.5)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
             }
-            
-            // Refresh countdown or disabled explanation
-            if bucket.disabled {
-                if let desc = bucket.resetDescription {
-                    Text(desc)
-                        .font(.system(size: 8.5, weight: .medium))
-                        .foregroundStyle(theme.dangerRed.opacity(0.85))
-                        .lineLimit(3)
-                        .padding(.top, 1)
+        }
+        .themedCardStyle(theme: theme)
+    }
+
+    private func compactQuotaColumn(group: AgyQuotaGroup) -> some View {
+        let accent = compactGroupAccent(group.displayName)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(compactGroupTitle(group.displayName))
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(accent)
+                .lineLimit(1)
+
+            ForEach(group.sortedBuckets) { bucket in
+                VStack(alignment: .leading, spacing: 3.5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(compactBucketLabel(bucket))
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(bucket.disabled ? theme.textTertiary : theme.textSecondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 4)
+
+                        if bucket.disabled {
+                            Text("—")
+                                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.textTertiary)
+                        } else if let fraction = bucket.remainingFraction {
+                            Text(String(format: "%.2f%%", fraction * 100.0))
+                                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                                .foregroundStyle(healthColor(for: fraction))
+                        } else {
+                            Text("unlimited")
+                                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                    }
+
+                    if !bucket.disabled, let fraction = bucket.remainingFraction {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 2.5)
+                                    .fill(theme.progressTrack)
+                                RoundedRectangle(cornerRadius: 2.5)
+                                    .fill(healthColor(for: fraction))
+                                    .frame(width: max(0, geo.size.width * CGFloat(min(1.0, max(0.0, fraction)))))
+                            }
+                        }
+                        .frame(height: 4.5)
+                    }
+
+                    if bucket.disabled {
+                        Text(bucket.resetDescription ?? "Disabled")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(theme.dangerRed.opacity(0.85))
+                            .lineLimit(2)
+                    } else if let countdown = formatCompactCountdown(bucket: bucket) {
+                        Text(countdown)
+                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+                            .lineLimit(1)
+                    }
                 }
-            } else if let countdown = formatHumanCountdown(bucket: bucket) {
-                Text(countdown)
-                    .font(.system(size: 8.5, weight: .semibold))
-                    .foregroundStyle(healthCountdownColor(bucket: bucket))
             }
         }
     }
-    
-    // MARK: - Section: Super Clean Model Cost Breakdown
-    
-    private var costByModelSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Header & Cache Pill
+
+    private func unusedOverflowActionsPanel(summary: SubscriptionAccountSummary) -> some View {
+        VStack(spacing: 0) {
             HStack {
-                Text("ESTIMATED COST BY MODEL")
-                    .font(.system(size: 10.5, weight: .black, design: .monospaced))
-                    .foregroundStyle(theme.textPrimary)
-                    .help("Consumer estimates use 1.0× base SKU rates; GCP direct calls include the 1.10× Vertex AI 'us' regional multiplier.")
-                
+                Text("Spend Today")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
                 Spacer()
-                
-                Text("~92% CACHED (95% OFF)")
-                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.costGreen)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(theme.costGreen.opacity(0.12)))
+                Text("$0.00 (0 queries)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(theme.textTertiary)
             }
-            
-            // Timeframe Selector
-            HStack(spacing: 3) {
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+
+            Rectangle().fill(theme.divider).frame(height: 1)
+
+            HStack {
+                Text("Remove from tab overflow?")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        viewModel.dismissAccount(summary.email)
+                        selectedAccountTabId = "auto"
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8.5, weight: .bold))
+                        Text("Dismiss Account")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(theme.dangerRed)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4.5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(theme.dangerRed.opacity(0.10))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(theme.dangerRed.opacity(0.32), lineWidth: 0.75)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+        }
+        .themedCardStyle(theme: theme)
+    }
+
+    // MARK: - Case 2: GCP Tab View
+
+    @ViewBuilder
+    private func gcpTabBody(project: String) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "cloud.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.blue)
+
+                Text(project)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                let region = viewModel.stats.gcpLocation ?? "us"
+                pillBadge("\(region) · 1.10×", foreground: Color.blue, background: Color.blue.opacity(0.14))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .help("Vertex AI '\(viewModel.stats.gcpLocation ?? "us")' regional billing applies a 1.10× multiplier to base SKU rates.")
+
+            if viewModel.gcpCreditPool > 0 {
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                let poolTotal = viewModel.gcpCreditPool
+                let remaining = viewModel.gcpCreditRemaining
+                let used = viewModel.gcpCostSinceBaseline
+                let remainingFraction = max(0.0, min(1.0, remaining / poolTotal))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Credit Pool Balance")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(theme.textSecondary)
+                        Spacer()
+                        Text(String(format: "$%.2f remaining", remaining))
+                            .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(theme.costGreen)
+                    }
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(theme.progressTrack)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.blue)
+                                .frame(width: max(0, geo.size.width * CGFloat(remainingFraction)))
+                        }
+                    }
+                    .frame(height: 5.5)
+
+                    HStack {
+                        Text(String(format: "$%.2f used", used))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+                        Spacer()
+                        let poolStr = poolTotal.truncatingRemainder(dividingBy: 1) == 0
+                            ? String(format: "Pool $%.0f", poolTotal)
+                            : String(format: "Pool $%.2f", poolTotal)
+                        Text(poolStr)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+            }
+        }
+        .themedCardStyle(theme: theme)
+
+        spendSummaryPanel(accentColor: Color.blue) {
+            if let pinned = pinnedBucket {
+                return "\(pinned.label) · Pinned day"
+            }
+            if selectedTimeframe == .today {
+                return viewModel.stats.gcpWeeklyCost > 0.005
+                    ? String(format: "Today · 7d $%.2f", viewModel.stats.gcpWeeklyCost)
+                    : "Today"
+            }
+            return "\(selectedTimeframe.rawValue) · \(activeBuckets.count)d"
+        }
+
+        modelsPanel(title: "GCP MODELS")
+    }
+
+    // MARK: - Case 3: All Tab View
+
+    @ViewBuilder
+    private var allTabBody: some View {
+        let subSpend = timeframeSubscriptionSpend
+        let gcpSpend = timeframeGcpSpend
+        let hasGcp = primaryTabs.contains(where: { $0.id == "gcp" }) || gcpSpend > 0.005
+
+        spendSummaryPanel(accentColor: theme.costGreen) {
+            if let pinned = pinnedBucket {
+                return hasGcp
+                    ? String(format: "%@ · $%.2f Sub · $%.2f GCP", pinned.shortLabel, subSpend, gcpSpend)
+                    : "\(pinned.label) · Pinned day"
+            }
+            if hasGcp {
+                return String(format: "$%.2f Sub · $%.2f GCP", subSpend, gcpSpend)
+            }
+            return String(format: "$%.2f Subscription", subSpend)
+        }
+
+        byAccountPanel(hasGcp: hasGcp, gcpSpend: gcpSpend)
+
+        modelsPanel(title: "COMBINED SPEND BY MODEL")
+    }
+
+    private func byAccountPanel(hasGcp: Bool, gcpSpend: Double) -> some View {
+        let summaries = viewModel.subscriptionAccountSummaries
+        let gcpProject = viewModel.stats.gcpProject ?? "clawdbot-485304"
+
+        return VStack(spacing: 0) {
+            HStack {
+                Text("BY ACCOUNT")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+                Text("SPEND")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            ForEach(summaries) { summary in
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                let spend = timeframeSpend(for: summary)
+                let tierLabel = AgyStatsViewModel.shortTierName(for: summary.plan)?.uppercased()
+                let dotColor: Color = summary.isActive
+                    ? theme.costGreen
+                    : (summary.hasAnyHistoricalUsage ? theme.claudeAccent : theme.textTertiary)
+
+                AccountNavigationRow(theme: theme) {
+                    selectAccountTab("sub:\(summary.id)")
+                } content: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(dotColor)
+                            .frame(width: 6, height: 6)
+
+                        Text(summary.email)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+
+                        if let tierLabel {
+                            let tierColor = tierLabel == "ULTRA" ? theme.geminiAccent : (tierLabel == "PRO" ? theme.costGreen : theme.textSecondary)
+                            pillBadge(tierLabel, foreground: tierColor, background: tierColor.opacity(0.14))
+                        }
+
+                        Spacer(minLength: 4)
+
+                        Text(String(format: "$%.2f", spend))
+                            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(summary.isActive ? theme.costGreen : theme.textPrimary)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+            }
+
+            if hasGcp {
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                AccountNavigationRow(theme: theme) {
+                    selectAccountTab("gcp")
+                } content: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "cloud.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color.blue)
+
+                        Text(gcpProject)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+
+                        pillBadge("GCP", foreground: Color.blue, background: Color.blue.opacity(0.14))
+
+                        Spacer(minLength: 4)
+
+                        Text(String(format: "$%.2f", gcpSpend))
+                            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Color.blue)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+            }
+        }
+        .themedCardStyle(theme: theme)
+    }
+
+    // MARK: - Shared Spend & Model Panels
+
+    private func spendSummaryPanel(accentColor: Color, subline: () -> String) -> some View {
+        VStack(spacing: 0) {
+            // Compact Timeframe Switcher
+            HStack(spacing: 2) {
                 ForEach(CostTimeframe.allCases) { tf in
+                    let isSelected = (selectedTimeframe == tf)
                     Button {
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                             selectedTimeframe = tf
                             selectedBucketId = nil
                             hoveredBucketId = nil
                         }
                     } label: {
-                        Text(tf.rawValue)
-                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                            .foregroundStyle(selectedTimeframe == tf ? Color.primary : Color.secondary)
+                        Text(tf.compactLabel)
+                            .font(.system(size: 10, weight: isSelected ? .semibold : .medium, design: .monospaced))
+                            .foregroundStyle(isSelected ? theme.textPrimary : theme.textSecondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 4)
                             .background(
                                 RoundedRectangle(cornerRadius: 5)
-                                    .fill(selectedTimeframe == tf ? theme.cardFillHovered : Color.clear)
+                                    .fill(isSelected ? theme.cardFillHovered : Color.clear)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 5)
-                                    .stroke(selectedTimeframe == tf ? theme.cardStroke : Color.clear, lineWidth: 0.5)
+                                    .stroke(isSelected ? theme.cardStroke : Color.clear, lineWidth: 0.5)
                             )
                     }
                     .buttonStyle(.plain)
@@ -1026,197 +1188,153 @@ public struct OverviewTabView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(theme.surfaceSecondary)
             )
-            
-            // Daily Spend Bar Graph (Visible when not today and buckets exist)
-            if selectedTimeframe != .today && !activeBuckets.isEmpty {
-                dailySpendBarGraph
-            }
-            
-            // Total Summary Line
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    HStack(spacing: 4) {
-                        Text(String(format: "$%.2f", totalCost))
-                            .font(.system(size: 16, weight: .black, design: .monospaced))
-                            .foregroundStyle(selectedAccount == .gcp ? Color.blue : theme.costGreen)
-                        
-                        let labelText: String = {
-                            if let pinned = pinnedBucket {
-                                return "\(pinned.shortLabel.uppercased()) SPEND"
-                            }
-                            if let selEmail = effectiveSelectedSubscriptionEmail {
-                                let local = selEmail.split(separator: "@").first.map(String.init) ?? selEmail
-                                return local.uppercased()
-                            }
-                            return selectedAccount == .gcp ? "GCP CREDIT" : (selectedAccount == .subscription ? "SUBSCRIPTION" : "TOTAL")
-                        }()
-                        
-                        Text(labelText)
-                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                            .foregroundStyle(pinnedBucket != nil ? (selectedAccount == .gcp ? Color.blue : theme.costGreen) : theme.textTertiary)
-                    }
-                    
-                    Spacer()
-                    
-                    if let pinned = pinnedBucket {
-                        Button {
-                            withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                                selectedBucketId = nil
-                            }
-                        } label: {
-                            HStack(spacing: 3) {
-                                Text("All \(activeBuckets.count) Days")
-                                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 7, weight: .bold))
-                            }
-                            .foregroundStyle(selectedAccount == .gcp ? Color.blue : theme.costGreen)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule().fill((selectedAccount == .gcp ? Color.blue : theme.costGreen).opacity(0.12))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Text("\(formatCompactTokens(totalTokens)) tokens · \(totalQueries) queries")
-                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+
+            Rectangle().fill(theme.divider).frame(height: 1)
+
+            // Spend Total + Queries / Tokens
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "$%.2f", totalCost))
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundStyle(accentColor)
+
+                    HStack(spacing: 6) {
+                        Text(subline())
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(theme.textSecondary)
-                    }
-                }
-                
-                if pinnedBucket != nil {
-                    HStack {
-                        Text("\(formatCompactTokens(totalTokens)) tokens · \(totalQueries) queries")
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textSecondary)
-                        Spacer()
-                    }
-                }
-                
-                if selectedAccount == .all {
-                    let subCost = pinnedBucket?.quotaCost ?? activeBuckets.aggregatedQuotaCost
-                    let gcpCost = pinnedBucket?.gcpCost ?? activeBuckets.aggregatedGcpCost
-                    if gcpCost > 0 || subCost > 0 {
-                        HStack(spacing: 6) {
-                            Text(String(format: "↳ $%.2f Sub", subCost))
-                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(theme.costGreen)
-                            Text("·")
-                                .font(.system(size: 8.5, weight: .bold))
-                                .foregroundStyle(theme.textTertiary)
-                            Text(String(format: "$%.2f GCP Credit", gcpCost))
-                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(Color.blue)
+                            .lineLimit(1)
+
+                        if pinnedBucket != nil {
+                            Button {
+                                withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                                    selectedBucketId = nil
+                                }
+                            } label: {
+                                HStack(spacing: 2.5) {
+                                    Text("All \(activeBuckets.count)d")
+                                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 7, weight: .bold))
+                                }
+                                .foregroundStyle(accentColor)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1.5)
+                                .background(Capsule().fill(accentColor.opacity(0.14)))
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
 
-                if (selectedAccount == .all || (selectedAccount == .subscription && effectiveSelectedSubscriptionEmail == nil)) && viewModel.subscriptionAccountSummaries.count > 1 {
-                    let nonZeroAccounts = Self.formattedActiveAccountSpendParts(
-                        summaries: viewModel.subscriptionAccountSummaries,
-                        spendForSummary: { timeframeSpend(for: $0) }
-                    )
-                    if !nonZeroAccounts.isEmpty {
-                        Text("↳ " + nonZeroAccounts.joined(separator: " · "))
-                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                Spacer(minLength: 6)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(totalQueries) \(totalQueries == 1 ? "query" : "queries")")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.textPrimary)
+
+                    Text("\(formatCompactTokens(totalTokens)) tokens")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
                 }
             }
-            .padding(.vertical, 2)
-            
-            // Model Cards List
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+
+            if selectedTimeframe != .today && !activeBuckets.isEmpty {
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                dailySpendBarGraph
+                    .padding(9)
+            }
+        }
+        .themedCardStyle(theme: theme)
+    }
+
+    private func modelsPanel(title: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+                Text("SHARE")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .help("Consumer estimates use 1.0× base SKU rates; GCP direct calls include the 1.10× Vertex AI 'us' regional multiplier.")
+
             if modelRows.isEmpty {
+                Rectangle().fill(theme.divider).frame(height: 1)
                 HStack {
                     let periodName = pinnedBucket?.shortLabel.lowercased() ?? selectedTimeframe.rawValue.lowercased()
                     Text("No model queries recorded for \(periodName)")
-                        .font(.system(size: 9.5, weight: .medium))
+                        .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(theme.textTertiary)
                     Spacer()
                 }
-                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             } else {
-                VStack(spacing: 6) {
-                    ForEach(modelRows) { row in
-                        modelCostCard(row)
-                    }
+                ForEach(modelRows) { row in
+                    Rectangle().fill(theme.divider).frame(height: 1)
+                    modelRowView(row)
                 }
             }
         }
-        .padding(12)
         .themedCardStyle(theme: theme)
     }
-    
-    private func modelCostCard(_ row: ModelRowData) -> some View {
+
+    private func modelRowView(_ row: ModelRowData) -> some View {
         let accent = modelAccentColor(row.name)
-        
-        return VStack(alignment: .leading, spacing: 4) {
-            // Row Top: Name with Dot + Big Bold Price
-            HStack {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(accent)
-                        .frame(width: 6, height: 6)
-                    Text(row.name)
-                        .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(theme.textPrimary)
-                }
-                
-                Spacer()
-                
+
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(accent)
+                    .frame(width: 6, height: 6)
+
+                Text(row.name)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Text("\(formatCompactTokens(row.tokens)) · \(String(format: "%.0f%%", row.percentage))")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(theme.textTertiary)
+
                 Text(String(format: "$%.2f", row.cost))
-                    .font(.system(size: 12, weight: .black, design: .monospaced))
+                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(theme.textPrimary)
             }
-            
-            // Proportion Bar
+
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.primary.opacity(0.06))
-                    
+                        .fill(theme.progressTrack)
                     RoundedRectangle(cornerRadius: 2)
                         .fill(accent)
-                        .frame(width: max(0, geo.size.width * CGFloat(row.percentage / 100.0)))
+                        .frame(width: max(0, geo.size.width * CGFloat(min(1.0, max(0.0, row.percentage / 100.0)))))
                 }
             }
-            .frame(height: 4)
-            
-            // Subtitle Details
-            HStack {
-                Text("\(formatCompactTokens(row.tokens)) tokens")
-                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                    .foregroundStyle(theme.textTertiary)
-                
-                Spacer()
-                
-                Text(String(format: "%.0f%% of total spend", row.percentage))
-                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.textSecondary)
-            }
+            .frame(height: 3.5)
         }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(theme.surfaceSecondary.opacity(0.4))
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
-    
+
     // MARK: - Daily Spend Bar Graph Component
-    
-    // MARK: - Daily Spend Bar Graph Container
-    
+
     private var dailySpendBarGraph: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Top header row
             dailySpendHeaderRow
-            
-            // Bar canvas (height ~68pt)
             dailySpendBarCanvas
-            
-            // X-axis labels row below the bars
             dailySpendXAxis
         }
         .padding(8)
@@ -1229,27 +1347,28 @@ public struct OverviewTabView: View {
                 .stroke(theme.cardStroke.opacity(0.6), lineWidth: 0.5)
         )
     }
-    
+
     private var dailySpendHeaderRow: some View {
-        HStack(alignment: .center) {
+        let accentTint = (currentAccountFilter == .gcp) ? Color.blue : theme.costGreen
+        return HStack(alignment: .center) {
             if let inspected = activeInspectedBucket {
                 HStack(spacing: 4.5) {
                     Text(Self.dayHeaderFormatter.string(from: inspected.date).uppercased())
                         .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                         .foregroundStyle(theme.textPrimary)
-                    
+
                     Text("·")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(theme.textTertiary)
-                    
+
                     Text(String(format: "$%.2f", effectiveBucketCost(inspected)))
                         .font(.system(size: 9, weight: .black, design: .monospaced))
-                        .foregroundStyle(selectedAccount == .gcp ? Color.blue : theme.costGreen)
-                    
+                        .foregroundStyle(accentTint)
+
                     Text("·")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(theme.textTertiary)
-                    
+
                     Text("\(formatCompactTokens(effectiveBucketTokens(inspected))) · \(effectiveBucketQueries(inspected))q")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
@@ -1259,9 +1378,9 @@ public struct OverviewTabView: View {
                     .font(.system(size: 8.5, weight: .black, design: .monospaced))
                     .foregroundStyle(theme.textSecondary)
             }
-            
+
             Spacer()
-            
+
             if pinnedBucket != nil {
                 Button {
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
@@ -1277,22 +1396,18 @@ public struct OverviewTabView: View {
                     .foregroundStyle(theme.textPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(
-                        Capsule().fill(theme.surfaceSecondary)
-                    )
-                    .overlay(
-                        Capsule().stroke(theme.cardStroke, lineWidth: 0.5)
-                    )
+                    .background(Capsule().fill(theme.surfaceSecondary))
+                    .overlay(Capsule().stroke(theme.cardStroke, lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
             } else if let peak = effectivePeakBucket {
                 Text(String(format: "PEAK: $%.2f (%@)", effectiveBucketCost(peak), Self.shortDateFormatter.string(from: peak.date)))
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.costGreen)
+                    .foregroundStyle(accentTint)
             }
         }
     }
-    
+
     private var dailySpendBarCanvas: some View {
         GeometryReader { geo in
             let canvasHeight = geo.size.height
@@ -1300,7 +1415,7 @@ public struct OverviewTabView: View {
             let spacing: CGFloat = selectedTimeframe == .week ? 6.0 : 2.5
             let maxBarWidth: CGFloat = selectedTimeframe == .week ? 34 : (selectedTimeframe == .month ? 12 : 8)
             let cornerRadius: CGFloat = selectedTimeframe == .week ? 3 : 2
-            
+
             HStack(alignment: .bottom, spacing: spacing) {
                 ForEach(activeBuckets) { bucket in
                     let cost = effectiveBucketCost(bucket)
@@ -1308,18 +1423,16 @@ public struct OverviewTabView: View {
                     let isPinned = (selectedBucketId == bucket.id)
                     let isInspected = isHovered || isPinned
                     let isPeak = (effectivePeakBucket?.id == bucket.id)
-                    
+
                     let barHeight: CGFloat = {
-                        if cost <= 0 {
-                            return 3.0
-                        }
+                        if cost <= 0 { return 3.0 }
                         let ratio = CGFloat(cost / maxCost)
                         return max(6.0, canvasHeight * ratio)
                     }()
-                    
+
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        
+
                         RoundedRectangle(cornerRadius: cornerRadius)
                             .fill(barFillColor(isInspected: isInspected, isPeak: isPeak, cost: cost))
                             .frame(height: barHeight)
@@ -1349,11 +1462,11 @@ public struct OverviewTabView: View {
                 }
             }
         }
-        .frame(height: 68)
+        .frame(height: 62)
     }
-    
+
     private func barFillColor(isInspected: Bool, isPeak: Bool, cost: Double) -> Color {
-        let baseTint = selectedAccount == .gcp ? Color.blue : theme.costGreen
+        let baseTint = (currentAccountFilter == .gcp) ? Color.blue : theme.costGreen
         if isInspected {
             return baseTint
         } else if isPeak && cost > 0 {
@@ -1364,7 +1477,7 @@ public struct OverviewTabView: View {
             return theme.surfaceSecondary.opacity(0.8)
         }
     }
-    
+
     @ViewBuilder
     private func barOverlay(isInspected: Bool, isPeak: Bool, cost: Double, cornerRadius: CGFloat) -> some View {
         if isInspected {
@@ -1379,15 +1492,14 @@ public struct OverviewTabView: View {
             }
         }
     }
-    
+
     private var dailySpendXAxis: some View {
         Group {
             if selectedTimeframe == .week || activeBuckets.count <= 7 {
                 HStack(spacing: 6) {
                     ForEach(activeBuckets) { bucket in
                         let isInspected = (activeInspectedBucket?.id == bucket.id)
-                        let text = Self.weekdayFormatter.string(from: bucket.date)
-                        Text(text)
+                        Text(Self.weekdayFormatter.string(from: bucket.date))
                             .font(.system(size: 7.5, weight: isInspected ? .bold : .medium, design: .monospaced))
                             .foregroundStyle(isInspected ? theme.textPrimary : theme.textTertiary)
                             .frame(maxWidth: .infinity)
@@ -1396,7 +1508,7 @@ public struct OverviewTabView: View {
             } else {
                 let buckets = activeBuckets
                 let tickIndices = Self.computeTickIndices(totalCount: buckets.count)
-                
+
                 HStack {
                     ForEach(Array(tickIndices.enumerated()), id: \.offset) { i, idx in
                         let b = buckets[idx]
@@ -1404,11 +1516,11 @@ public struct OverviewTabView: View {
                         let isToday = isLast && Calendar.current.isDateInToday(b.date)
                         let labelText = isToday ? "Today" : Self.shortDateFormatter.string(from: b.date)
                         let isInspected = (activeInspectedBucket?.id == b.id)
-                        
+
                         Text(labelText)
                             .font(.system(size: 7.5, weight: isInspected ? .bold : .medium, design: .monospaced))
                             .foregroundStyle(isInspected ? theme.textPrimary : theme.textTertiary)
-                        
+
                         if i < tickIndices.count - 1 {
                             Spacer()
                         }
@@ -1418,31 +1530,97 @@ public struct OverviewTabView: View {
             }
         }
     }
-    
+
     // MARK: - Helpers & Color Resolvers
-    
+
+    private var timeframeSubscriptionSpend: Double {
+        if let pinned = pinnedBucket { return pinned.quotaCost }
+        if selectedTimeframe == .all && viewModel.stats.quotaTotalCost > activeBuckets.aggregatedQuotaCost {
+            return viewModel.stats.quotaTotalCost
+        }
+        return activeBuckets.aggregatedQuotaCost
+    }
+
+    private var timeframeGcpSpend: Double {
+        if let pinned = pinnedBucket { return pinned.gcpCost }
+        if selectedTimeframe == .all && viewModel.stats.gcpTotalCost > activeBuckets.aggregatedGcpCost {
+            return viewModel.stats.gcpTotalCost
+        }
+        if selectedTimeframe == .today && activeBuckets.isEmpty {
+            return viewModel.stats.gcpTodayCost
+        }
+        return activeBuckets.aggregatedGcpCost
+    }
+
+    private func timeframeSpend(for summary: SubscriptionAccountSummary) -> Double {
+        let metrics = Self.accountSummaryMetrics(
+            emailKey: summary.id,
+            timeframe: selectedTimeframe,
+            allBuckets: viewModel.stats.dailyUsage,
+            pinnedBucket: pinnedBucket,
+            summaryTotalCost: summary.totalCost,
+            summaryTotalQueries: summary.totalQueries
+        )
+        if pinnedBucket == nil && selectedTimeframe == .today && activeBuckets.isEmpty {
+            return max(metrics.cost, summary.todayCost)
+        }
+        return metrics.cost
+    }
+
+    private func pillBadge(_ text: String, foreground: Color, background: Color) -> some View {
+        Text(text)
+            .font(.system(size: 8, weight: .bold, design: .monospaced))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 5.5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(background))
+            .overlay(Capsule().stroke(foreground.opacity(0.28), lineWidth: 0.6))
+    }
+
+    private func compactGroupTitle(_ displayName: String) -> String {
+        let lower = displayName.lowercased()
+        if lower.contains("hydrogen") { return "GEMINI 4 HYDROGEN" }
+        if lower.contains("carbon") { return "GEMINI 4 CARBON" }
+        if lower.contains("argon") { return "GEMINI 4 ARGON" }
+        if lower.contains("gemini") { return "GEMINI" }
+        if lower.contains("claude") || lower.contains("gpt") || lower.contains("anthropic") || lower.contains("openai") || lower.contains("sonnet") || lower.contains("opus") {
+            return "CLAUDE & GPT"
+        }
+        return displayName.uppercased()
+    }
+
+    private func compactGroupAccent(_ displayName: String) -> Color {
+        let lower = displayName.lowercased()
+        if lower.contains("claude") || lower.contains("gpt") || lower.contains("anthropic") || lower.contains("openai") || lower.contains("sonnet") || lower.contains("opus") {
+            return theme.claudeAccent
+        }
+        return theme.geminiAccent
+    }
+
+    private func compactBucketLabel(_ bucket: AgyQuotaBucket) -> String {
+        let name = bucket.displayName.lowercased()
+        let id = bucket.bucketId.lowercased()
+        if name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five") {
+            return "5h"
+        }
+        if name.contains("week") || id.contains("week") {
+            return "Wk"
+        }
+        return bucket.displayName
+    }
+
     private func healthColor(for fraction: Double) -> Color {
-        if fraction > 0.20 {
+        if fraction > 0.50 {
             return theme.costGreen
-        } else if fraction > 0.05 {
+        } else if fraction > 0.20 {
             return theme.claudeAccent
         }
         return theme.dangerRed
     }
-    
-    private func healthCountdownColor(bucket: AgyQuotaBucket) -> Color {
-        let fraction = bucket.remainingFraction ?? 1.0
-        if fraction <= 0.05 {
-            return theme.dangerRed
-        } else if fraction <= 0.20 {
-            return theme.claudeAccent
-        }
-        return theme.costGreen
-    }
-    
+
     private func modelAccentColor(_ name: String) -> Color {
         let lower = name.lowercased()
-        if lower.contains("argon") || lower.contains("carbon") {
+        if lower.contains("argon") || lower.contains("carbon") || lower.contains("hydrogen") {
             return theme.geminiAccent
         } else if lower.contains("claude") || lower.contains("opus") || lower.contains("sonnet") {
             return theme.claudeAccent
@@ -1451,32 +1629,34 @@ public struct OverviewTabView: View {
         }
         return theme.costGreen
     }
-    
-    private func formatHumanCountdown(bucket: AgyQuotaBucket) -> String? {
+
+    private func formatCompactCountdown(bucket: AgyQuotaBucket) -> String? {
         if let resetTimeStr = bucket.resetTime,
-           let date = Self.iso8601Formatter.date(from: resetTimeStr) {
+           let date = AgyQuotaInfo.parseResetTime(resetTimeStr) {
             let diff = date.timeIntervalSince(Date())
             if diff > 0 {
                 let days = Int(diff) / 86400
                 let hours = (Int(diff) % 86400) / 3600
                 let minutes = (Int(diff) % 3600) / 60
-                
                 if days > 0 {
-                    return "Refreshes in \(days) day\(days == 1 ? "" : "s"), \(hours) hour\(hours == 1 ? "" : "s")"
+                    return "\(days)d \(hours)h"
                 } else if hours > 0 {
-                    return "Refreshes in \(hours)h \(minutes)m"
+                    return "\(hours)h \(minutes)m"
                 } else {
-                    return "Refreshes in \(minutes)m"
+                    return "\(minutes)m"
                 }
             }
+            return "Resetting…"
         }
-        
+
         if let desc = bucket.resetDescription, !desc.isEmpty {
             return desc
+                .replacingOccurrences(of: "Refreshes in ", with: "")
+                .replacingOccurrences(of: "Resets in ", with: "")
         }
         return nil
     }
-    
+
     private func formatCompactTokens(_ count: Int) -> String {
         if count >= 1_000_000 {
             return String(format: "%.1fM", Double(count) / 1_000_000.0)
@@ -1484,5 +1664,25 @@ public struct OverviewTabView: View {
             return String(format: "%.0fK", Double(count) / 1_000.0)
         }
         return "\(count)"
+    }
+}
+
+private struct AccountNavigationRow<Content: View>: View {
+    let theme: ThemeColors
+    let action: () -> Void
+    @ViewBuilder let content: () -> Content
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            content()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(isHovered ? theme.cardFillHovered : Color.clear)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }

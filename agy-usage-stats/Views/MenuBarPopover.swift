@@ -25,7 +25,8 @@ public enum PopoverTab: String, CaseIterable, Identifiable {
 public struct MenuBarPopover: View {
     @Bindable public var viewModel: AgyStatsViewModel
     @State private var selectedTab: PopoverTab = .usage
-    @Namespace private var namespace
+    @State private var isRefreshHovered = false
+    @State private var isGearHovered = false
     @Environment(\.colorScheme) var colorScheme
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     
@@ -55,10 +56,14 @@ public struct MenuBarPopover: View {
                 case .usage:
                     OverviewTabView(viewModel: viewModel)
                 case .settings:
-                    SettingsTabView(viewModel: viewModel)
+                    SettingsTabView(viewModel: viewModel) {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedTab = .usage
+                        }
+                    }
                 }
             }
-            .frame(height: 520)
+            .frame(height: 540)
             .background(theme.surfacePrimary)
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.15), value: selectedTab)
@@ -87,7 +92,11 @@ public struct MenuBarPopover: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 // Logo & Title
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(isConnected ? theme.costGreen : theme.dangerRed)
+                        .frame(width: 6, height: 6)
+
                     Text("AGY")
                         .font(.system(size: 11.5, weight: .black, design: .monospaced))
                         .foregroundStyle(theme.textPrimary)
@@ -95,20 +104,16 @@ public struct MenuBarPopover: View {
                     Text("usage stats")
                         .font(.system(size: 11.5, weight: .light, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
-                    
-                    Circle()
-                        .fill(isConnected ? Color.green : Color.red)
-                        .frame(width: 4, height: 4)
-                        .opacity(0.8)
                 }
                 
                 Spacer()
                 
-                // Refresh controls
-                HStack(spacing: 8) {
+                // Refresh & Settings Gear controls
+                HStack(spacing: 4) {
                     if viewModel.isRefreshing {
                         ProgressView()
                             .controlSize(.mini)
+                            .frame(width: 24, height: 24)
                     } else {
                         Button {
                             Task {
@@ -116,22 +121,55 @@ public struct MenuBarPopover: View {
                             }
                         } label: {
                             Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(theme.textSecondary)
-                                .frame(width: 18, height: 18)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(isRefreshHovered ? theme.textPrimary : theme.textSecondary)
+                                .frame(width: 24, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(isRefreshHovered ? theme.surfaceSecondary : Color.clear)
+                                )
+                                .contentShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
+                        .onHover { isRefreshHovered = $0 }
+                        .help("Refresh telemetry")
                     }
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedTab = (selectedTab == .settings) ? .usage : .settings
+                        }
+                    } label: {
+                        let isSettingsActive = (selectedTab == .settings)
+                        Image(systemName: isSettingsActive ? "gearshape.fill" : "gearshape")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(
+                                isSettingsActive
+                                    ? theme.geminiAccent
+                                    : (isGearHovered ? theme.textPrimary : theme.textSecondary)
+                            )
+                            .frame(width: 24, height: 24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(
+                                        isSettingsActive
+                                            ? theme.geminiAccent.opacity(0.14)
+                                            : (isGearHovered ? theme.surfaceSecondary : Color.clear)
+                                    )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSettingsActive ? theme.geminiAccent.opacity(0.35) : Color.clear, lineWidth: 0.75)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { isGearHovered = $0 }
+                    .help(selectedTab == .settings ? "Back to usage" : "Settings")
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
-            
-            // Segmented Picker
-            tabPicker
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+            .padding(.vertical, 9)
             
             // Theme-aware divider
             Rectangle()
@@ -139,54 +177,6 @@ public struct MenuBarPopover: View {
                 .frame(height: 1)
         }
         .background(theme.surfacePrimary)
-    }
-    
-    // MARK: - Tab Picker
-    
-    private var tabPicker: some View {
-        HStack(spacing: 0) {
-            ForEach(PopoverTab.allCases) { tab in
-                Button {
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
-                        selectedTab = tab
-                    }
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 9))
-                        Text(tab.rawValue.lowercased())
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundStyle(
-                        selectedTab == tab
-                            ? Color.primary
-                            : Color.secondary.opacity(0.8)
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 5)
-                    .background(
-                        ZStack {
-                            if selectedTab == tab {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(theme.cardFill)
-                                    .matchedGeometryEffect(id: "activeTabBackground", in: namespace)
-                            }
-                        }
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(selectedTab == tab ? theme.cardStroke : Color.clear, lineWidth: 0.5)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(theme.surfaceSecondary)
-        )
     }
     
     // MARK: - Footer
