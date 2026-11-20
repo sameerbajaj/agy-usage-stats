@@ -282,184 +282,230 @@ public struct OverviewTabView: View {
         return (cost, tokens, queries, breakdown)
     }
 
-    // MARK: - Active Tab & Timeframe State
+    // MARK: - Single-Pass Per-Render Snapshot (Eliminates Repeated O(N) & O(N^2) View Recomputations)
 
-    private var primaryTabs: [AccountTabItem] {
-        viewModel.primaryAccountTabs
+    private struct RenderSnapshot {
+        let summaries: [SubscriptionAccountSummary]
+        let primaryTabs: [AccountTabItem]
+        let overflowSubscriptions: [SubscriptionAccountSummary]
+        let activeTabId: String
+        let selection: ResolvedTabSelection
+        let accountFilter: AccountFilter
+        let activeBuckets: [UsageTimeBucket]
+        let pinnedBucket: UsageTimeBucket?
+        let hoveredBucket: UsageTimeBucket?
+        let inspectedBucket: UsageTimeBucket?
+        let bucketCostsById: [String: Double]
+        let peakBucket: UsageTimeBucket?
+        let maxBucketCost: Double
+        let totalCost: Double
+        let totalTokens: Int
+        let totalQueries: Int
+        let modelRows: [ModelRowData]
+        let timeframeSubscriptionSpend: Double
+        let timeframeGcpSpend: Double
     }
 
-    private var overflowSubscriptions: [SubscriptionAccountSummary] {
-        viewModel.overflowUnusedSubscriptions
-    }
-
-    private var effectiveSelectedTabId: String {
-        Self.resolveSelectedTabId(
+    private func buildRenderSnapshot() -> RenderSnapshot {
+        let summaries = viewModel.subscriptionAccountSummaries
+        let tabs = viewModel.primaryAccountTabs
+        let overflow = viewModel.overflowUnusedSubscriptions
+        let activeId = Self.resolveSelectedTabId(
             storedId: selectedAccountTabId,
-            primaryTabs: primaryTabs,
-            overflowSubscriptions: overflowSubscriptions
+            primaryTabs: tabs,
+            overflowSubscriptions: overflow
+        )
+
+        let selection: ResolvedTabSelection
+        let accountFilter: AccountFilter
+        if activeId == "gcp" {
+            selection = .gcp(project: viewModel.stats.gcpProject ?? "clawdbot-485304")
+            accountFilter = .gcp
+        } else if activeId.hasPrefix("sub:") {
+            let emailKey = String(activeId.dropFirst(4)).lowercased()
+            if let summary = summaries.first(where: { $0.id == emailKey }) {
+                selection = .subscription(summary)
+                accountFilter = .subscription
+            } else {
+                selection = .all
+                accountFilter = .all
+            }
+        } else {
+            selection = .all
+            accountFilter = .all
+        }
+
+        let buckets = Self.filterBuckets(for: selectedTimeframe, in: viewModel.stats.dailyUsage)
+        let pinned = Self.pinnedBucket(for: selectedBucketId, in: buckets)
+        let hovered: UsageTimeBucket? = hoveredBucketId.flatMap { hid in buckets.first(where: { $0.id == hid }) }
+        let inspected = hovered ?? pinned
+
+        var bucketCostsById: [String: Double] = [:]
+        bucketCostsById.reserveCapacity(buckets.count)
+        var peak: UsageTimeBucket? = nil
+        var peakCost: Double = 0.0
+        for b in buckets {
+            let c: Double
+            if case .subscription(let summary) = selection {
+                c = Self.accountCost(in: b, emailKey: summary.id)
+            } else {
+                c = Self.bucketCost(b, account: accountFilter)
+            }
+            bucketCostsById[b.id] = c
+            if c > peakCost {
+                peakCost = c
+                peak = b
+            }
+        }
+        let maxCost = max(0.0001, peakCost)
+
+        let cost: Double
+        let tokens: Int
+        let queries: Int
+        let breakdown: [String: Double]
+
+        switch selection {
+        case .subscription(let summary):
+            let metrics = Self.accountSummaryMetrics(
+                emailKey: summary.id,
+                timeframe: selectedTimeframe,
+                allBuckets: viewModel.stats.dailyUsage,
+                pinnedBucket: pinned,
+                summaryTotalCost: summary.totalCost,
+                summaryTotalQueries: summary.totalQueries
+            )
+            if pinned == nil && selectedTimeframe == .today && buckets.isEmpty {
+                cost = max(metrics.cost, summary.todayCost)
+                queries = max(metrics.queries, summary.todayQueries)
+            } else {
+                cost = metrics.cost
+                queries = metrics.queries
+            }
+            tokens = metrics.tokens
+            breakdown = metrics.modelBreakdown
+
+        case .gcp:
+            if let pinned {
+                cost = pinned.gcpCost
+                tokens = Self.bucketTokens(pinned, account: .gcp)
+                queries = Self.bucketQueries(pinned, account: .gcp)
+                breakdown = Self.bucketModelBreakdown(pinned, account: .gcp)
+            } else {
+                let aggGcp = buckets.aggregatedGcpCost
+                if selectedTimeframe == .all && viewModel.stats.gcpTotalCost > aggGcp {
+                    cost = viewModel.stats.gcpTotalCost
+                } else if selectedTimeframe == .today && buckets.isEmpty {
+                    cost = viewModel.stats.gcpTodayCost
+                } else {
+                    cost = aggGcp
+                }
+                tokens = buckets.aggregatedGcpTokens
+                queries = buckets.aggregatedGcpQueryCount
+                breakdown = buckets.aggregatedGcpModelBreakdown
+            }
+
+        case .all:
+            if let pinned {
+                cost = pinned.totalCost
+                tokens = Self.bucketTokens(pinned, account: .all)
+                queries = Self.bucketQueries(pinned, account: .all)
+                breakdown = Self.bucketModelBreakdown(pinned, account: .all)
+            } else {
+                let aggTotal = buckets.aggregatedTotalCost
+                if selectedTimeframe == .all && viewModel.stats.totalCostEstimate > aggTotal {
+                    cost = viewModel.stats.totalCostEstimate
+                } else {
+                    cost = aggTotal
+                }
+                let aggTokens = buckets.aggregatedInputTokens + buckets.aggregatedOutputTokens
+                if selectedTimeframe == .all && aggTokens == 0 && viewModel.stats.totalQueries > 0 {
+                    tokens = viewModel.stats.totalQueries * 85_000
+                } else {
+                    tokens = aggTokens
+                }
+                let aggQueries = buckets.aggregatedQueryCount
+                queries = (selectedTimeframe == .all) ? max(viewModel.stats.totalQueries, aggQueries) : aggQueries
+                breakdown = buckets.aggregatedModelBreakdown
+            }
+        }
+
+        let safeTotalCost = max(0.0001, cost)
+        let safeTotalTokens = max(1, tokens)
+        let rows: [ModelRowData] = breakdown
+            .filter { $0.value > 0 }
+            .sorted { $0.value > $1.value }
+            .map { item in
+                let pct = (item.value / safeTotalCost) * 100.0
+                let estimatedTokens = Int(Double(safeTotalTokens) * (pct / 100.0))
+                return ModelRowData(
+                    id: item.key,
+                    name: item.key,
+                    cost: item.value,
+                    percentage: pct,
+                    tokens: estimatedTokens
+                )
+            }
+
+        let subSpend: Double
+        let gcpSpend: Double
+        if let pinned {
+            subSpend = pinned.quotaCost
+            gcpSpend = pinned.gcpCost
+        } else {
+            let aggQuota = buckets.aggregatedQuotaCost
+            subSpend = (selectedTimeframe == .all && viewModel.stats.quotaTotalCost > aggQuota)
+                ? viewModel.stats.quotaTotalCost
+                : aggQuota
+            let aggGcp = buckets.aggregatedGcpCost
+            if selectedTimeframe == .all && viewModel.stats.gcpTotalCost > aggGcp {
+                gcpSpend = viewModel.stats.gcpTotalCost
+            } else if selectedTimeframe == .today && buckets.isEmpty {
+                gcpSpend = viewModel.stats.gcpTodayCost
+            } else {
+                gcpSpend = aggGcp
+            }
+        }
+
+        return RenderSnapshot(
+            summaries: summaries,
+            primaryTabs: tabs,
+            overflowSubscriptions: overflow,
+            activeTabId: activeId,
+            selection: selection,
+            accountFilter: accountFilter,
+            activeBuckets: buckets,
+            pinnedBucket: pinned,
+            hoveredBucket: hovered,
+            inspectedBucket: inspected,
+            bucketCostsById: bucketCostsById,
+            peakBucket: peak,
+            maxBucketCost: maxCost,
+            totalCost: cost,
+            totalTokens: tokens,
+            totalQueries: queries,
+            modelRows: rows,
+            timeframeSubscriptionSpend: subSpend,
+            timeframeGcpSpend: gcpSpend
         )
     }
 
-    private var resolvedSelection: ResolvedTabSelection {
-        let activeId = effectiveSelectedTabId
-        if activeId == "gcp" {
-            return .gcp(project: viewModel.stats.gcpProject ?? "clawdbot-485304")
-        }
-        if activeId.hasPrefix("sub:") {
-            let emailKey = String(activeId.dropFirst(4)).lowercased()
-            if let summary = viewModel.subscriptionAccountSummaries.first(where: { $0.id == emailKey }) {
-                return .subscription(summary)
-            }
-        }
-        return .all
-    }
-
-    private var currentAccountFilter: AccountFilter {
-        switch resolvedSelection {
-        case .subscription: return .subscription
-        case .gcp: return .gcp
-        case .all: return .all
-        }
-    }
-
-    private var activeBuckets: [UsageTimeBucket] {
-        Self.filterBuckets(for: selectedTimeframe, in: viewModel.stats.dailyUsage)
-    }
-
     public var pinnedBucket: UsageTimeBucket? {
-        Self.pinnedBucket(for: selectedBucketId, in: activeBuckets)
+        let buckets = Self.filterBuckets(for: selectedTimeframe, in: viewModel.stats.dailyUsage)
+        return Self.pinnedBucket(for: selectedBucketId, in: buckets)
     }
 
-    private var hoveredBucket: UsageTimeBucket? {
-        guard let id = hoveredBucketId else { return nil }
-        return activeBuckets.first(where: { $0.id == id })
-    }
-
-    private var activeInspectedBucket: UsageTimeBucket? {
-        hoveredBucket ?? pinnedBucket
-    }
-
-    private func effectiveBucketCost(_ bucket: UsageTimeBucket) -> Double {
-        if case .subscription(let summary) = resolvedSelection {
-            return Self.accountCost(in: bucket, emailKey: summary.id)
-        }
-        return Self.bucketCost(bucket, account: currentAccountFilter)
-    }
-
-    private func effectiveBucketTokens(_ bucket: UsageTimeBucket) -> Int {
-        if case .subscription(let summary) = resolvedSelection {
+    private func effectiveBucketTokens(_ bucket: UsageTimeBucket, snapshot: RenderSnapshot) -> Int {
+        if case .subscription(let summary) = snapshot.selection {
             return Self.accountTokens(in: bucket, emailKey: summary.id)
         }
-        return Self.bucketTokens(bucket, account: currentAccountFilter)
+        return Self.bucketTokens(bucket, account: snapshot.accountFilter)
     }
 
-    private func effectiveBucketQueries(_ bucket: UsageTimeBucket) -> Int {
-        if case .subscription(let summary) = resolvedSelection {
+    private func effectiveBucketQueries(_ bucket: UsageTimeBucket, snapshot: RenderSnapshot) -> Int {
+        if case .subscription(let summary) = snapshot.selection {
             return Self.accountQueries(in: bucket, emailKey: summary.id)
         }
-        return Self.bucketQueries(bucket, account: currentAccountFilter)
-    }
-
-    private var effectivePeakBucket: UsageTimeBucket? {
-        if case .subscription(let summary) = resolvedSelection {
-            let nonZero = activeBuckets.filter { Self.accountCost(in: $0, emailKey: summary.id) > 0 }
-            return nonZero.max {
-                Self.accountCost(in: $0, emailKey: summary.id) < Self.accountCost(in: $1, emailKey: summary.id)
-            }
-        }
-        return Self.computePeakBucket(in: activeBuckets, account: currentAccountFilter)
-    }
-
-    private var totalCost: Double {
-        switch resolvedSelection {
-        case .subscription(let summary):
-            let metrics = Self.accountSummaryMetrics(
-                emailKey: summary.id,
-                timeframe: selectedTimeframe,
-                allBuckets: viewModel.stats.dailyUsage,
-                pinnedBucket: pinnedBucket,
-                summaryTotalCost: summary.totalCost,
-                summaryTotalQueries: summary.totalQueries
-            )
-            if pinnedBucket == nil && selectedTimeframe == .today && activeBuckets.isEmpty {
-                return max(metrics.cost, summary.todayCost)
-            }
-            return metrics.cost
-        case .gcp:
-            if let pinned = pinnedBucket { return pinned.gcpCost }
-            if selectedTimeframe == .all && viewModel.stats.gcpTotalCost > activeBuckets.aggregatedGcpCost {
-                return viewModel.stats.gcpTotalCost
-            }
-            if selectedTimeframe == .today && activeBuckets.isEmpty {
-                return viewModel.stats.gcpTodayCost
-            }
-            return activeBuckets.aggregatedGcpCost
-        case .all:
-            if let pinned = pinnedBucket { return pinned.totalCost }
-            if selectedTimeframe == .all && viewModel.stats.totalCostEstimate > activeBuckets.aggregatedTotalCost {
-                return viewModel.stats.totalCostEstimate
-            }
-            return activeBuckets.aggregatedTotalCost
-        }
-    }
-
-    private var totalTokens: Int {
-        switch resolvedSelection {
-        case .subscription(let summary):
-            return Self.accountSummaryMetrics(
-                emailKey: summary.id,
-                timeframe: selectedTimeframe,
-                allBuckets: viewModel.stats.dailyUsage,
-                pinnedBucket: pinnedBucket,
-                summaryTotalCost: summary.totalCost,
-                summaryTotalQueries: summary.totalQueries
-            ).tokens
-        case .gcp:
-            if let pinned = pinnedBucket {
-                return Self.bucketTokens(pinned, account: .gcp)
-            }
-            return activeBuckets.aggregatedGcpTokens
-        case .all:
-            if let pinned = pinnedBucket {
-                return Self.bucketTokens(pinned, account: .all)
-            }
-            let tokens = activeBuckets.aggregatedInputTokens + activeBuckets.aggregatedOutputTokens
-            if selectedTimeframe == .all && tokens == 0 && viewModel.stats.totalQueries > 0 {
-                return viewModel.stats.totalQueries * 85_000
-            }
-            return tokens
-        }
-    }
-
-    private var totalQueries: Int {
-        switch resolvedSelection {
-        case .subscription(let summary):
-            let metrics = Self.accountSummaryMetrics(
-                emailKey: summary.id,
-                timeframe: selectedTimeframe,
-                allBuckets: viewModel.stats.dailyUsage,
-                pinnedBucket: pinnedBucket,
-                summaryTotalCost: summary.totalCost,
-                summaryTotalQueries: summary.totalQueries
-            )
-            if pinnedBucket == nil && selectedTimeframe == .today && activeBuckets.isEmpty {
-                return max(metrics.queries, summary.todayQueries)
-            }
-            return metrics.queries
-        case .gcp:
-            if let pinned = pinnedBucket {
-                return Self.bucketQueries(pinned, account: .gcp)
-            }
-            return activeBuckets.aggregatedGcpQueryCount
-        case .all:
-            if let pinned = pinnedBucket {
-                return Self.bucketQueries(pinned, account: .all)
-            }
-            if selectedTimeframe == .all {
-                return max(viewModel.stats.totalQueries, activeBuckets.aggregatedQueryCount)
-            }
-            return activeBuckets.aggregatedQueryCount
-        }
+        return Self.bucketQueries(bucket, account: snapshot.accountFilter)
     }
 
     private struct ModelRowData: Identifiable {
@@ -470,56 +516,13 @@ public struct OverviewTabView: View {
         let tokens: Int
     }
 
-    private var modelRows: [ModelRowData] {
-        let breakdown: [String: Double]
-        switch resolvedSelection {
-        case .subscription(let summary):
-            breakdown = Self.accountSummaryMetrics(
-                emailKey: summary.id,
-                timeframe: selectedTimeframe,
-                allBuckets: viewModel.stats.dailyUsage,
-                pinnedBucket: pinnedBucket,
-                summaryTotalCost: summary.totalCost,
-                summaryTotalQueries: summary.totalQueries
-            ).modelBreakdown
-        case .gcp:
-            if let pinned = pinnedBucket {
-                breakdown = Self.bucketModelBreakdown(pinned, account: .gcp)
-            } else {
-                breakdown = activeBuckets.aggregatedGcpModelBreakdown
-            }
-        case .all:
-            if let pinned = pinnedBucket {
-                breakdown = Self.bucketModelBreakdown(pinned, account: .all)
-            } else {
-                breakdown = activeBuckets.aggregatedModelBreakdown
-            }
-        }
-
-        let total = max(0.0001, totalCost)
-        let totalToks = max(1, totalTokens)
-
-        return breakdown
-            .filter { $0.value > 0 }
-            .sorted { $0.value > $1.value }
-            .map { item in
-                let pct = (item.value / total) * 100.0
-                let estimatedTokens = Int(Double(totalToks) * (pct / 100.0))
-                return ModelRowData(
-                    id: item.key,
-                    name: item.key,
-                    cost: item.value,
-                    percentage: pct,
-                    tokens: estimatedTokens
-                )
-            }
-    }
-
     // MARK: - Main Body
 
     public var body: some View {
+        let snapshot = buildRenderSnapshot()
+
         VStack(spacing: 0) {
-            accountTabStrip
+            accountTabStrip(snapshot: snapshot)
 
             Rectangle()
                 .fill(theme.divider)
@@ -527,13 +530,13 @@ public struct OverviewTabView: View {
 
             ScrollView {
                 VStack(spacing: 10) {
-                    switch resolvedSelection {
+                    switch snapshot.selection {
                     case .subscription(let summary):
-                        subscriptionTabBody(summary: summary)
+                        subscriptionTabBody(summary: summary, snapshot: snapshot)
                     case .gcp(let project):
-                        gcpTabBody(project: project)
+                        gcpTabBody(project: project, snapshot: snapshot)
                     case .all:
-                        allTabBody
+                        allTabBody(snapshot: snapshot)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -554,10 +557,10 @@ public struct OverviewTabView: View {
 
     // MARK: - Option B Sticky Account-First Top Tabs
 
-    private var accountTabStrip: some View {
-        let tabs = primaryTabs
-        let overflow = overflowSubscriptions
-        let activeId = effectiveSelectedTabId
+    private func accountTabStrip(snapshot: RenderSnapshot) -> some View {
+        let tabs = snapshot.primaryTabs
+        let overflow = snapshot.overflowSubscriptions
+        let activeId = snapshot.activeTabId
 
         return HStack(spacing: 5) {
             HStack(spacing: 2) {
@@ -693,14 +696,14 @@ public struct OverviewTabView: View {
     // MARK: - Case 1: Subscription Account View
 
     @ViewBuilder
-    private func subscriptionTabBody(summary: SubscriptionAccountSummary) -> some View {
+    private func subscriptionTabBody(summary: SubscriptionAccountSummary, snapshot: RenderSnapshot) -> some View {
         subscriptionIdentityAndQuotaPanel(summary: summary)
 
         if !summary.isActive && !summary.hasAnyHistoricalUsage {
             unusedOverflowActionsPanel(summary: summary)
         } else {
-            spendSummaryPanel(accentColor: theme.costGreen) {
-                if let pinned = pinnedBucket {
+            spendSummaryPanel(accentColor: theme.costGreen, snapshot: snapshot) {
+                if let pinned = snapshot.pinnedBucket {
                     return "\(pinned.label) · Pinned day"
                 }
                 if selectedTimeframe == .today {
@@ -708,10 +711,10 @@ public struct OverviewTabView: View {
                         ? String(format: "Today · 7d $%.2f", summary.weeklyCost)
                         : "Today"
                 }
-                return "\(selectedTimeframe.rawValue) · \(activeBuckets.count)d"
+                return "\(selectedTimeframe.rawValue) · \(snapshot.activeBuckets.count)d"
             }
 
-            modelsPanel(title: "SPEND BY MODEL")
+            modelsPanel(title: "SPEND BY MODEL", snapshot: snapshot)
         }
     }
 
@@ -949,7 +952,7 @@ public struct OverviewTabView: View {
     // MARK: - Case 2: GCP Tab View
 
     @ViewBuilder
-    private func gcpTabBody(project: String) -> some View {
+    private func gcpTabBody(project: String, snapshot: RenderSnapshot) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "cloud.fill")
@@ -1019,8 +1022,8 @@ public struct OverviewTabView: View {
         }
         .themedCardStyle(theme: theme)
 
-        spendSummaryPanel(accentColor: Color.blue) {
-            if let pinned = pinnedBucket {
+        spendSummaryPanel(accentColor: Color.blue, snapshot: snapshot) {
+            if let pinned = snapshot.pinnedBucket {
                 return "\(pinned.label) · Pinned day"
             }
             if selectedTimeframe == .today {
@@ -1028,22 +1031,22 @@ public struct OverviewTabView: View {
                     ? String(format: "Today · 7d $%.2f", viewModel.stats.gcpWeeklyCost)
                     : "Today"
             }
-            return "\(selectedTimeframe.rawValue) · \(activeBuckets.count)d"
+            return "\(selectedTimeframe.rawValue) · \(snapshot.activeBuckets.count)d"
         }
 
-        modelsPanel(title: "GCP MODELS")
+        modelsPanel(title: "GCP MODELS", snapshot: snapshot)
     }
 
     // MARK: - Case 3: All Tab View
 
     @ViewBuilder
-    private var allTabBody: some View {
-        let subSpend = timeframeSubscriptionSpend
-        let gcpSpend = timeframeGcpSpend
-        let hasGcp = primaryTabs.contains(where: { $0.id == "gcp" }) || gcpSpend > 0.005
+    private func allTabBody(snapshot: RenderSnapshot) -> some View {
+        let subSpend = snapshot.timeframeSubscriptionSpend
+        let gcpSpend = snapshot.timeframeGcpSpend
+        let hasGcp = snapshot.primaryTabs.contains(where: { $0.id == "gcp" }) || gcpSpend > 0.005
 
-        spendSummaryPanel(accentColor: theme.costGreen) {
-            if let pinned = pinnedBucket {
+        spendSummaryPanel(accentColor: theme.costGreen, snapshot: snapshot) {
+            if let pinned = snapshot.pinnedBucket {
                 return hasGcp
                     ? String(format: "%@ · $%.2f Sub · $%.2f GCP", pinned.shortLabel, subSpend, gcpSpend)
                     : "\(pinned.label) · Pinned day"
@@ -1054,13 +1057,13 @@ public struct OverviewTabView: View {
             return String(format: "$%.2f Subscription", subSpend)
         }
 
-        byAccountPanel(hasGcp: hasGcp, gcpSpend: gcpSpend)
+        byAccountPanel(hasGcp: hasGcp, gcpSpend: gcpSpend, snapshot: snapshot)
 
-        modelsPanel(title: "COMBINED SPEND BY MODEL")
+        modelsPanel(title: "COMBINED SPEND BY MODEL", snapshot: snapshot)
     }
 
-    private func byAccountPanel(hasGcp: Bool, gcpSpend: Double) -> some View {
-        let summaries = viewModel.subscriptionAccountSummaries
+    private func byAccountPanel(hasGcp: Bool, gcpSpend: Double, snapshot: RenderSnapshot) -> some View {
+        let summaries = snapshot.summaries
         let gcpProject = viewModel.stats.gcpProject ?? "clawdbot-485304"
 
         return VStack(spacing: 0) {
@@ -1079,7 +1082,7 @@ public struct OverviewTabView: View {
             ForEach(summaries) { summary in
                 Rectangle().fill(theme.divider).frame(height: 1)
 
-                let spend = timeframeSpend(for: summary)
+                let spend = timeframeSpend(for: summary, snapshot: snapshot)
                 let tierLabel = AgyStatsViewModel.shortTierName(for: summary.plan)?.uppercased()
                 let dotColor: Color = summary.isActive
                     ? theme.costGreen
@@ -1153,7 +1156,7 @@ public struct OverviewTabView: View {
 
     // MARK: - Shared Spend & Model Panels
 
-    private func spendSummaryPanel(accentColor: Color, subline: () -> String) -> some View {
+    private func spendSummaryPanel(accentColor: Color, snapshot: RenderSnapshot, subline: () -> String) -> some View {
         VStack(spacing: 0) {
             // Compact Timeframe Switcher
             HStack(spacing: 2) {
@@ -1196,7 +1199,7 @@ public struct OverviewTabView: View {
             // Spend Total + Queries / Tokens
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(String(format: "$%.2f", totalCost))
+                    Text(String(format: "$%.2f", snapshot.totalCost))
                         .font(.system(size: 20, weight: .bold, design: .monospaced))
                         .foregroundStyle(accentColor)
 
@@ -1206,14 +1209,14 @@ public struct OverviewTabView: View {
                             .foregroundStyle(theme.textSecondary)
                             .lineLimit(1)
 
-                        if pinnedBucket != nil {
+                        if snapshot.pinnedBucket != nil {
                             Button {
                                 withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
                                     selectedBucketId = nil
                                 }
                             } label: {
                                 HStack(spacing: 2.5) {
-                                    Text("All \(activeBuckets.count)d")
+                                    Text("All \(snapshot.activeBuckets.count)d")
                                         .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                                     Image(systemName: "xmark")
                                         .font(.system(size: 7, weight: .bold))
@@ -1231,11 +1234,11 @@ public struct OverviewTabView: View {
                 Spacer(minLength: 6)
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(totalQueries) \(totalQueries == 1 ? "query" : "queries")")
+                    Text("\(snapshot.totalQueries) \(snapshot.totalQueries == 1 ? "query" : "queries")")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(theme.textPrimary)
 
-                    Text("\(formatCompactTokens(totalTokens)) tokens")
+                    Text("\(formatCompactTokens(snapshot.totalTokens)) tokens")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.textTertiary)
                 }
@@ -1243,17 +1246,17 @@ public struct OverviewTabView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
 
-            if selectedTimeframe != .today && !activeBuckets.isEmpty {
+            if selectedTimeframe != .today && !snapshot.activeBuckets.isEmpty {
                 Rectangle().fill(theme.divider).frame(height: 1)
 
-                dailySpendBarGraph
+                dailySpendBarGraph(snapshot: snapshot)
                     .padding(9)
             }
         }
         .themedCardStyle(theme: theme)
     }
 
-    private func modelsPanel(title: String) -> some View {
+    private func modelsPanel(title: String, snapshot: RenderSnapshot) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text(title)
@@ -1268,10 +1271,10 @@ public struct OverviewTabView: View {
             .padding(.vertical, 8)
             .help("Consumer estimates use 1.0× base SKU rates; GCP direct calls include the 1.10× Vertex AI 'us' regional multiplier.")
 
-            if modelRows.isEmpty {
+            if snapshot.modelRows.isEmpty {
                 Rectangle().fill(theme.divider).frame(height: 1)
                 HStack {
-                    let periodName = pinnedBucket?.shortLabel.lowercased() ?? selectedTimeframe.rawValue.lowercased()
+                    let periodName = snapshot.pinnedBucket?.shortLabel.lowercased() ?? selectedTimeframe.rawValue.lowercased()
                     Text("No model queries recorded for \(periodName)")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(theme.textTertiary)
@@ -1280,7 +1283,7 @@ public struct OverviewTabView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
             } else {
-                ForEach(modelRows) { row in
+                ForEach(snapshot.modelRows) { row in
                     Rectangle().fill(theme.divider).frame(height: 1)
                     modelRowView(row)
                 }
@@ -1331,11 +1334,11 @@ public struct OverviewTabView: View {
 
     // MARK: - Daily Spend Bar Graph Component
 
-    private var dailySpendBarGraph: some View {
+    private func dailySpendBarGraph(snapshot: RenderSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            dailySpendHeaderRow
-            dailySpendBarCanvas
-            dailySpendXAxis
+            dailySpendHeaderRow(snapshot: snapshot)
+            dailySpendBarCanvas(snapshot: snapshot)
+            dailySpendXAxis(snapshot: snapshot)
         }
         .padding(8)
         .background(
@@ -1348,10 +1351,10 @@ public struct OverviewTabView: View {
         )
     }
 
-    private var dailySpendHeaderRow: some View {
-        let accentTint = (currentAccountFilter == .gcp) ? Color.blue : theme.costGreen
+    private func dailySpendHeaderRow(snapshot: RenderSnapshot) -> some View {
+        let accentTint = (snapshot.accountFilter == .gcp) ? Color.blue : theme.costGreen
         return HStack(alignment: .center) {
-            if let inspected = activeInspectedBucket {
+            if let inspected = snapshot.inspectedBucket {
                 HStack(spacing: 4.5) {
                     Text(Self.dayHeaderFormatter.string(from: inspected.date).uppercased())
                         .font(.system(size: 8.5, weight: .bold, design: .monospaced))
@@ -1361,7 +1364,7 @@ public struct OverviewTabView: View {
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(theme.textTertiary)
 
-                    Text(String(format: "$%.2f", effectiveBucketCost(inspected)))
+                    Text(String(format: "$%.2f", snapshot.bucketCostsById[inspected.id] ?? 0.0))
                         .font(.system(size: 9, weight: .black, design: .monospaced))
                         .foregroundStyle(accentTint)
 
@@ -1369,7 +1372,7 @@ public struct OverviewTabView: View {
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(theme.textTertiary)
 
-                    Text("\(formatCompactTokens(effectiveBucketTokens(inspected))) · \(effectiveBucketQueries(inspected))q")
+                    Text("\(formatCompactTokens(effectiveBucketTokens(inspected, snapshot: snapshot))) · \(effectiveBucketQueries(inspected, snapshot: snapshot))q")
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
                 }
@@ -1381,7 +1384,7 @@ public struct OverviewTabView: View {
 
             Spacer()
 
-            if pinnedBucket != nil {
+            if snapshot.pinnedBucket != nil {
                 Button {
                     withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
                         selectedBucketId = nil
@@ -1400,29 +1403,32 @@ public struct OverviewTabView: View {
                     .overlay(Capsule().stroke(theme.cardStroke, lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
-            } else if let peak = effectivePeakBucket {
-                Text(String(format: "PEAK: $%.2f (%@)", effectiveBucketCost(peak), Self.shortDateFormatter.string(from: peak.date)))
+            } else if let peak = snapshot.peakBucket {
+                Text(String(format: "PEAK: $%.2f (%@)", snapshot.bucketCostsById[peak.id] ?? 0.0, Self.shortDateFormatter.string(from: peak.date)))
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundStyle(accentTint)
             }
         }
     }
 
-    private var dailySpendBarCanvas: some View {
-        GeometryReader { geo in
+    private func dailySpendBarCanvas(snapshot: RenderSnapshot) -> some View {
+        let peakId = snapshot.peakBucket?.id
+        let maxCost = snapshot.maxBucketCost
+        let accountFilter = snapshot.accountFilter
+
+        return GeometryReader { geo in
             let canvasHeight = geo.size.height
-            let maxCost = max(0.0001, activeBuckets.map { effectiveBucketCost($0) }.max() ?? 0.0)
             let spacing: CGFloat = selectedTimeframe == .week ? 6.0 : 2.5
             let maxBarWidth: CGFloat = selectedTimeframe == .week ? 34 : (selectedTimeframe == .month ? 12 : 8)
             let cornerRadius: CGFloat = selectedTimeframe == .week ? 3 : 2
 
             HStack(alignment: .bottom, spacing: spacing) {
-                ForEach(activeBuckets) { bucket in
-                    let cost = effectiveBucketCost(bucket)
+                ForEach(snapshot.activeBuckets) { bucket in
+                    let cost = snapshot.bucketCostsById[bucket.id] ?? 0.0
                     let isHovered = (hoveredBucketId == bucket.id)
                     let isPinned = (selectedBucketId == bucket.id)
                     let isInspected = isHovered || isPinned
-                    let isPeak = (effectivePeakBucket?.id == bucket.id)
+                    let isPeak = (peakId == bucket.id)
 
                     let barHeight: CGFloat = {
                         if cost <= 0 { return 3.0 }
@@ -1434,7 +1440,7 @@ public struct OverviewTabView: View {
                         Spacer(minLength: 0)
 
                         RoundedRectangle(cornerRadius: cornerRadius)
-                            .fill(barFillColor(isInspected: isInspected, isPeak: isPeak, cost: cost))
+                            .fill(barFillColor(isInspected: isInspected, isPeak: isPeak, cost: cost, accountFilter: accountFilter))
                             .frame(height: barHeight)
                             .overlay(
                                 barOverlay(isInspected: isInspected, isPeak: isPeak, cost: cost, cornerRadius: cornerRadius)
@@ -1465,8 +1471,8 @@ public struct OverviewTabView: View {
         .frame(height: 62)
     }
 
-    private func barFillColor(isInspected: Bool, isPeak: Bool, cost: Double) -> Color {
-        let baseTint = (currentAccountFilter == .gcp) ? Color.blue : theme.costGreen
+    private func barFillColor(isInspected: Bool, isPeak: Bool, cost: Double, accountFilter: AccountFilter) -> Color {
+        let baseTint = (accountFilter == .gcp) ? Color.blue : theme.costGreen
         if isInspected {
             return baseTint
         } else if isPeak && cost > 0 {
@@ -1493,12 +1499,15 @@ public struct OverviewTabView: View {
         }
     }
 
-    private var dailySpendXAxis: some View {
-        Group {
-            if selectedTimeframe == .week || activeBuckets.count <= 7 {
+    private func dailySpendXAxis(snapshot: RenderSnapshot) -> some View {
+        let buckets = snapshot.activeBuckets
+        let inspectedId = snapshot.inspectedBucket?.id
+
+        return Group {
+            if selectedTimeframe == .week || buckets.count <= 7 {
                 HStack(spacing: 6) {
-                    ForEach(activeBuckets) { bucket in
-                        let isInspected = (activeInspectedBucket?.id == bucket.id)
+                    ForEach(buckets) { bucket in
+                        let isInspected = (inspectedId == bucket.id)
                         Text(Self.weekdayFormatter.string(from: bucket.date))
                             .font(.system(size: 7.5, weight: isInspected ? .bold : .medium, design: .monospaced))
                             .foregroundStyle(isInspected ? theme.textPrimary : theme.textTertiary)
@@ -1506,7 +1515,6 @@ public struct OverviewTabView: View {
                     }
                 }
             } else {
-                let buckets = activeBuckets
                 let tickIndices = Self.computeTickIndices(totalCount: buckets.count)
 
                 HStack {
@@ -1515,7 +1523,7 @@ public struct OverviewTabView: View {
                         let isLast = (idx == buckets.count - 1)
                         let isToday = isLast && Calendar.current.isDateInToday(b.date)
                         let labelText = isToday ? "Today" : Self.shortDateFormatter.string(from: b.date)
-                        let isInspected = (activeInspectedBucket?.id == b.id)
+                        let isInspected = (inspectedId == b.id)
 
                         Text(labelText)
                             .font(.system(size: 7.5, weight: isInspected ? .bold : .medium, design: .monospaced))
@@ -1533,35 +1541,16 @@ public struct OverviewTabView: View {
 
     // MARK: - Helpers & Color Resolvers
 
-    private var timeframeSubscriptionSpend: Double {
-        if let pinned = pinnedBucket { return pinned.quotaCost }
-        if selectedTimeframe == .all && viewModel.stats.quotaTotalCost > activeBuckets.aggregatedQuotaCost {
-            return viewModel.stats.quotaTotalCost
-        }
-        return activeBuckets.aggregatedQuotaCost
-    }
-
-    private var timeframeGcpSpend: Double {
-        if let pinned = pinnedBucket { return pinned.gcpCost }
-        if selectedTimeframe == .all && viewModel.stats.gcpTotalCost > activeBuckets.aggregatedGcpCost {
-            return viewModel.stats.gcpTotalCost
-        }
-        if selectedTimeframe == .today && activeBuckets.isEmpty {
-            return viewModel.stats.gcpTodayCost
-        }
-        return activeBuckets.aggregatedGcpCost
-    }
-
-    private func timeframeSpend(for summary: SubscriptionAccountSummary) -> Double {
+    private func timeframeSpend(for summary: SubscriptionAccountSummary, snapshot: RenderSnapshot) -> Double {
         let metrics = Self.accountSummaryMetrics(
             emailKey: summary.id,
             timeframe: selectedTimeframe,
             allBuckets: viewModel.stats.dailyUsage,
-            pinnedBucket: pinnedBucket,
+            pinnedBucket: snapshot.pinnedBucket,
             summaryTotalCost: summary.totalCost,
             summaryTotalQueries: summary.totalQueries
         )
-        if pinnedBucket == nil && selectedTimeframe == .today && activeBuckets.isEmpty {
+        if snapshot.pinnedBucket == nil && selectedTimeframe == .today && snapshot.activeBuckets.isEmpty {
             return max(metrics.cost, summary.todayCost)
         }
         return metrics.cost
@@ -1579,6 +1568,7 @@ public struct OverviewTabView: View {
 
     private func compactGroupTitle(_ displayName: String) -> String {
         let lower = displayName.lowercased()
+        if lower.contains("neon") { return "GEMINI 4 NEON" }
         if lower.contains("hydrogen") { return "GEMINI 4 HYDROGEN" }
         if lower.contains("carbon") { return "GEMINI 4 CARBON" }
         if lower.contains("argon") { return "GEMINI 4 ARGON" }
@@ -1620,7 +1610,7 @@ public struct OverviewTabView: View {
 
     private func modelAccentColor(_ name: String) -> Color {
         let lower = name.lowercased()
-        if lower.contains("argon") || lower.contains("carbon") || lower.contains("hydrogen") {
+        if lower.contains("neon") || lower.contains("argon") || lower.contains("carbon") || lower.contains("hydrogen") {
             return theme.geminiAccent
         } else if lower.contains("claude") || lower.contains("opus") || lower.contains("sonnet") {
             return theme.claudeAccent

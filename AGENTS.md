@@ -8,10 +8,13 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - Never poll the filesystem by traversing `conversations/*.db` files (doing so previously pegged CPU at 90.4% across 500+ databases).
    - Use macOS kernel kqueue event monitors (`DispatchSource.makeFileSystemObjectSource`) on both consumer (`~/.gemini/antigravity-cli`) and GCP (`~/.agy-gcp-home/.gemini/antigravity-cli`) `history.jsonl` and `conversations/` directories (`gcpConvDirSource`) with a debounced handler and lightweight fallback.
 
-2. **Stats In-Memory Caching (`AgyStatsService`)**:
+2. **Stats In-Memory & Persistent Binary Disk Caching (`AgyStatsService`)**:
    - A top-level signature cache check (`statsCache`) sits at the very entrance of `loadStats(cliDir:)`.
    - Keyed on both consumer and GCP paths: `(settings, startOfToday, histMod, histSize, convDirMod, gcpHistoryModDate, gcpHistorySize, gcpConversationsDirModDate)`.
    - Returns in `< 1ms` on warm loads without re-parsing SQLite databases or JSON files.
+   - A versioned binary plist disk cache (`~/Library/Caches/com.sameerbajaj.agy-usage-stats/parse-cache-v3.plist`, disabled under XCTest) persists parsed `conversationCache`, `logFileCache`, `modelLogFileCache`, and `gcpConsumerLogCache` across app launches, cutting cold launches from multi-second DB/log scans to sub-50ms.
+   - `parseDbConversationUncached` skips `steps.step_payload` (~925 MB) unless `includeToolStats` is explicitly requested, and walks `steps.metadata` and `gen_metadata.data` directly on `UnsafeRawBufferPointer` (skipping unused Field 1.2 payloads in O(1)) with bounded concurrency (`min(8, cores)`). `historyCache` is keyed by file path to prevent consumer/GCP thrashing.
+   - `AgyQuotaService` serves `defaultStore` persisted quotas and peak AI credits directly from in-memory dictionaries without repeated `UserDefaults`/`JSONDecoder` reads, and `OverviewTabView` computes a single `RenderSnapshot` per render pass to prevent O(N²) chart hover recomputations.
 
 3. **Quota Service Optimization (`AgyQuotaService`)**:
    - Do NOT run slow `/bin/ps` table scans.
@@ -37,7 +40,9 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
 
 6. **Model Catalog & Frontier Pricing Engine**:
    - **Consumer vs. GCP Vertex `'us'` Multiplier**: Consumer API-equivalent stats use `1.0x` base SKU rates (`ModelCostInfo.knownModels`). All GCP direct-billed usage (`isGcp`) applies `ModelCostInfo.gcpRegionalMultiplier` (`1.10x` Vertex AI `'us'` regional multiplier) consistently across `gcpTotalCost`, `gcpTodayCost`, `gcpWeeklyCost`, `gcpSpendEntries`, daily/monthly GCP buckets, and per-model GCP breakdowns without double-multiplying.
-   - **Gemini 4 Hydrogen**: Base rates $1.50 / MTok input, $7.50 / MTok output (including thinking tokens), and $0.075 / MTok cached input (GCP 1.10x: $1.65 / $8.25 / $0.0825). Tiers mapped across `Low`, `Medium`, and `High`; parser recognizes `hydrogen`, `gemini-4-hydrogen`, and `gemini hydrogen`.
+   - **Gemini 4 Neon & Orchestrator (Neon)**: Base rates $3.00 / MTok input, $15.00 / MTok output (including thinking tokens), and $0.15 / MTok cached input (GCP 1.10x: $3.30 / $16.50 / $0.165). Tiers mapped across `Low`, `Medium`, `High`, and `XHigh` (`MODEL_PLACEHOLDER_M532`–`M535`, `M537`).
+   - **Gemini 4 Hydrogen**: Base rates $1.50 / MTok input, $7.50 / MTok output (including thinking tokens), and $0.075 / MTok cached input (GCP 1.10x: $1.65 / $8.25 / $0.0825). Tiers mapped across `Low`, `Medium`, `High`, and `XHigh` (`MODEL_PLACEHOLDER_M525`–`M528`, `M461`, `M462`); parser recognizes `hydrogen`, `gemini-4-hydrogen`, and `gemini hydrogen`.
+   - **Claude 5.5 Placeholders**: `MODEL_PLACEHOLDER_M400`–`M402` map to `Claude Opus 5.5` (Low/Medium/High) and `M403`–`M405` map to `Claude Sonnet 5.5` (Low/Medium/High), verified against live `GetUserStatus` and SQLite `gen_metadata`.
    - **Gemini 4 Carbon**: Base rates $4.00 / MTok input, $20.00 / MTok output, and $0.20 / MTok cached input across all Oct-Nov 2026+ sessions (GCP 1.10x: $4.40 / $22.00 / $0.22). Tiers mapped across `Low`, `Medium`, and `High`. Pattern mapping in [`AgyStatsService.cleanAndMapModelName`](file:///Users/sameerbajaj/PARA/Projects/dev/agy-usage-stats/agy-usage-stats/Services/AgyStatsService.swift) matches `carbon`, `gemini-4-carbon`, and `gemini-carbon`.
    - **Gemini 4 Argon**: Base rates $4.00 / MTok input, $20.00 / MTok output, and $0.20 / MTok cached input (GCP 1.10x: $4.40 / $22.00 / $0.22). Tiers mapped across `Low`, `Medium`, and `High`. Pattern mapping in [`AgyStatsService.cleanAndMapModelName`](file:///Users/sameerbajaj/PARA/Projects/dev/agy-usage-stats/agy-usage-stats/Services/AgyStatsService.swift) matches `argon`, `gemini-4-argon`, and `gemini-argon`.
    - **Gemini 3.7 / 3.8 Flash & Flash Lite**: Gemini 3.7 Flash, 3.8 Flash, and 3.8 Flash Cyber base rates are $1.50 / MTok input, $7.50 / MTok output, and $0.15 / MTok cached input (GCP 1.10x: $1.65 / $8.25 / $0.165). Gemini 3.5 Flash Lite base rates are $0.30 / $2.50 / $0.03 (GCP 1.10x: $0.33 / $2.75 / $0.033).

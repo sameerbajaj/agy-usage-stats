@@ -162,7 +162,6 @@ public final class AgyStatsViewModel {
         didSet {
             userDefaults.set(cliDir, forKey: "agy_cliDir")
             AgyStatsService.clearCaches()
-            activeConsumerEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: cliDir)
             restartWatcher()
             Task { await refresh() }
         }
@@ -814,7 +813,13 @@ public final class AgyStatsViewModel {
         let expanded = self.cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         let path = (expanded as NSString).appendingPathComponent("history.jsonl")
         self.isConnected = FileManager.default.fileExists(atPath: path)
-        self.activeConsumerEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: self.cliDir)
+        // Hydrate immediately from persisted quota in UserDefaults (O(1) in-memory) so launch never blocks main thread scanning logs
+        if let persistedQuota = AgyQuotaService.loadPersistedQuota(userDefaults: userDefaults) {
+            self.stats.quotaInfo = persistedQuota
+            if let email = persistedQuota.email, !email.isEmpty, !AgyQuotaService.isSyntheticTestEmail(email) {
+                self.activeConsumerEmail = email
+            }
+        }
         reconcileDismissedConsumerEmails()
     }
     
@@ -848,6 +853,13 @@ public final class AgyStatsViewModel {
             }
         }
         
+        // Keyword checks for Neon (prefer a dedicated model quota when available).
+        if rawName.contains("neon") {
+            if let neonGroup = quota.groups.first(where: { $0.displayName.lowercased().contains("neon") }) {
+                return neonGroup
+            }
+        }
+
         // Keyword checks for Hydrogen (prefer a dedicated model quota when available).
         if rawName.contains("hydrogen") {
             if let hydrogenGroup = quota.groups.first(where: { $0.displayName.lowercased().contains("hydrogen") }) {
@@ -869,11 +881,11 @@ public final class AgyStatsViewModel {
             }
         }
         
-        // Keyword checks for Gemini / Hydrogen / Carbon / Argon fallback
-        if rawName.contains("gemini") || rawName.contains("hydrogen") || rawName.contains("carbon") || rawName.contains("argon") {
+        // Keyword checks for Gemini / Neon / Hydrogen / Carbon / Argon fallback
+        if rawName.contains("gemini") || rawName.contains("neon") || rawName.contains("hydrogen") || rawName.contains("carbon") || rawName.contains("argon") {
             for group in quota.groups {
                 let name = group.displayName.lowercased()
-                if name.contains("gemini") || name.contains("hydrogen") || name.contains("carbon") || name.contains("argon") {
+                if name.contains("gemini") || name.contains("neon") || name.contains("hydrogen") || name.contains("carbon") || name.contains("argon") {
                     return group
                 }
             }
@@ -909,12 +921,22 @@ public final class AgyStatsViewModel {
         }
 
         // 1. Inspect recent query activity across all active terminals and sessions.
-        // Queries from the last 2 hours (or the most recent 15 queries) tell us what is actively running.
+        // Queries are sorted newest-first; scan lazily without allocating a full filtered copy of thousands of entries.
         // Consumer box queries ONLY (!q.isGcp): GCP credit queries must never hijack subscription model/quota!
-        let consumerQueries = stats.recentQueries.filter { !$0.isGcp }
         let recentCutoff = Date().addingTimeInterval(-2 * 3600)
-        let activeQueries = consumerQueries.filter { $0.timestamp >= recentCutoff }
-        let queriesToInspect = activeQueries.isEmpty ? Array(consumerQueries.prefix(15)) : activeQueries
+        var activeQueries: [QueryEntry] = []
+        var fallbackQueries: [QueryEntry] = []
+        fallbackQueries.reserveCapacity(15)
+        for q in stats.recentQueries where !q.isGcp {
+            if q.timestamp >= recentCutoff {
+                activeQueries.append(q)
+            } else if activeQueries.isEmpty && fallbackQueries.count < 15 {
+                fallbackQueries.append(q)
+            } else {
+                break
+            }
+        }
+        let queriesToInspect = activeQueries.isEmpty ? fallbackQueries : activeQueries
 
         var activeGroups: [AgyQuotaGroup] = []
         for q in queriesToInspect {
@@ -949,8 +971,8 @@ public final class AgyStatsViewModel {
     }
 
     public var activeModelDisplayName: String {
-        let consumerQueries = stats.recentQueries.filter { !$0.isGcp }
-        if consumerQueries.isEmpty, let firstQ = stats.recentQueries.first, firstQ.isGcp, let specificName = firstQ.modelName {
+        let firstConsumerQuery = stats.recentQueries.first(where: { !$0.isGcp })
+        if firstConsumerQuery == nil, let firstQ = stats.recentQueries.first, firstQ.isGcp, let specificName = firstQ.modelName {
             return "\(specificName) (GCP)"
         }
 
@@ -959,10 +981,13 @@ public final class AgyStatsViewModel {
         }
 
         let groupName = group.displayName.lowercased()
-        let matchingQuery = consumerQueries.first { q in
-            guard let m = q.modelName?.lowercased() else { return false }
-            return ((m.contains("gemini") || m.contains("hydrogen") || m.contains("carbon") || m.contains("argon")) && (groupName.contains("gemini") || groupName.contains("hydrogen") || groupName.contains("carbon") || groupName.contains("argon"))) ||
-                   ((m.contains("claude") || m.contains("sonnet") || m.contains("opus") || m.contains("gpt")) && (groupName.contains("claude") || groupName.contains("gpt") || groupName.contains("openai") || groupName.contains("anthropic") || groupName.contains("sonnet") || groupName.contains("opus")))
+        let isGeminiFamilyGroup = groupName.contains("gemini") || groupName.contains("neon") || groupName.contains("hydrogen") || groupName.contains("carbon") || groupName.contains("argon")
+        let isClaudeFamilyGroup = groupName.contains("claude") || groupName.contains("gpt") || groupName.contains("openai") || groupName.contains("anthropic") || groupName.contains("sonnet") || groupName.contains("opus")
+
+        let matchingQuery = stats.recentQueries.first { q in
+            guard !q.isGcp, let m = q.modelName?.lowercased() else { return false }
+            return ((m.contains("gemini") || m.contains("neon") || m.contains("hydrogen") || m.contains("carbon") || m.contains("argon")) && isGeminiFamilyGroup) ||
+                   ((m.contains("claude") || m.contains("sonnet") || m.contains("opus") || m.contains("gpt")) && isClaudeFamilyGroup)
         }
         if let specificName = matchingQuery?.modelName {
             return specificName
@@ -979,7 +1004,7 @@ public final class AgyStatsViewModel {
         guard let quota = stats.quotaInfo else { return nil }
         if let flashGroup = quota.groups.first(where: {
             let name = $0.displayName.lowercased()
-            return (name.contains("gemini") || name.contains("flash")) && !name.contains("hydrogen") && !name.contains("argon") && !name.contains("carbon")
+            return (name.contains("gemini") || name.contains("flash")) && !name.contains("neon") && !name.contains("hydrogen") && !name.contains("argon") && !name.contains("carbon")
         }) {
             return flashGroup
         }
@@ -1382,7 +1407,10 @@ public final class AgyStatsViewModel {
 
     /// Fast-path quota refresh without re-reading or parsing history files (<1ms localhost request)
     public func refreshQuotaOnly(forceRefresh: Bool = false) async {
-        let resolvedEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: cliDir)
+        let dir = await MainActor.run { self.cliDir }
+        let resolvedEmail = await Task.detached(priority: .userInitiated) {
+            AgyStatsService.resolveActiveConsumerEmail(cliDir: dir)
+        }.value
         let (previousEmail, currentQuotaEmail) = await MainActor.run { () -> (String?, String?) in
             let prev = self.activeConsumerEmail
             if prev != resolvedEmail {
@@ -1411,13 +1439,17 @@ public final class AgyStatsViewModel {
     }
     
     public func refresh() async {
-        guard !isRefreshing else { return }
-        
-        await MainActor.run {
+        let canStart = await MainActor.run { () -> Bool in
+            guard !isRefreshing else { return false }
             isRefreshing = true
+            return true
         }
+        guard canStart else { return }
 
-        let resolvedEmail = AgyStatsService.resolveActiveConsumerEmail(cliDir: cliDir)
+        let dir = await MainActor.run { self.cliDir }
+        let resolvedEmail = await Task.detached(priority: .userInitiated) {
+            AgyStatsService.resolveActiveConsumerEmail(cliDir: dir)
+        }.value
         let (previousEmail, currentQuota) = await MainActor.run { () -> (String?, AgyQuotaInfo?) in
             let prev = self.activeConsumerEmail
             if prev != resolvedEmail {
@@ -1433,8 +1465,8 @@ public final class AgyStatsViewModel {
         }
         let safeExistingQuota: AgyQuotaInfo? = (emailChanged || quotaMismatches) ? nil : currentQuota
         
-        let (loadedStats, loadedSettings) = await AgyStatsService.loadStats(cliDir: cliDir, existingQuota: safeExistingQuota)
-        let expanded = cliDir.replacingOccurrences(of: "~", with: NSHomeDirectory())
+        let (loadedStats, loadedSettings) = await AgyStatsService.loadStats(cliDir: dir, existingQuota: safeExistingQuota)
+        let expanded = dir.replacingOccurrences(of: "~", with: NSHomeDirectory())
         let path = (expanded as NSString).appendingPathComponent("history.jsonl")
         let connected = FileManager.default.fileExists(atPath: path)
         
@@ -1443,7 +1475,17 @@ public final class AgyStatsViewModel {
             if updatedStats.quotaInfo == nil, let existingQuota = safeExistingQuota {
                 updatedStats.quotaInfo = existingQuota
             }
-            if self.stats != updatedStats {
+            // Fast structural fingerprint check avoids O(40k) array equality scans on MainActor
+            let statsChanged = self.stats.totalQueries != updatedStats.totalQueries
+                || self.stats.queriesToday != updatedStats.queriesToday
+                || abs(self.stats.totalCostEstimate - updatedStats.totalCostEstimate) > 0.000001
+                || abs(self.stats.todayCostEstimate - updatedStats.todayCostEstimate) > 0.000001
+                || abs(self.stats.gcpTotalCost - updatedStats.gcpTotalCost) > 0.000001
+                || self.stats.quotaInfo != updatedStats.quotaInfo
+                || self.stats.lastQueryAt != updatedStats.lastQueryAt
+                || self.stats.discoveredConsumerEmails != updatedStats.discoveredConsumerEmails
+                || self.stats.dailyUsage.count != updatedStats.dailyUsage.count
+            if statsChanged {
                 self.stats = updatedStats
             }
             if self.settings != loadedSettings {

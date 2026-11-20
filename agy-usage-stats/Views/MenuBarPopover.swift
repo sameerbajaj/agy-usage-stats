@@ -77,7 +77,7 @@ public struct MenuBarPopover: View {
         .onAppear {
             viewModel.setup()
             Task {
-                await viewModel.refreshQuotaOnly(forceRefresh: true)
+                await viewModel.refreshQuotaOnly(forceRefresh: false)
             }
         }
     }

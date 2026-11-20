@@ -306,6 +306,10 @@ public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
     }
 
     public func normalizedForCurrentTime(now: Date = Date()) -> AgyQuotaInfo {
+        let hasAnyResetTime = groups.contains { group in
+            group.buckets.contains { $0.resetTime != nil }
+        }
+        guard hasAnyResetTime else { return self }
         let updatedGroups = groups.map { $0.normalizedForCurrentTime(now: now) }
         return AgyQuotaInfo(
             email: email,
@@ -333,7 +337,9 @@ public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
             let pct = Int((minFraction * 100.0).rounded())
             let lower = group.displayName.lowercased()
             let shortName: String
-            if lower.contains("carbon") {
+            if lower.contains("neon") {
+                shortName = "Neon"
+            } else if lower.contains("carbon") {
                 shortName = "Carbon"
             } else if lower.contains("argon") {
                 shortName = "Argon"
@@ -680,11 +686,20 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
     public static func knownModels(at date: Date = Date()) -> [ModelCostInfo] {
         let carbonPricing = gemini4CarbonPricing(at: date)
         return [
+            // Gemini 4 Neon: Google Gemini API / Vertex AI Standard tier pricing.
+            // Base rates: $3.00/M input, $15.00/M output (incl. thinking), $0.15/M cached input (GCP 1.10x: $3.30 / $16.50 / $0.165).
+            ModelCostInfo(name: "Gemini 4 Neon (Low)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, cachedInputPricePerMillion: 0.15, tier: .low),
+            ModelCostInfo(name: "Gemini 4 Neon (Medium)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, cachedInputPricePerMillion: 0.15, tier: .medium),
+            ModelCostInfo(name: "Gemini 4 Neon (High)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, cachedInputPricePerMillion: 0.15, tier: .high),
+            ModelCostInfo(name: "Gemini 4 Neon (XHigh)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, cachedInputPricePerMillion: 0.15, tier: .high),
+            ModelCostInfo(name: "Orchestrator (Neon)", inputPricePerMillion: 3.00, outputPricePerMillion: 15.00, cachedInputPricePerMillion: 0.15, tier: .high),
+
             // Gemini 4 Hydrogen: Google Gemini API Standard tier pricing.
             // Rates are per 1M tokens; cached input is implicit caching.
             ModelCostInfo(name: "Gemini 4 Hydrogen (Low)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.075, tier: .low),
             ModelCostInfo(name: "Gemini 4 Hydrogen (Medium)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.075, tier: .medium),
             ModelCostInfo(name: "Gemini 4 Hydrogen (High)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.075, tier: .high),
+            ModelCostInfo(name: "Gemini 4 Hydrogen (XHigh)", inputPricePerMillion: 1.50, outputPricePerMillion: 7.50, cachedInputPricePerMillion: 0.075, tier: .high),
 
             // Frontier / Gemini 4 Reasoning (Carbon)
             ModelCostInfo(name: "Gemini 4 Carbon (Low)", inputPricePerMillion: carbonPricing.input, outputPricePerMillion: carbonPricing.output, cachedInputPricePerMillion: carbonPricing.cached, tier: .low),
@@ -695,6 +710,7 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
             ModelCostInfo(name: "Gemini 4 Argon (Low)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .low),
             ModelCostInfo(name: "Gemini 4 Argon (Medium)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .medium),
             ModelCostInfo(name: "Gemini 4 Argon (High)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .high),
+            ModelCostInfo(name: "Orchestrator (Argon)", inputPricePerMillion: 4.00, outputPricePerMillion: 20.00, cachedInputPricePerMillion: 0.20, tier: .high),
 
             // Claude 5.5 Series
             ModelCostInfo(name: "Claude Sonnet 5.5 (Low)", inputPricePerMillion: 2.00, outputPricePerMillion: 10.00, cachedInputPricePerMillion: 0.20, tier: .low),
@@ -762,11 +778,13 @@ public var defaultGeminiModel: ModelCostInfo {
 
 public func canonicalModelDisplayName(from rawName: String) -> String {
     var name = rawName
-    for suffix in [" (Low)", " (Medium)", " (High)", " (Thinking)", " (current)"] {
+    for suffix in [" (XHigh)", " (Low)", " (Medium)", " (High)", " (Thinking)", " (current)"] {
         name = name.replacingOccurrences(of: suffix, with: "")
     }
     let lower = name.lowercased()
-    if lower.contains("hydrogen") {
+    if lower.contains("neon") {
+        return "Gemini 4 Neon"
+    } else if lower.contains("hydrogen") {
         return "Gemini 4 Hydrogen"
     } else if lower.contains("carbon") {
         return "Gemini 4 Carbon"

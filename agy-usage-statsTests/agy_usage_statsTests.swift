@@ -823,8 +823,14 @@ struct agy_usage_statsTests {
             // $4.00 + $20.00 + $0.20 = $24.20 base; * 1.10 = $26.62 ($4.40 + $22.00 + $0.22)
             ("Gemini 4 Carbon (High)", 24.20, 26.62),
             ("Gemini 4 Argon (High)", 24.20, 26.62),
+            ("Orchestrator (Argon)", 24.20, 26.62),
+            // $3.00 + $15.00 + $0.15 = $18.15 base; * 1.10 = $19.965 ($3.30 + $16.50 + $0.165)
+            ("Gemini 4 Neon (High)", 18.15, 19.965),
+            ("Gemini 4 Neon (XHigh)", 18.15, 19.965),
+            ("Orchestrator (Neon)", 18.15, 19.965),
             // $1.50 + $7.50 + $0.075 = $9.075 base; * 1.10 = $9.9825 ($1.65 + $8.25 + $0.0825)
             ("Gemini 4 Hydrogen (High)", 9.075, 9.9825),
+            ("Gemini 4 Hydrogen (XHigh)", 9.075, 9.9825),
             // $1.50 + $7.50 + $0.15 = $9.15 base; * 1.10 = $10.065 ($1.65 + $8.25 + $0.165)
             ("Gemini 3.8 Flash (High)", 9.15, 10.065),
             ("Gemini 3.8 Flash Cyber", 9.15, 10.065),
@@ -866,15 +872,53 @@ struct agy_usage_statsTests {
         #expect(canonicalModelDisplayName(from: "Gemini 4 Carbon (Medium)") == "Gemini 4 Carbon")
         #expect(canonicalModelDisplayName(from: "carbon") == "Gemini 4 Carbon")
 
-        // Argon mappings
+        // Neon & Orchestrator mappings (must NOT fall through to gemini-4 -> Argon!)
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-neon") == "Gemini 4 Neon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-neon-low") == "Gemini 4 Neon (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-neon-medium") == "Gemini 4 Neon (Medium)")
+        #expect(AgyStatsService.cleanAndMapModelName("gemini-4-neon-xhigh") == "Gemini 4 Neon (XHigh)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M532") == "Gemini 4 Neon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M533") == "Gemini 4 Neon (Medium)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M534") == "Gemini 4 Neon (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M535") == "Gemini 4 Neon (XHigh)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M537") == "Orchestrator (Neon)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M668") == "Orchestrator (Argon)")
+        #expect(canonicalModelDisplayName(from: "Gemini 4 Neon (XHigh)") == "Gemini 4 Neon")
+        #expect(canonicalModelDisplayName(from: "Orchestrator (Neon)") == "Gemini 4 Neon")
+        #expect(canonicalModelDisplayName(from: "Orchestrator (Argon)") == "Gemini 4 Argon")
+
+        // Hydrogen placeholder mappings
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M525") == "Gemini 4 Hydrogen (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M526") == "Gemini 4 Hydrogen (Medium)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M527") == "Gemini 4 Hydrogen (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M528") == "Gemini 4 Hydrogen (XHigh)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M461") == "Gemini 4 Hydrogen (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M462") == "Gemini 4 Hydrogen (High)")
+        #expect(canonicalModelDisplayName(from: "Gemini 4 Hydrogen (XHigh)") == "Gemini 4 Hydrogen")
+
+        // Carbon & Argon placeholder mappings
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M437") == "Gemini 4 Carbon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M670") == "Gemini 4 Carbon (High)")
         #expect(AgyStatsService.cleanAndMapModelName("gemini-4-argon") == "Gemini 4 Argon (High)")
         #expect(AgyStatsService.cleanAndMapModelName("gemini-argon-low") == "Gemini 4 Argon (Low)")
         #expect(AgyStatsService.cleanAndMapModelName("argon-high") == "Gemini 4 Argon (High)")
         #expect(AgyStatsService.cleanAndMapModelName("argon") == "Gemini 4 Argon (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M417") == "Gemini 4 Argon (High)")
         #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M418") == "Gemini 4 Argon (High)")
-        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M401") == "Gemini 3.5 Flash Lite")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M419") == "Gemini 4 Argon (Low)")
+
+        // Claude 5.5 placeholder mappings (M400-M405 verified against live GetUserStatus & SQLite DBs)
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M400") == "Claude Opus 5.5 (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M401") == "Claude Opus 5.5 (Medium)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M402") == "Claude Opus 5.5 (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M403") == "Claude Sonnet 5.5 (Low)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M404") == "Claude Sonnet 5.5 (Medium)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M405") == "Claude Sonnet 5.5 (High)")
+
+        // Flash placeholder mappings
         #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M318") == "Gemini 3.8 Flash (High)")
         #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M319") == "Gemini 3.8 Flash (High)")
+        #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M320") == "Gemini 3.8 Flash (Low)")
         #expect(AgyStatsService.cleanAndMapModelName("MODEL_PLACEHOLDER_M299") == "Gemini 3.7 Flash (High)")
         #expect(AgyStatsService.cleanAndMapModelName("gemini-3.5-flash-lite") == "Gemini 3.5 Flash Lite")
 

@@ -527,4 +527,79 @@ struct AgyStatsServiceTests {
         #expect(!emails.contains("fixture@test.com"))
         #expect(!emails.contains("leak@company.internal"))
     }
+
+    @Test
+    func testCombinedConsumerAndGcpHistoryPreservesNewestFirstOrderAndNeonPricing() async throws {
+        let rootDir = FileManager.default.temporaryDirectory.appendingPathComponent("neon-sort-test-\(UUID().uuidString)")
+        let consumerDir = rootDir.appendingPathComponent("consumer")
+        let consumerConvDir = consumerDir.appendingPathComponent("conversations")
+        let gcpDir = rootDir.appendingPathComponent("gcp")
+        let gcpConvDir = gcpDir.appendingPathComponent("conversations")
+        try FileManager.default.createDirectory(at: consumerConvDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: gcpConvDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: rootDir)
+            AgyStatsService.clearCaches()
+        }
+
+        let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+        let tenDaysAgo = now.addingTimeInterval(-10 * 86400)
+
+        // Consumer history has an old query (10d ago) AND a today query
+        let consumerConvOld = "conv-old-\(UUID().uuidString)"
+        let consumerConvToday = "conv-today-\(UUID().uuidString)"
+        let consumerHistory = """
+        {"display":"old prompt","timestamp":\(Int64(tenDaysAgo.timeIntervalSince1970 * 1000)),"workspace":"/tmp/c","conversationId":"\(consumerConvOld)"}
+        {"display":"today neon prompt","timestamp":\(Int64(now.timeIntervalSince1970 * 1000)),"workspace":"/tmp/c","conversationId":"\(consumerConvToday)"}
+        """
+        try consumerHistory.write(to: consumerDir.appendingPathComponent("history.jsonl"), atomically: true, encoding: .utf8)
+
+        // GCP history has a query 10 days ago
+        let gcpConvOld = "gcp-old-\(UUID().uuidString)"
+        let gcpHistory = """
+        {"display":"gcp old prompt","timestamp":\(Int64(tenDaysAgo.timeIntervalSince1970 * 1000)),"workspace":"/tmp/g","conversationId":"\(gcpConvOld)"}
+        """
+        try gcpHistory.write(to: gcpDir.appendingPathComponent("history.jsonl"), atomically: true, encoding: .utf8)
+
+        // Write a Neon generation with a large unused Field 1.2 payload to verify fast zero-copy protobuf walker skips it accurately
+        var f4Data = Data()
+        f4Data.append(encodeField(tag: 1, varint: 1532)) // Gemini 4 Neon (High)
+        f4Data.append(encodeField(tag: 2, varint: 1_000_000))
+        f4Data.append(encodeField(tag: 3, varint: 1_000_000))
+        f4Data.append(encodeField(tag: 5, varint: 1_000_000))
+
+        var kvStep = Data()
+        kvStep.append(encodeField(tag: 1, string: "last_step_index"))
+        kvStep.append(encodeField(tag: 2, string: "0"))
+
+        var f1Data = Data()
+        f1Data.append(encodeField(tag: 2, bytes: Data(repeating: 0x41, count: 65_536))) // large unused payload
+        f1Data.append(encodeField(tag: 19, string: "gemini-4-neon"))
+        f1Data.append(encodeField(tag: 4, bytes: f4Data))
+        f1Data.append(encodeField(tag: 20, bytes: kvStep))
+        let neonGenBlob = encodeField(tag: 1, bytes: f1Data)
+
+        var db: OpaquePointer?
+        let dbPath = consumerConvDir.appendingPathComponent("\(consumerConvToday).db").path
+        #expect(sqlite3_open(dbPath, &db) == SQLITE_OK)
+        #expect(sqlite3_exec(db, "CREATE TABLE steps (idx INTEGER PRIMARY KEY, metadata BLOB, step_payload BLOB);", nil, nil, nil) == SQLITE_OK)
+        #expect(sqlite3_exec(db, "CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB, size INTEGER);", nil, nil, nil) == SQLITE_OK)
+        insertStep(db: db, idx: 0, metadata: makeStepMetadata(timestamp: now))
+        insertGen(db: db, idx: 0, data: neonGenBlob, size: neonGenBlob.count)
+        sqlite3_close(db)
+
+        AgyStatsService.clearCaches()
+        let (stats, _) = await AgyStatsService.loadStats(cliDir: consumerDir.path, gcpCliDir: gcpDir.path)
+
+        // Queries must remain sorted newest-first even when GCP history is merged, so queriesToday == 1
+        #expect(stats.totalQueries == 3)
+        #expect(stats.queriesToday == 1)
+        #expect(stats.queriesThisWeek == 1)
+        #expect(stats.recentQueries.first?.conversationId == consumerConvToday)
+
+        // Gemini 4 Neon consumer cost: $3.00 + $15.00 + $0.15 = $18.15
+        #expect(abs(stats.quotaTodayCost - 18.15) < 0.0001)
+        let todayBucket = stats.dailyUsage.last
+        #expect(abs((todayBucket?.quotaModelBreakdown["Gemini 4 Neon (High)"] ?? 0) - 18.15) < 0.0001)
+    }
 }
