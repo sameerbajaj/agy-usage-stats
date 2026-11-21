@@ -2925,6 +2925,41 @@ struct agy_usage_statsTests {
         #expect(!cappedTabs.contains(where: { $0.id == "gcp" }))
         #expect(vm.overflowUnusedSubscriptions.map(\.id).sorted() == ["fourth@acme.io", "unuseddev@acme.io"])
     }
+
+    @Test func testFetchQuotaCacheHitFromMainActorNeverDeadlocksQuotaLock() async {
+        // Regression test for Swift 6 async executor hop inside NSLock (quotaLock.lock/unlock around normalizedForCurrentTime).
+        // Calling fetchQuota(forceRefresh: false) on @MainActor when cachedQuota is warm must NEVER leave quotaLock wedged.
+        let bucket = AgyQuotaBucket(
+            bucketId: "gemini-5h",
+            displayName: "Five Hour Limit Remaining",
+            remainingFraction: 0.75,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: "2099-01-01T00:00:00Z"
+        )
+        let info = AgyQuotaInfo(
+            email: "lockcheck@acme.org",
+            plan: "Google AI Pro",
+            groups: [AgyQuotaGroup(displayName: "Gemini Models", buckets: [bucket])]
+        )
+        AgyQuotaService.savePersistedQuota(info)
+        defer { AgyQuotaService.removePersistedAccount("lockcheck@acme.org") }
+
+        let first = await AgyQuotaService.fetchQuota(forceRefresh: false, expectedEmail: "lockcheck@acme.org")
+        #expect(first != nil)
+
+        // Call fetchQuota(forceRefresh: false) repeatedly from a @MainActor task (matches MenuBarPopover.onAppear)
+        // and immediately read allPersistedQuotas() + loadPersistedQuota() on MainActor.
+        let mainActorTask = Task { @MainActor in
+            for _ in 0..<5 {
+                _ = await AgyQuotaService.fetchQuota(forceRefresh: false, expectedEmail: "lockcheck@acme.org")
+                let quotas = AgyQuotaService.allPersistedQuotas()
+                #expect(quotas["lockcheck@acme.org"] != nil)
+                _ = AgyQuotaService.loadPersistedQuota(expectedEmail: "lockcheck@acme.org")
+            }
+        }
+        await mainActorTask.value
+    }
 }
 
 

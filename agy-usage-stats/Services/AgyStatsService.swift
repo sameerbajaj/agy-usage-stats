@@ -8,7 +8,7 @@
 import Foundation
 import SQLite3
 
-public enum AgyStatsService {
+nonisolated public enum AgyStatsService {
     /// Vertex AI 'us' regional multiplier (1.10x) applied exclusively to GCP direct-billed usage.
     public static let gcpRegionalMultiplier: Double = ModelCostInfo.gcpRegionalMultiplier
     
@@ -504,26 +504,28 @@ public enum AgyStatsService {
             let oauthTokenPath = (expandedDir as NSString).appendingPathComponent("antigravity-oauth-token")
             let oauthTokenModDate = (try? fm.attributesOfItem(atPath: oauthTokenPath))?[.modificationDate] as? Date ?? Date.distantPast
             
-            // Fast cache check: if history.jsonl, conversations dir, GCP dual-box files, active consumer email/oauth token, and settings haven't changed today, return immediately
-            statsCacheLock.lock()
-            if let cached = statsCache,
-               cached.cliDir == expandedDir,
-               cached.gcpCliDir == resolvedGcpCliDir,
-               cached.settings == settings,
-               cached.startOfToday == startOfToday,
-               cached.historyModDate == histMod,
-               cached.historySize == histSize,
-               cached.conversationsDirModDate == convDirMod,
-               cached.conversationsSig == convSig,
-               cached.gcpHistoryModDate == gcpHistMod,
-               cached.gcpHistorySize == gcpHistSize,
-               cached.gcpConversationsDirModDate == gcpConvDirMod,
-               cached.gcpConversationsSig == gcpConvSig,
-               cached.activeConsumerEmail == activeConsumerEmail,
-               cached.oauthTokenModDate == oauthTokenModDate {
-                var cachedStats = cached.stats
-                statsCacheLock.unlock()
-                
+            // Fast cache check: use synchronous withLock so NSLock can NEVER span a Swift async suspension point
+            let cachedHit: AgyUsageStats? = statsCacheLock.withLock {
+                guard let cached = statsCache,
+                      cached.cliDir == expandedDir,
+                      cached.gcpCliDir == resolvedGcpCliDir,
+                      cached.settings == settings,
+                      cached.startOfToday == startOfToday,
+                      cached.historyModDate == histMod,
+                      cached.historySize == histSize,
+                      cached.conversationsDirModDate == convDirMod,
+                      cached.conversationsSig == convSig,
+                      cached.gcpHistoryModDate == gcpHistMod,
+                      cached.gcpHistorySize == gcpHistSize,
+                      cached.gcpConversationsDirModDate == gcpConvDirMod,
+                      cached.gcpConversationsSig == gcpConvSig,
+                      cached.activeConsumerEmail == activeConsumerEmail,
+                      cached.oauthTokenModDate == oauthTokenModDate else {
+                    return nil
+                }
+                return cached.stats
+            }
+            if var cachedStats = cachedHit {
                 // Fetch fresh quota without blocking UI if already cached
                 if let quota = await AgyQuotaService.fetchQuota(expectedEmail: activeConsumerEmail) {
                     cachedStats.quotaInfo = quota
@@ -532,7 +534,6 @@ public enum AgyStatsService {
                 }
                 return (cachedStats, settings)
             }
-            statsCacheLock.unlock()
             
             let tStart = ContinuousClock.now
             // Hydrate persistent disk parse cache once on cold launch (sub-15ms vs multi-second SQLite/log scan)
@@ -921,9 +922,7 @@ public enum AgyStatsService {
             let fetchedQuota = await quotaTask
             print("TIME: quotaInfo await = \(tQuota.duration(to: .now))")
             
-            statsCacheLock.lock()
-            let previousCachedQuota = statsCache?.stats.quotaInfo
-            statsCacheLock.unlock()
+            let previousCachedQuota = statsCacheLock.withLock { statsCache?.stats.quotaInfo }
             let safePreviousQuota: AgyQuotaInfo? = {
                 guard let prev = previousCachedQuota else { return nil }
                 if let expected = activeConsumerEmail?.lowercased(),
@@ -1518,8 +1517,7 @@ public enum AgyStatsService {
                 discoveredConsumerEmails: discoveredConsumerEmails
             )
             
-            statsCacheLock.lock()
-            statsCache = StatsCacheEntry(
+            let newStatsCacheEntry = StatsCacheEntry(
                 cliDir: expandedDir,
                 gcpCliDir: resolvedGcpCliDir,
                 settings: settings,
@@ -1536,7 +1534,9 @@ public enum AgyStatsService {
                 oauthTokenModDate: oauthTokenModDate,
                 stats: stats
             )
-            statsCacheLock.unlock()
+            statsCacheLock.withLock {
+                statsCache = newStatsCacheEntry
+            }
             
             let dAuth = tStart.duration(to: tHist)
             let dHist = tHist.duration(to: tDb)

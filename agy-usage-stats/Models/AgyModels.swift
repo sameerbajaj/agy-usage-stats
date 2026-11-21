@@ -8,7 +8,7 @@
 import Foundation
 import SwiftUI
 
-public struct ConversationDbMeta: Codable, Hashable, Sendable {
+nonisolated public struct ConversationDbMeta: Codable, Hashable, Sendable {
     public let llmCalls: Int
     public let totalOutputBytes: Int
     public var inputTokens: Int? = nil
@@ -16,7 +16,7 @@ public struct ConversationDbMeta: Codable, Hashable, Sendable {
     public var cachedInputTokens: Int? = nil
 }
 
-public struct QueryEntry: Identifiable, Codable, Hashable {
+nonisolated public struct QueryEntry: Identifiable, Codable, Hashable, Sendable {
     public var id: String { "\(timestamp.timeIntervalSince1970)-\(display.prefix(30))" }
     public let display: String
     public let timestamp: Date
@@ -76,7 +76,7 @@ public struct QueryEntry: Identifiable, Codable, Hashable {
     }
 }
 
-public struct WorkspaceStats: Identifiable, Codable, Hashable {
+nonisolated public struct WorkspaceStats: Identifiable, Codable, Hashable, Sendable {
     public var id: String { path }
     public let path: String
     public var name: String {
@@ -87,7 +87,7 @@ public struct WorkspaceStats: Identifiable, Codable, Hashable {
     public var lastActiveAt: Date
 }
 
-public struct ToolStat: Identifiable, Codable, Hashable {
+nonisolated public struct ToolStat: Identifiable, Codable, Hashable, Sendable {
     public var id: String { toolName }
     public let toolName: String
     public var count: Int
@@ -146,7 +146,7 @@ public struct ToolStat: Identifiable, Codable, Hashable {
 public typealias ModelQuotaBucket = AgyQuotaBucket
 public typealias ModelQuotaGroup = AgyQuotaGroup
 
-public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hashable, Sendable {
+nonisolated public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hashable, Sendable {
     public var id: String { bucketId }
     public let bucketId: String
     public let displayName: String
@@ -194,7 +194,7 @@ public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hashable, Sendab
     }
 }
 
-public struct AgyQuotaGroup: Identifiable, Codable, Equatable, Hashable, Sendable {
+nonisolated public struct AgyQuotaGroup: Identifiable, Codable, Equatable, Hashable, Sendable {
     public var id: String { displayName }
     public let displayName: String
     public let description: String?
@@ -258,7 +258,7 @@ public struct AgyQuotaGroup: Identifiable, Codable, Equatable, Hashable, Sendabl
     }
 }
 
-public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
+nonisolated public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
     public let email: String?
     public let plan: String?
     public let groups: [AgyQuotaGroup]
@@ -360,7 +360,7 @@ public struct AgyQuotaInfo: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
+nonisolated public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     public var id: String { periodKey }
     public let periodKey: String
     public let label: String
@@ -440,7 +440,7 @@ public struct UsageTimeBucket: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-public struct GcpSpendEntry: Codable, Equatable, Hashable, Sendable {
+nonisolated public struct GcpSpendEntry: Codable, Equatable, Hashable, Sendable {
     public let timestamp: Double
     public let cost: Double
     
@@ -450,7 +450,7 @@ public struct GcpSpendEntry: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-public struct AccountSpendEntry: Codable, Equatable, Hashable, Sendable {
+nonisolated public struct AccountSpendEntry: Codable, Equatable, Hashable, Sendable {
     public let email: String
     public let timestamp: TimeInterval
     public let cost: Double
@@ -462,7 +462,7 @@ public struct AccountSpendEntry: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-public struct AgyUsageStats: Codable, Equatable {
+nonisolated public struct AgyUsageStats: Codable, Equatable, Sendable {
     public var totalQueries: Int
     public var queriesToday: Int
     public var queriesThisWeek: Int
@@ -540,7 +540,7 @@ public struct AgyUsageStats: Codable, Equatable {
     )
 }
 
-public struct GcpConfig: Codable, Equatable, Hashable {
+nonisolated public struct GcpConfig: Codable, Equatable, Hashable, Sendable {
     public var project: String?
     public var location: String?
     
@@ -550,7 +550,7 @@ public struct GcpConfig: Codable, Equatable, Hashable {
     }
 }
 
-public struct AgySettings: Codable, Equatable {
+nonisolated public struct AgySettings: Codable, Equatable, Sendable {
     public var colorScheme: String?
     public var enableTelemetry: Bool?
     public var model: String?
@@ -566,7 +566,7 @@ public struct AgySettings: Codable, Equatable {
     )
 }
 
-public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
+nonisolated public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
     public var id: String { name }
     public let name: String
     public let inputPricePerMillion: Double
@@ -756,19 +756,19 @@ public struct ModelCostInfo: Identifiable, Codable, Hashable, Sendable {
 }
 
 /// Global convenience accessor for date-aware Gemini 4 Carbon pricing
-public func gemini4CarbonPricing(at date: Date = Date()) -> (input: Double, output: Double, cached: Double) {
+nonisolated public func gemini4CarbonPricing(at date: Date = Date()) -> (input: Double, output: Double, cached: Double) {
     ModelCostInfo.gemini4CarbonPricing(at: date)
 }
 
-public var knownModels: [ModelCostInfo] {
+nonisolated public var knownModels: [ModelCostInfo] {
     ModelCostInfo.knownModels(at: Date())
 }
 
-public func knownModels(at date: Date) -> [ModelCostInfo] {
+nonisolated public func knownModels(at date: Date) -> [ModelCostInfo] {
     ModelCostInfo.knownModels(at: date)
 }
 
-public var defaultGeminiModel: ModelCostInfo {
+nonisolated public var defaultGeminiModel: ModelCostInfo {
     knownModels.first(where: { $0.name == "Gemini 3.8 Flash (High)" }) ??
     knownModels.first(where: { $0.name == "Gemini 3.7 Flash (High)" }) ??
     knownModels[0]
@@ -776,7 +776,7 @@ public var defaultGeminiModel: ModelCostInfo {
 
 // MARK: - Canonical Model Consolidation & Aggregation
 
-public func canonicalModelDisplayName(from rawName: String) -> String {
+nonisolated public func canonicalModelDisplayName(from rawName: String) -> String {
     var name = rawName
     for suffix in [" (XHigh)", " (Low)", " (Medium)", " (High)", " (Thinking)", " (current)"] {
         name = name.replacingOccurrences(of: suffix, with: "")
@@ -808,7 +808,7 @@ public func canonicalModelDisplayName(from rawName: String) -> String {
     return name
 }
 
-public extension UsageTimeBucket {
+nonisolated public extension UsageTimeBucket {
     /// Returns model breakdown grouped and summed by canonical model name
     var consolidatedModelBreakdown: [String: Double] {
         var result: [String: Double] = [:]
@@ -838,7 +838,7 @@ public extension UsageTimeBucket {
     }
 }
 
-public extension Sequence where Element == UsageTimeBucket {
+nonisolated public extension Sequence where Element == UsageTimeBucket {
     var aggregatedModelBreakdown: [String: Double] {
         var result: [String: Double] = [:]
         for bucket in self {

@@ -397,20 +397,20 @@ public actor AgyQuotaService {
         return result
     }
 
-    private static func updatePeakGoogleOneAiCredits(
+    private static func updatePeakGoogleOneAiCreditsUnlocked(
         emailKey: String,
         credits: Int,
         userDefaults: UserDefaults
-    ) {
-        guard !isSyntheticTestEmail(emailKey) else { return }
+    ) -> [String: Int]? {
+        guard !isSyntheticTestEmail(emailKey) else { return nil }
         if userDefaults === defaultStore {
             let existing = _peakGoogleOneAiCreditsByEmail[emailKey]
             let newPeak = existing.map { max($0, credits) } ?? credits
             if existing != newPeak {
                 _peakGoogleOneAiCreditsByEmail[emailKey] = newPeak
-                userDefaults.set(_peakGoogleOneAiCreditsByEmail, forKey: peakGoogleOneAiCreditsKey)
+                return _peakGoogleOneAiCreditsByEmail
             }
-            return
+            return nil
         }
         var peaks = loadPeakGoogleOneAiCreditsDict(from: userDefaults)
         let existing = peaks[emailKey]
@@ -419,6 +419,7 @@ public actor AgyQuotaService {
             peaks[emailKey] = newPeak
             userDefaults.set(peaks, forKey: peakGoogleOneAiCreditsKey)
         }
+        return nil
     }
 
     public static func peakGoogleOneAiCredits(
@@ -429,9 +430,7 @@ public actor AgyQuotaService {
               !isSyntheticTestEmail(emailKey) else { return nil }
         let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
         if resolvedStore === defaultStore {
-            quotaLock.lock()
-            defer { quotaLock.unlock() }
-            return _peakGoogleOneAiCreditsByEmail[emailKey]
+            return quotaLock.withLock { _peakGoogleOneAiCreditsByEmail[emailKey] }
         }
         return loadPeakGoogleOneAiCreditsDict(from: resolvedStore)[emailKey]
     }
@@ -442,9 +441,7 @@ public actor AgyQuotaService {
     ) -> [String: AgyQuotaInfo] {
         let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
         if resolvedStore === defaultStore {
-            quotaLock.lock()
-            let snapshot = _persistedQuotasByEmail
-            quotaLock.unlock()
+            let snapshot = quotaLock.withLock { _persistedQuotasByEmail }
             return snapshot.mapValues { $0.normalizedForCurrentTime(now: now) }
         }
 
@@ -462,14 +459,17 @@ public actor AgyQuotaService {
               !isSyntheticTestEmail(emailKey) else { return }
         let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
         if resolvedStore === defaultStore {
-            quotaLock.lock()
-            _persistedQuotasByEmail[emailKey] = info
-            let dictSnapshot = _persistedQuotasByEmail
-            if let credits = info.googleOneAiCredits {
-                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
+            let (dictSnapshot, updatedPeaks): ([String: AgyQuotaInfo], [String: Int]?) = quotaLock.withLock {
+                _persistedQuotasByEmail[emailKey] = info
+                let peaks = info.googleOneAiCredits.flatMap {
+                    updatePeakGoogleOneAiCreditsUnlocked(emailKey: emailKey, credits: $0, userDefaults: resolvedStore)
+                }
+                return (_persistedQuotasByEmail, peaks)
             }
-            quotaLock.unlock()
 
+            if let updatedPeaks {
+                resolvedStore.set(updatedPeaks, forKey: peakGoogleOneAiCreditsKey)
+            }
             if let dictData = try? JSONEncoder().encode(dictSnapshot) {
                 resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
             }
@@ -483,7 +483,7 @@ public actor AgyQuotaService {
         }
         dict[emailKey] = info
         if let credits = info.googleOneAiCredits {
-            updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
+            _ = updatePeakGoogleOneAiCreditsUnlocked(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
         }
         if let dictData = try? JSONEncoder().encode(dict) {
             resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
@@ -496,17 +496,21 @@ public actor AgyQuotaService {
         }
         let resolvedStore = (userDefaults === UserDefaults.standard) ? defaultStore : userDefaults
         if resolvedStore === defaultStore {
-            quotaLock.lock()
-            _lastKnownSubscriptionQuota = info
-            if let emailKey = normalizeEmailKey(info.email) {
-                _persistedQuotasByEmail[emailKey] = info
-                if let credits = info.googleOneAiCredits {
-                    updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
+            let (dictSnapshot, updatedPeaks): ([String: AgyQuotaInfo], [String: Int]?) = quotaLock.withLock {
+                _lastKnownSubscriptionQuota = info
+                var peaks: [String: Int]? = nil
+                if let emailKey = normalizeEmailKey(info.email) {
+                    _persistedQuotasByEmail[emailKey] = info
+                    if let credits = info.googleOneAiCredits {
+                        peaks = updatePeakGoogleOneAiCreditsUnlocked(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
+                    }
                 }
+                return (_persistedQuotasByEmail, peaks)
             }
-            let dictSnapshot = _persistedQuotasByEmail
-            quotaLock.unlock()
 
+            if let updatedPeaks {
+                resolvedStore.set(updatedPeaks, forKey: peakGoogleOneAiCreditsKey)
+            }
             if let data = try? JSONEncoder().encode(info) {
                 resolvedStore.set(data, forKey: persistedQuotaKey)
             }
@@ -524,7 +528,7 @@ public actor AgyQuotaService {
         if let emailKey = normalizeEmailKey(info.email) {
             dict[emailKey] = info
             if let credits = info.googleOneAiCredits {
-                updatePeakGoogleOneAiCredits(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
+                _ = updatePeakGoogleOneAiCreditsUnlocked(emailKey: emailKey, credits: credits, userDefaults: resolvedStore)
             }
         }
         if let data = try? JSONEncoder().encode(info) {
@@ -541,18 +545,25 @@ public actor AgyQuotaService {
         let resolvedStore = (targetStore === UserDefaults.standard) ? defaultStore : targetStore
 
         if resolvedStore === defaultStore {
-            quotaLock.lock()
-            _persistedQuotasByEmail.removeValue(forKey: emailKey)
-            let dictSnapshot = _persistedQuotasByEmail
-            if let last = _lastKnownSubscriptionQuota, normalizeEmailKey(last.email) == emailKey {
-                _lastKnownSubscriptionQuota = nil
+            let (dictSnapshot, removedLast, updatedPeaks): ([String: AgyQuotaInfo], Bool, [String: Int]?) = quotaLock.withLock {
+                _persistedQuotasByEmail.removeValue(forKey: emailKey)
+                var clearedLast = false
+                if let last = _lastKnownSubscriptionQuota, normalizeEmailKey(last.email) == emailKey {
+                    _lastKnownSubscriptionQuota = nil
+                    clearedLast = true
+                }
+                let peaks: [String: Int]? = (_peakGoogleOneAiCreditsByEmail.removeValue(forKey: emailKey) != nil)
+                    ? _peakGoogleOneAiCreditsByEmail
+                    : nil
+                return (_persistedQuotasByEmail, clearedLast, peaks)
+            }
+
+            if removedLast {
                 resolvedStore.removeObject(forKey: persistedQuotaKey)
             }
-            if _peakGoogleOneAiCreditsByEmail.removeValue(forKey: emailKey) != nil {
-                resolvedStore.set(_peakGoogleOneAiCreditsByEmail, forKey: peakGoogleOneAiCreditsKey)
+            if let updatedPeaks {
+                resolvedStore.set(updatedPeaks, forKey: peakGoogleOneAiCreditsKey)
             }
-            quotaLock.unlock()
-
             if let dictData = try? JSONEncoder().encode(dictSnapshot) {
                 resolvedStore.set(dictData, forKey: persistedQuotasByEmailKey)
             }
@@ -578,13 +589,45 @@ public actor AgyQuotaService {
     }
 
     public static func clearCache(clearActivePort: Bool = false) {
-        quotaLock.lock()
-        cachedQuota = nil
-        cachedDetectedPorts = nil
-        if clearActivePort {
-            lastActivePort = nil
+        quotaLock.withLock {
+            cachedQuota = nil
+            cachedDetectedPorts = nil
+            if clearActivePort {
+                lastActivePort = nil
+            }
         }
-        quotaLock.unlock()
+    }
+
+    // Synchronous lock helpers ensure NSLock is NEVER held across Swift concurrency suspension points or actor hops.
+    private static func readCachedQuotaIfValid(targetEmail: String?) -> (hit: Bool, info: AgyQuotaInfo?) {
+        quotaLock.withLock {
+            guard let cached = cachedQuota else { return (false, nil) }
+            let ttl = cached.info != nil ? cacheTTL : nilCacheTTL
+            let emailMatches = targetEmail == nil || normalizeEmailKey(cached.info?.email) == targetEmail
+            if emailMatches && Date().timeIntervalSince(cached.timestamp) < ttl {
+                return (true, cached.info)
+            }
+            return (false, nil)
+        }
+    }
+
+    private static func resolveAndStoreFallbackQuota(
+        targetEmail: String?,
+        resolvedExpectedEmail: String?
+    ) -> AgyQuotaInfo? {
+        let rawFallback: AgyQuotaInfo? = quotaLock.withLock {
+            lastActivePort = nil
+            let base: AgyQuotaInfo?
+            if let targetEmail {
+                base = loadPersistedQuotaUnlocked(expectedEmail: targetEmail)
+                    ?? AgyQuotaInfo(email: resolvedExpectedEmail, plan: nil, groups: [])
+            } else {
+                base = cachedQuota?.info ?? _lastKnownSubscriptionQuota ?? loadPersistedQuotaUnlocked()
+            }
+            cachedQuota = CachedQuota(info: base, timestamp: Date())
+            return base
+        }
+        return rawFallback?.normalizedForCurrentTime()
     }
 
     public static func fetchQuota(forceRefresh: Bool = false, expectedEmail: String? = nil) async -> AgyQuotaInfo? {
@@ -592,41 +635,32 @@ public actor AgyQuotaService {
         let targetEmail = normalizeEmailKey(resolvedExpectedEmail)
 
         if !forceRefresh {
-            quotaLock.lock()
-            if let cached = cachedQuota {
-                let ttl = cached.info != nil ? cacheTTL : nilCacheTTL
-                let emailMatches = targetEmail == nil || normalizeEmailKey(cached.info?.email) == targetEmail
-                if emailMatches && Date().timeIntervalSince(cached.timestamp) < ttl {
-                    let info = cached.info?.normalizedForCurrentTime()
-                    quotaLock.unlock()
-                    return info
-                }
+            let cachedResult = readCachedQuotaIfValid(targetEmail: targetEmail)
+            if cachedResult.hit {
+                return cachedResult.info?.normalizedForCurrentTime()
             }
-            quotaLock.unlock()
         }
 
         return await Task.detached(priority: .userInitiated) {
             // Try last active port first if available
-            quotaLock.lock()
-            let knownPort = lastActivePort
-            quotaLock.unlock()
+            let knownPort = quotaLock.withLock { lastActivePort }
 
             var invalidatedStalePort = false
             if let port = knownPort {
                 if let info = await fetchFromPort(port), !info.groups.isEmpty {
                     if targetEmail == nil || normalizeEmailKey(info.email) == targetEmail {
                         savePersistedQuota(info)
-                        quotaLock.lock()
-                        cachedQuota = CachedQuota(info: info, timestamp: Date())
-                        quotaLock.unlock()
+                        quotaLock.withLock {
+                            cachedQuota = CachedQuota(info: info, timestamp: Date())
+                        }
                         return info
                     } else {
                         invalidatedStalePort = true
-                        quotaLock.lock()
-                        if lastActivePort == port {
-                            lastActivePort = nil
+                        quotaLock.withLock {
+                            if lastActivePort == port {
+                                lastActivePort = nil
+                            }
                         }
-                        quotaLock.unlock()
                     }
                 }
             }
@@ -634,21 +668,8 @@ public actor AgyQuotaService {
             let detectedPorts = detectAgyPorts(forceRefresh: forceRefresh || invalidatedStalePort)
             let portsToProbe = invalidatedStalePort ? detectedPorts : detectedPorts.filter { $0 != knownPort }
 
-            let fallbackClosure: () -> AgyQuotaInfo? = {
-                if let targetEmail {
-                    return loadPersistedQuotaUnlocked(expectedEmail: targetEmail)?.normalizedForCurrentTime()
-                        ?? AgyQuotaInfo(email: resolvedExpectedEmail, plan: nil, groups: [])
-                }
-                return (cachedQuota?.info ?? _lastKnownSubscriptionQuota ?? loadPersistedQuotaUnlocked())?.normalizedForCurrentTime()
-            }
-
             guard !portsToProbe.isEmpty else {
-                quotaLock.lock()
-                lastActivePort = nil
-                let fallback = fallbackClosure()
-                cachedQuota = CachedQuota(info: fallback, timestamp: Date())
-                quotaLock.unlock()
-                return fallback
+                return resolveAndStoreFallbackQuota(targetEmail: targetEmail, resolvedExpectedEmail: resolvedExpectedEmail)
             }
 
             // Probe detected ports in parallel, prioritizing expectedEmail when set
@@ -656,19 +677,15 @@ public actor AgyQuotaService {
                 await fetchFromPort(port)
             }
 
-            quotaLock.lock()
             if let (port, info) = found {
-                lastActivePort = port
-                cachedQuota = CachedQuota(info: info, timestamp: Date())
-                quotaLock.unlock()
+                quotaLock.withLock {
+                    lastActivePort = port
+                    cachedQuota = CachedQuota(info: info, timestamp: Date())
+                }
                 savePersistedQuota(info)
                 return info
             } else {
-                lastActivePort = nil
-                let fallback = fallbackClosure()
-                cachedQuota = CachedQuota(info: fallback, timestamp: Date())
-                quotaLock.unlock()
-                return fallback
+                return resolveAndStoreFallbackQuota(targetEmail: targetEmail, resolvedExpectedEmail: resolvedExpectedEmail)
             }
         }.value
     }
