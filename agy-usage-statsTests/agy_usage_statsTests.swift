@@ -2861,6 +2861,7 @@ struct agy_usage_statsTests {
         )
 
         let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.showMuseTracking = false
         vm.activeConsumerEmail = "ultradevuser@acme.io"
         vm.gcpCreditPool = 12.06
 
@@ -3091,6 +3092,7 @@ struct agy_usage_statsTests {
         )
 
         let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.showMuseTracking = false
         vm.activeConsumerEmail = "primary@acme.io"
         var stats = AgyUsageStats.empty
         stats.discoveredConsumerEmails = ["primary@acme.io", "oldaccount@acme.io"]
@@ -3139,6 +3141,150 @@ struct agy_usage_statsTests {
         vm.setAccountHidden(false, for: "oldaccount@acme.io")
         #expect(vm.isAccountHidden("oldaccount@acme.io") == false)
         #expect(vm.subscriptionAccountSummaries.count == 2)
+    }
+
+    @Test func testMuseFlightResponseParsingNormalizationAndActionDiscovery() {
+        let flightBody = """
+        0:{"a":"$@1","q":"","i":false}
+        1:{"success":true,"subscription":{"subscriptionType":"FREE","tier":{"tierId":"hatch_free","name":"Muse Free","tierCode":"HATCH_FREE","isPaid":false,"rank":0},"usage":{"state":"METERED","percentUsed":96,"resetsAt":1795622695,"quotaStatus":"SUFFICIENT"},"statusSubtitle":"Weekly limit resets on Nov 25","usageRowLabel":"Free plan","usageRowValueLabel":"96% used","topupBalance":159769891,"topupTotal":160000000,"topupRowLabel":"Additional tokens","topupRowValueLabel":"0% used (3.9B tokens left)","agreement":null}}
+        """
+        let now = Date(timeIntervalSince1970: 1795557695) // 18h 3m 20s before reset
+        let parsed = MuseQuotaService.parseFlightResponse(flightBody, now: now)
+        #expect(parsed != nil)
+        #expect(parsed?.planName == "Muse Free")
+        #expect(parsed?.shortPlanBadge == "FREE")
+        #expect(parsed?.percentUsed == 96.0)
+        #expect(abs((parsed?.remainingFraction ?? 0) - 0.04) < 0.0001)
+        #expect(parsed?.compactCountdown(now: now) == "18h 3m")
+        #expect(parsed?.ultraCompactCountdown(now: now) == "18h")
+        #expect(parsed?.topupTokensLeftText == "3.9B tokens left")
+        #expect((parsed?.topupRemainingFraction ?? 0) > 0.99)
+
+        // Expired reset timestamp automatically promotes to 0% used / 100% remaining
+        let afterReset = Date(timeIntervalSince1970: 1795622695 + 60)
+        let normalized = parsed!.normalizedForCurrentTime(now: afterReset)
+        #expect(normalized.percentUsed == 0.0)
+        #expect(normalized.remainingFraction == 1.0)
+        #expect(normalized.resetsAt == nil)
+
+        // Next.js chunk path & fetchSubscriptionAction discovery
+        let sampleHtml = """
+        <script src="/_next/static/immutable/chunks/abc123.js"></script>
+        <script src="/_next/static/chunks/def456.js"></script>
+        """
+        #expect(MuseQuotaService.extractChunkPaths(from: sampleHtml) == [
+            "/_next/static/immutable/chunks/abc123.js",
+            "/_next/static/chunks/def456.js"
+        ])
+
+        let sampleLoader = """
+        foo.A(434304).then(({preloadHatchSettingsData:e})=>e());
+        [434304,e=>{e.v(t=>Promise.all(["static/immutable/chunks/3w_mabjdbiapo.js"]))}]
+        """
+        let modId = MuseQuotaService.extractSettingsLoaderModuleID(from: sampleLoader)
+        #expect(modId == "434304")
+        #expect(MuseQuotaService.extractSettingsLoaderChunkList(moduleId: "434304", from: sampleLoader) == [
+            "/_next/static/immutable/chunks/3w_mabjdbiapo.js"
+        ])
+
+        let sampleActionChunk = #"createServerReference("406cd44441421b58cea8309747129141947de9f499",t.callServer,void 0,t.findSourceMapURL,"fetchSubscriptionAction")"#
+        #expect(MuseQuotaService.extractActionID(from: sampleActionChunk) == "406cd44441421b58cea8309747129141947de9f499")
+
+        // Manual cookie normalization strips optional "Cookie:" prefix
+        #expect(MuseQuotaService.normalizeManualCookieHeader("  Cookie: hatch_sess=abc; datr=xyz  ") == "hatch_sess=abc; datr=xyz")
+        #expect(MuseQuotaService.normalizeManualCookieHeader("   ") == nil)
+    }
+
+    @Test func testMuseTabAndMenuBarBadgePresentationAndGcpToggle() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.activeConsumerEmail = "primary@acme.io"
+        var stats = AgyUsageStats.empty
+        stats.discoveredConsumerEmails = ["primary@acme.io"]
+        stats.gcpProject = "gcp-proj-1"
+        stats.gcpTotalCost = 12.0
+        vm.stats = stats
+
+        // By default both Muse and GCP tabs are enabled
+        #expect(vm.primaryAccountTabs.contains(.muse))
+        #expect(vm.primaryAccountTabs.contains(where: { $0.id == "gcp" }))
+
+        // Toggling showGcpTab off removes GCP cleanly while keeping Muse
+        vm.showGcpTab = false
+        #expect(!vm.primaryAccountTabs.contains(where: { $0.id == "gcp" }))
+        #expect(vm.primaryAccountTabs.contains(.muse))
+
+        // Toggling showMuseTracking off removes Muse tab
+        vm.showMuseTracking = false
+        #expect(!vm.primaryAccountTabs.contains(.muse))
+
+        // Menu bar Muse badge presentation across all 3 display styles & health coloring
+        let remState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 5,
+            litColor: .white,
+            activeUsageFraction: 0.72,
+            activeFillFraction: 0.90,
+            geminiUsageFraction: 0.72,
+            geminiFillFraction: 0.90,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            showSpend: false,
+            showMuseBadge: true,
+            museRemainingFraction: 0.04,
+            musePercentUsed: 96.0,
+            museResetShortText: "18h",
+            museDisplayStyle: .remainingPercent
+        )
+        #expect(remState.spendBadge == nil)
+        #expect(remState.museBadge?.text == "4%")
+        #expect(remState.museBadge?.textColor == MenuBarPresentationResolver.lowRedColor)
+
+        let usedState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 5,
+            litColor: .white,
+            activeUsageFraction: 0.72,
+            activeFillFraction: 0.90,
+            geminiUsageFraction: 0.72,
+            geminiFillFraction: 0.90,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            showSpend: false,
+            showMuseBadge: true,
+            museRemainingFraction: 0.65,
+            musePercentUsed: 35.0,
+            museResetShortText: "4d",
+            museDisplayStyle: .usedPercent
+        )
+        #expect(usedState.museBadge?.text == "35%")
+        #expect(usedState.museBadge?.textColor == MenuBarPresentationResolver.healthyGreenColor)
+
+        let comboState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 5,
+            litColor: .white,
+            activeUsageFraction: 0.72,
+            activeFillFraction: 0.90,
+            geminiUsageFraction: 0.72,
+            geminiFillFraction: 0.90,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            showSpend: false,
+            showMuseBadge: true,
+            museRemainingFraction: 0.35,
+            musePercentUsed: 65.0,
+            museResetShortText: "2d",
+            museDisplayStyle: .remainingAndReset
+        )
+        #expect(comboState.museBadge?.text == "35% 2d")
+        #expect(comboState.museBadge?.textColor == MenuBarPresentationResolver.warningAmberColor)
     }
 }
 

@@ -116,7 +116,14 @@ struct MenuBarLabel: View {
         if let c = viewModel.claudeUsageFraction {
             lines.append(String(format: "Claude: %.0f%%", c * 100))
         }
-        if viewModel.stats.gcpTodayCost > 0 || viewModel.stats.gcpTotalCost > 0 {
+        if viewModel.showMuseTracking, let muse = viewModel.museQuota?.normalizedForCurrentTime() {
+            let resetPart = muse.compactCountdown().map { " · resets in \($0)" } ?? ""
+            lines.append(String(format: "Muse (%@): %.0f%% left (%.0f%% used)%@", muse.planName, muse.remainingPercent, muse.percentUsed, resetPart))
+            if let topupText = muse.topupTokensLeftText {
+                lines.append("Muse Additional Tokens: \(topupText)")
+            }
+        }
+        if viewModel.showGcpTab && (viewModel.stats.gcpTodayCost > 0 || viewModel.stats.gcpTotalCost > 0) {
             lines.append(String(format: "GCP Cloud Spend: $%.2f today ($%.2f total)", viewModel.stats.gcpTodayCost, viewModel.stats.gcpTotalCost))
         }
         lines.append("Queries Today: \(viewModel.stats.queriesToday)")
@@ -152,18 +159,38 @@ public struct IconPresentationState: Equatable {
         }
     }
 
+    public struct MuseBadge: Equatable {
+        public let iconColor: NSColor
+        public let text: String
+        public let textColor: NSColor
+
+        public init(iconColor: NSColor, text: String, textColor: NSColor) {
+            self.iconColor = iconColor
+            self.text = text
+            self.textColor = textColor
+        }
+    }
+
     public let text: String
     public let textColor: NSColor
     public let gaugeStyle: GaugeStyle
     public let spendBadge: SpendBadge?
+    public let museBadge: MuseBadge?
 
     public var hasText: Bool { !text.isEmpty }
 
-    public init(text: String, textColor: NSColor, gaugeStyle: GaugeStyle, spendBadge: SpendBadge? = nil) {
+    public init(
+        text: String,
+        textColor: NSColor,
+        gaugeStyle: GaugeStyle,
+        spendBadge: SpendBadge? = nil,
+        museBadge: MuseBadge? = nil
+    ) {
         self.text = text
         self.textColor = textColor
         self.gaugeStyle = gaugeStyle
         self.spendBadge = spendBadge
+        self.museBadge = museBadge
     }
 }
 
@@ -174,6 +201,7 @@ public enum MenuBarPresentationResolver {
     public static let claudeColor = NSColor(red: 1.0, green: 0.5, blue: 0.2, alpha: 1.0)
     public static let gcpBlueColor = NSColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0)
     public static let apiGreenColor = NSColor(red: 0.15, green: 0.85, blue: 0.55, alpha: 1.0)
+    public static let museIndigoColor = NSColor(red: 0.45, green: 0.42, blue: 1.0, alpha: 1.0)
 
     public static let healthyGreenColor = NSColor(red: 0.15, green: 0.85, blue: 0.55, alpha: 1.0)
     public static let warningAmberColor = NSColor(red: 1.0, green: 0.60, blue: 0.15, alpha: 1.0)
@@ -254,7 +282,12 @@ public enum MenuBarPresentationResolver {
         spendSource: MenuBarSpendSource = .gcpToday,
         spendAmount: Double = 0.0,
         gcpTotalCost: Double? = nil,
-        todayCost: Double? = nil
+        todayCost: Double? = nil,
+        showMuseBadge: Bool = false,
+        museRemainingFraction: Double? = nil,
+        musePercentUsed: Double? = nil,
+        museResetShortText: String? = nil,
+        museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent
     ) -> IconPresentationState {
         let badge: IconPresentationState.SpendBadge?
         if showSpend {
@@ -286,8 +319,45 @@ public enum MenuBarPresentationResolver {
             badge = nil
         }
 
+        let museBadge: IconPresentationState.MuseBadge?
+        if showMuseBadge, let remFrac = museRemainingFraction {
+            let clampedRem = max(0.0, min(1.0, remFrac))
+            let usedPct = musePercentUsed ?? ((1.0 - clampedRem) * 100.0)
+            let museText: String
+            switch museDisplayStyle {
+            case .remainingPercent:
+                museText = String(format: "%.0f%%", clampedRem * 100.0)
+            case .usedPercent:
+                museText = String(format: "%.0f%%", usedPct)
+            case .remainingAndReset:
+                let pctPart = String(format: "%.0f%%", clampedRem * 100.0)
+                if let resetShort = museResetShortText, !resetShort.isEmpty {
+                    museText = "\(pctPart) \(resetShort)"
+                } else {
+                    museText = pctPart
+                }
+            }
+            museBadge = IconPresentationState.MuseBadge(
+                iconColor: museIndigoColor,
+                text: museText,
+                textColor: healthColor(for: clampedRem)
+            )
+        } else {
+            museBadge = nil
+        }
+
+        func finish(_ text: String, _ textColor: NSColor, _ gaugeStyle: IconPresentationState.GaugeStyle) -> IconPresentationState {
+            IconPresentationState(
+                text: text,
+                textColor: textColor,
+                gaugeStyle: gaugeStyle,
+                spendBadge: badge,
+                museBadge: museBadge
+            )
+        }
+
         guard showUsage else {
-            return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+            return finish("", litColor, .none)
         }
 
         switch selectedModel {
@@ -297,12 +367,12 @@ public enum MenuBarPresentationResolver {
                 let fill = activeFillFraction ?? fraction
                 let textColor = healthColor(for: fraction)
                 let strokeColor = healthColor(for: fill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else if queriesToday > 0 {
                 let pctText = "\(queriesToday)q"
-                return IconPresentationState(text: pctText, textColor: litColor, gaugeStyle: .single(fraction: 1.0, strokeColor: litColor), spendBadge: badge)
+                return finish(pctText, litColor, .single(fraction: 1.0, strokeColor: litColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .mostDepleted:
@@ -329,12 +399,12 @@ public enum MenuBarPresentationResolver {
                 let fill = depletedFill ?? fraction
                 let textColor = healthColor(for: fraction)
                 let strokeColor = healthColor(for: fill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else if queriesToday > 0 {
                 let pctText = "\(queriesToday)q"
-                return IconPresentationState(text: pctText, textColor: litColor, gaugeStyle: .single(fraction: 1.0, strokeColor: litColor), spendBadge: badge)
+                return finish(pctText, litColor, .single(fraction: 1.0, strokeColor: litColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .gemini:
@@ -343,9 +413,9 @@ public enum MenuBarPresentationResolver {
                 let fill = geminiFillFraction ?? fraction
                 let textColor = healthColor(for: fraction)
                 let strokeColor = healthColor(for: fill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .carbon:
@@ -354,9 +424,9 @@ public enum MenuBarPresentationResolver {
                 let fill = carbonFillFraction ?? fraction
                 let textColor = healthColor(for: fraction)
                 let strokeColor = healthColor(for: fill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .argon:
@@ -365,9 +435,9 @@ public enum MenuBarPresentationResolver {
                 let fill = argonFillFraction ?? fraction
                 let textColor = healthColor(for: fraction)
                 let strokeColor = healthColor(for: fill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .claude:
@@ -376,25 +446,25 @@ public enum MenuBarPresentationResolver {
                 let fill = claudeFillFraction ?? fraction
                 let textColor = healthColor(for: fraction)
                 let strokeColor = healthColor(for: fill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: fill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .gcp:
             if let cost = gcpTodayCost, cost > 0 {
                 let costText = String(format: "$%.2f", cost)
                 let fill = activeFillFraction ?? activeUsageFraction ?? 1.0
-                return IconPresentationState(text: costText, textColor: gcpBlueColor, gaugeStyle: .single(fraction: fill, strokeColor: gcpBlueColor), spendBadge: badge)
+                return finish(costText, gcpBlueColor, .single(fraction: fill, strokeColor: gcpBlueColor))
             } else if let fraction = activeUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = activeFillFraction ?? fraction
-                return IconPresentationState(text: pctText, textColor: gcpBlueColor, gaugeStyle: .single(fraction: fill, strokeColor: gcpBlueColor), spendBadge: badge)
+                return finish(pctText, gcpBlueColor, .single(fraction: fill, strokeColor: gcpBlueColor))
             } else if queriesToday > 0 {
                 let pctText = "\(queriesToday)q"
-                return IconPresentationState(text: pctText, textColor: gcpBlueColor, gaugeStyle: .single(fraction: 1.0, strokeColor: gcpBlueColor), spendBadge: badge)
+                return finish(pctText, gcpBlueColor, .single(fraction: 1.0, strokeColor: gcpBlueColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .both:
@@ -402,21 +472,21 @@ public enum MenuBarPresentationResolver {
                 let pctText = String(format: "G:%.0f%% C:%.0f%%", gf * 100, cf * 100)
                 let gFill = geminiFillFraction ?? gf
                 let cFill = claudeFillFraction ?? cf
-                return IconPresentationState(text: pctText, textColor: NSColor.textColor, gaugeStyle: .both(geminiFraction: gFill, claudeFraction: cFill), spendBadge: badge)
+                return finish(pctText, NSColor.textColor, .both(geminiFraction: gFill, claudeFraction: cFill))
             } else if let gf = geminiUsageFraction {
                 let pctText = String(format: "%.0f%%", gf * 100)
                 let gFill = geminiFillFraction ?? gf
                 let textColor = healthColor(for: gf)
                 let strokeColor = healthColor(for: gFill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: gFill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: gFill, strokeColor: strokeColor))
             } else if let cf = claudeUsageFraction {
                 let pctText = String(format: "%.0f%%", cf * 100)
                 let cFill = claudeFillFraction ?? cf
                 let textColor = healthColor(for: cf)
                 let strokeColor = healthColor(for: cFill)
-                return IconPresentationState(text: pctText, textColor: textColor, gaugeStyle: .single(fraction: cFill, strokeColor: strokeColor), spendBadge: badge)
+                return finish(pctText, textColor, .single(fraction: cFill, strokeColor: strokeColor))
             } else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
         case .allThree:
@@ -426,7 +496,7 @@ public enum MenuBarPresentationResolver {
             if let cf = claudeUsageFraction { parts.append(String(format: "C:%.0f%%", cf * 100)) }
 
             guard !parts.isEmpty else {
-                return IconPresentationState(text: "", textColor: litColor, gaugeStyle: .none, spendBadge: badge)
+                return finish("", litColor, .none)
             }
 
             let pctText = parts.joined(separator: " ")
@@ -449,12 +519,7 @@ public enum MenuBarPresentationResolver {
                 gauge = .none
             }
 
-            return IconPresentationState(
-                text: pctText,
-                textColor: NSColor.textColor,
-                gaugeStyle: gauge,
-                spendBadge: badge
-            )
+            return finish(pctText, NSColor.textColor, gauge)
         }
     }
 }
@@ -484,7 +549,12 @@ public enum AgyMenuBarRenderer {
         spendAmount: Double = 0.0,
         gcpTodayCost: Double? = nil,
         gcpTotalCost: Double? = nil,
-        todayCost: Double? = nil
+        todayCost: Double? = nil,
+        showMuseBadge: Bool = false,
+        museRemainingFraction: Double? = nil,
+        musePercentUsed: Double? = nil,
+        museResetShortText: String? = nil,
+        museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent
     ) -> NSImage {
         let litNS = NSColor(litColor)
         let presentation = MenuBarPresentationResolver.resolveIconPresentation(
@@ -507,10 +577,15 @@ public enum AgyMenuBarRenderer {
             spendSource: menuBarSpendSource,
             spendAmount: spendAmount,
             gcpTotalCost: gcpTotalCost,
-            todayCost: todayCost
+            todayCost: todayCost,
+            showMuseBadge: showMuseBadge,
+            museRemainingFraction: museRemainingFraction,
+            musePercentUsed: musePercentUsed,
+            museResetShortText: museResetShortText,
+            museDisplayStyle: museDisplayStyle
         )
 
-        let cacheKey = "\(queriesToday)_\(litColor.description)_\(presentation.text)_\(presentation.textColor.description)_\(presentation.gaugeStyle)_\(presentation.spendBadge?.icon.hashValue ?? 0)_\(presentation.spendBadge?.text ?? "")_\(presentation.spendBadge?.iconColor.description ?? "")"
+        let cacheKey = "\(queriesToday)_\(litColor.description)_\(presentation.text)_\(presentation.textColor.description)_\(presentation.gaugeStyle)_\(presentation.spendBadge?.icon.hashValue ?? 0)_\(presentation.spendBadge?.text ?? "")_\(presentation.spendBadge?.iconColor.description ?? "")_\(presentation.museBadge?.text ?? "")_\(presentation.museBadge?.textColor.description ?? "")"
         if let cached = cachedAntigravityIcon, cached.key == cacheKey {
             return cached.image
         }
@@ -574,23 +649,44 @@ public enum AgyMenuBarRenderer {
             }
         }
 
+        // Measure Muse badge
+        var museSymbolImg: NSImage? = nil
+        var museTextStr: String = ""
+        var museAttributes: [NSAttributedString.Key: Any] = [:]
+        var museTextSize = NSSize.zero
+
+        if let muse = presentation.museBadge {
+            museAttributes = [.font: font, .foregroundColor: muse.textColor]
+            let config = NSImage.SymbolConfiguration(pointSize: 9.5, weight: .semibold)
+                .applying(.init(paletteColors: [muse.iconColor]))
+            museSymbolImg = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+            museTextStr = muse.text
+            museTextSize = (museTextStr as NSString).size(withAttributes: museAttributes)
+        }
+
         // Calculate total image width
         var totalW: CGFloat = gaugeSlotWidth
         if presentation.hasText {
             totalW += 3.5 + pctTextSize.width
         }
-        if let _ = presentation.spendBadge {
+        if presentation.spendBadge != nil {
             totalW += 3.5 + 1.0 + 3.5 // Divider line
             if let cloud = cloudSymbolImg {
                 totalW += cloud.size.width + 2.5
             } else if let dollar = dollarSymbolImg {
                 totalW += dollar.size.width + 1.5
             }
-            totalW += spendTextSize.width + 2.0
-        } else {
-            if presentation.hasText {
-                totalW += 2.0
+            totalW += spendTextSize.width
+        }
+        if presentation.museBadge != nil {
+            totalW += 3.5 + 1.0 + 3.5 // Divider line
+            if let museSym = museSymbolImg {
+                totalW += museSym.size.width + 2.0
             }
+            totalW += museTextSize.width
+        }
+        if presentation.hasText || presentation.spendBadge != nil || presentation.museBadge != nil {
+            totalW += 2.0
         }
 
         let img = NSImage(size: NSSize(width: max(16.0, totalW), height: h), flipped: false) { _ in
@@ -709,6 +805,25 @@ public enum AgyMenuBarRenderer {
                 currentX += spendTextSize.width
             }
 
+            // 4. Draw Muse Badge (Divider + Sparkles Icon + Health-Colored %)
+            if presentation.museBadge != nil {
+                let sepX = currentX + 3.5
+                let sepRect = NSRect(x: sepX, y: (h - 7.0) / 2.0, width: 1.0, height: 7.0)
+                let sepPath = NSBezierPath(roundedRect: sepRect, xRadius: 0.5, yRadius: 0.5)
+                NSColor.labelColor.withAlphaComponent(0.22).setFill()
+                sepPath.fill()
+                currentX = sepX + 1.0 + 3.5
+
+                if let museSym = museSymbolImg {
+                    let iconY = (h - museSym.size.height) / 2.0
+                    museSym.draw(in: NSRect(x: currentX, y: iconY, width: museSym.size.width, height: museSym.size.height))
+                    currentX += museSym.size.width + 2.0
+                }
+
+                museTextStr.draw(at: NSPoint(x: currentX, y: textY), withAttributes: museAttributes)
+                currentX += museTextSize.width
+            }
+
             return true
         }
         img.isTemplate = false
@@ -770,7 +885,12 @@ public func makeAntigravityImage(
     spendAmount: Double = 0.0,
     gcpTodayCost: Double? = nil,
     gcpTotalCost: Double? = nil,
-    todayCost: Double? = nil
+    todayCost: Double? = nil,
+    showMuseBadge: Bool = false,
+    museRemainingFraction: Double? = nil,
+    musePercentUsed: Double? = nil,
+    museResetShortText: String? = nil,
+    museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent
 ) -> NSImage {
     AgyMenuBarRenderer.makeAntigravityImage(
         queriesToday: queriesToday,
@@ -792,7 +912,12 @@ public func makeAntigravityImage(
         spendAmount: spendAmount,
         gcpTodayCost: gcpTodayCost,
         gcpTotalCost: gcpTotalCost,
-        todayCost: todayCost
+        todayCost: todayCost,
+        showMuseBadge: showMuseBadge,
+        museRemainingFraction: museRemainingFraction,
+        musePercentUsed: musePercentUsed,
+        museResetShortText: museResetShortText,
+        museDisplayStyle: museDisplayStyle
     )
 }
 

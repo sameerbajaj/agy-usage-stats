@@ -14,10 +14,13 @@ struct SettingsTabView: View {
     @State private var tempDir = ""
     
     @State private var isHoveredQuota = false
+    @State private var isHoveredMuse = false
     @State private var isHoveredAccounts = false
     @State private var isHoveredSpend = false
     @State private var isHoveredAppearance = false
     @State private var isHoveredSystem = false
+    @State private var isEditingMuseCookie = false
+    @State private var draftMuseCookie = ""
     
     private var theme: ThemeColors { ThemeColors.colors(for: viewModel.selectedTheme, colorScheme: colorScheme) }
     
@@ -61,6 +64,9 @@ struct SettingsTabView: View {
                 VStack(spacing: 14) {
                     // Live Menu Bar Preview Mini-Card
                     menuBarPreviewSection
+
+                    // Muse (muse.ai) Tracking & Menu Bar
+                    museTrackingSection
 
                     // Subscription Accounts & Credit Status
                     subscriptionAccountsSection
@@ -117,6 +123,195 @@ struct SettingsTabView: View {
             }
             .padding(.vertical, 8)
             .themedCardStyle(theme: theme, isHovered: false)
+        }
+    }
+
+    // MARK: - Muse (muse.ai) Tracking
+    private var museTrackingSection: some View {
+        let museAccent = Color(red: 0.45, green: 0.42, blue: 1.0)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("muse (muse.ai) tracking")
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(theme.textSecondary)
+                Spacer()
+                if viewModel.showMuseTracking {
+                    if let q = viewModel.museQuota {
+                        Text(String(format: "%@ · %.0f%% left", q.shortPlanBadge, q.remainingPercent))
+                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(museAccent)
+                    } else if viewModel.isRefreshingMuse {
+                        Text("syncing…")
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+
+            VStack(spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Track Muse (muse.ai)")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Show Muse tab & track weekly limit + exact reset time")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showMuseTracking.animation(.easeInOut(duration: 0.2)))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+
+                if viewModel.showMuseTracking {
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show Muse in Menu Bar")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Display Muse weekly % badge alongside AGY icon")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $viewModel.showMuseInMenuBar.animation(.easeInOut(duration: 0.2)))
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                    }
+
+                    if viewModel.showMuseInMenuBar {
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Menu Bar Format")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Metric shown next to sparkles icon")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Picker("", selection: $viewModel.museMenuBarDisplayStyle) {
+                                ForEach(MuseMenuBarDisplayStyle.allCases) { style in
+                                    Text(style.rawValue).tag(style)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
+                        }
+                    }
+
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            let isManual = !viewModel.museManualCookieHeader.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            Text(isManual ? "Session: Manual Cookie" : "Session: Auto (Brave / agentcookie)")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.8))
+
+                            Text(museStatusCaption)
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                                .lineLimit(2)
+                        }
+
+                        Spacer()
+
+                        Button(isEditingMuseCookie ? "Done" : "Cookie") {
+                            if isEditingMuseCookie {
+                                isEditingMuseCookie = false
+                            } else {
+                                draftMuseCookie = viewModel.museManualCookieHeader
+                                isEditingMuseCookie = true
+                            }
+                        }
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(theme.textSecondary)
+                        .buttonStyle(.plain)
+
+                        Button {
+                            Task {
+                                await viewModel.refreshMuseQuota(forceRefresh: true)
+                            }
+                        } label: {
+                            if viewModel.isRefreshingMuse {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Text("Sync")
+                                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                                    .foregroundStyle(museAccent)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.isRefreshingMuse)
+                    }
+
+                    if isEditingMuseCookie {
+                        VStack(alignment: .leading, spacing: 5) {
+                            TextField("Optional manual Cookie header (leave empty for Auto)", text: $draftMuseCookie)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .controlSize(.small)
+
+                            HStack(spacing: 8) {
+                                Button("Save & Sync") {
+                                    viewModel.museManualCookieHeader = draftMuseCookie
+                                    MuseQuotaService.clearCache(clearCookie: true)
+                                    isEditingMuseCookie = false
+                                    Task { await viewModel.refreshMuseQuota(forceRefresh: true) }
+                                }
+                                .font(.system(size: 9, weight: .bold))
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.mini)
+
+                                if !viewModel.museManualCookieHeader.isEmpty {
+                                    Button("Clear (Use Auto)") {
+                                        draftMuseCookie = ""
+                                        viewModel.museManualCookieHeader = ""
+                                        MuseQuotaService.clearCache(clearCookie: true)
+                                        isEditingMuseCookie = false
+                                        Task { await viewModel.refreshMuseQuota(forceRefresh: true) }
+                                    }
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(theme.textSecondary)
+                                    .buttonStyle(.plain)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .themedCardStyle(theme: theme, isHovered: isHoveredMuse)
+            .onHover { h in isHoveredMuse = h }
+        }
+    }
+
+    private var museStatusCaption: String {
+        switch viewModel.museFetchStatus {
+        case .connected:
+            if let q = viewModel.museQuota, let cd = q.compactCountdown() {
+                return "Connected · resets in \(cd)"
+            }
+            return "Connected to muse.ai"
+        case .loading:
+            return "Fetching latest usage from muse.ai…"
+        case .idle:
+            return "Ready to sync from Brave session"
+        case .missingSession(let msg), .sessionExpired(let msg), .error(let msg):
+            return msg
         }
     }
 
@@ -280,6 +475,24 @@ struct SettingsTabView: View {
                 .padding(.horizontal, 4)
 
             VStack(spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show GCP Tab")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Include GCP cloud billing tab in the top bar")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showGcpTab.animation(.easeInOut(duration: 0.2)))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Show Spend in Menu Bar")

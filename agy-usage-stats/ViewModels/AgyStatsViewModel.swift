@@ -100,6 +100,14 @@ public enum MenuBarSpendSource: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+public enum MuseMenuBarDisplayStyle: String, Codable, CaseIterable, Identifiable {
+    case remainingPercent = "Remaining %"
+    case usedPercent = "Used %"
+    case remainingAndReset = "Remaining + Reset"
+
+    public var id: String { rawValue }
+}
+
 public struct WeeklyLimitInfo {
     public let remainingFraction: Double?
     public let resetTimeDescription: String?
@@ -138,6 +146,7 @@ public struct SubscriptionAccountSummary: Identifiable, Equatable {
 
 public enum AccountTabItem: Identifiable, Equatable {
     case subscription(email: String, label: String, tierBadge: String?, isActive: Bool)
+    case muse
     case gcp(project: String)
     case all
 
@@ -145,6 +154,8 @@ public enum AccountTabItem: Identifiable, Equatable {
         switch self {
         case .subscription(let email, _, _, _):
             return "sub:\(email.lowercased())"
+        case .muse:
+            return "muse"
         case .gcp:
             return "gcp"
         case .all:
@@ -232,6 +243,44 @@ public final class AgyStatsViewModel {
             userDefaults.set(showAllAccountTab, forKey: "agy_showAllAccountTab")
         }
     }
+
+    public var showGcpTab: Bool {
+        didSet {
+            userDefaults.set(showGcpTab, forKey: "agy_showGcpTab")
+        }
+    }
+
+    public var showMuseTracking: Bool {
+        didSet {
+            userDefaults.set(showMuseTracking, forKey: "agy_showMuseTracking")
+            if showMuseTracking {
+                Task { await refreshMuseQuota(forceRefresh: false) }
+            }
+        }
+    }
+
+    public var showMuseInMenuBar: Bool {
+        didSet {
+            userDefaults.set(showMuseInMenuBar, forKey: "agy_showMuseInMenuBar")
+        }
+    }
+
+    public var museMenuBarDisplayStyle: MuseMenuBarDisplayStyle {
+        didSet {
+            userDefaults.set(museMenuBarDisplayStyle.rawValue, forKey: "agy_museMenuBarDisplayStyle")
+        }
+    }
+
+    public var museManualCookieHeader: String {
+        didSet {
+            userDefaults.set(museManualCookieHeader, forKey: "agy_museManualCookieHeader")
+        }
+    }
+
+    public var museQuota: MuseQuotaInfo? = nil
+    public var museFetchStatus: MuseFetchStatus = .idle
+    public var isRefreshingMuse: Bool = false
+    private var lastMuseRefreshAt: Date? = nil
     
     public var selectedTheme: AppTheme {
         didSet {
@@ -689,7 +738,10 @@ public final class AgyStatsViewModel {
 
     public var primaryAccountTabs: [AccountTabItem] {
         var tabs = partitionedSubscriptionTabs.primary
-        if stats.gcpTotalCost > 0 || stats.gcpTodayCost > 0 || gcpCreditPool > 0 || stats.isGcpActive {
+        if showMuseTracking {
+            tabs.append(.muse)
+        }
+        if showGcpTab && (stats.gcpTotalCost > 0 || stats.gcpTodayCost > 0 || gcpCreditPool > 0 || stats.isGcpActive) {
             tabs.append(.gcp(project: stats.gcpProject ?? "clawdbot-485304"))
         }
         if showAllAccountTab || tabs.isEmpty {
@@ -790,6 +842,33 @@ public final class AgyStatsViewModel {
         } else {
             self.showAllAccountTab = true
         }
+
+        if userDefaults.object(forKey: "agy_showGcpTab") != nil {
+            self.showGcpTab = userDefaults.bool(forKey: "agy_showGcpTab")
+        } else {
+            self.showGcpTab = true
+        }
+
+        if userDefaults.object(forKey: "agy_showMuseTracking") != nil {
+            self.showMuseTracking = userDefaults.bool(forKey: "agy_showMuseTracking")
+        } else {
+            self.showMuseTracking = true
+        }
+
+        if userDefaults.object(forKey: "agy_showMuseInMenuBar") != nil {
+            self.showMuseInMenuBar = userDefaults.bool(forKey: "agy_showMuseInMenuBar")
+        } else {
+            self.showMuseInMenuBar = true
+        }
+
+        if let savedMuseStyle = userDefaults.string(forKey: "agy_museMenuBarDisplayStyle"),
+           let parsedMuseStyle = MuseMenuBarDisplayStyle(rawValue: savedMuseStyle) {
+            self.museMenuBarDisplayStyle = parsedMuseStyle
+        } else {
+            self.museMenuBarDisplayStyle = .remainingPercent
+        }
+
+        self.museManualCookieHeader = userDefaults.string(forKey: "agy_museManualCookieHeader") ?? ""
         
         let savedTheme = userDefaults.string(forKey: "agy_selectedTheme")
         if let savedTheme, let theme = AppTheme(rawValue: savedTheme) {
@@ -897,6 +976,10 @@ public final class AgyStatsViewModel {
             if let email = persistedQuota.email, !email.isEmpty, !AgyQuotaService.isSyntheticTestEmail(email) {
                 self.activeConsumerEmail = email
             }
+        }
+        if let persistedMuse = MuseQuotaService.loadPersistedQuota(userDefaults: userDefaults) {
+            self.museQuota = persistedMuse
+            self.museFetchStatus = .connected
         }
         reconcileDismissedConsumerEmails()
     }
@@ -1310,6 +1393,8 @@ public final class AgyStatsViewModel {
             }
         }
 
+        let activeMuseQuota = (showMuseTracking && showMuseInMenuBar) ? museQuota?.normalizedForCurrentTime() : nil
+
         return AgyMenuBarRenderer.makeAntigravityImage(
             queriesToday: stats.queriesToday,
             litColor: color,
@@ -1330,7 +1415,12 @@ public final class AgyStatsViewModel {
             spendAmount: menuBarSpendAmount,
             gcpTodayCost: stats.gcpTodayCost,
             gcpTotalCost: stats.gcpTotalCost,
-            todayCost: stats.todayCostEstimate
+            todayCost: stats.todayCostEstimate,
+            showMuseBadge: activeMuseQuota != nil,
+            museRemainingFraction: activeMuseQuota?.remainingFraction,
+            musePercentUsed: activeMuseQuota?.percentUsed,
+            museResetShortText: activeMuseQuota?.ultraCompactCountdown(),
+            museDisplayStyle: museMenuBarDisplayStyle
         )
     }
 
@@ -1446,6 +1536,9 @@ public final class AgyStatsViewModel {
         // Initial load
         Task {
             await refresh()
+            if showMuseTracking {
+                await refreshMuseQuota(forceRefresh: false)
+            }
             await checkForUpdates()
         }
     }
@@ -1467,12 +1560,47 @@ public final class AgyStatsViewModel {
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.refreshQuotaOnly()
+                if let self, self.showMuseTracking {
+                    let shouldPollMuse = self.lastMuseRefreshAt.map { Date().timeIntervalSince($0) >= 300.0 } ?? true
+                    if shouldPollMuse {
+                        await self.refreshMuseQuota(forceRefresh: false)
+                    }
+                }
                 self?.scheduleAdaptiveQuotaPolling()
             }
         }
         timer.tolerance = 5.0
         RunLoop.main.add(timer, forMode: .common)
         quotaPollingTimer = timer
+    }
+
+    public func refreshMuseQuota(forceRefresh: Bool = false) async {
+        let (enabled, manualCookie, alreadyRunning) = await MainActor.run { () -> (Bool, String, Bool) in
+            guard !isRefreshingMuse else { return (showMuseTracking, museManualCookieHeader, true) }
+            if showMuseTracking {
+                isRefreshingMuse = true
+                if museQuota == nil {
+                    museFetchStatus = .loading
+                }
+            }
+            return (showMuseTracking, museManualCookieHeader, false)
+        }
+        guard enabled, !alreadyRunning else { return }
+
+        let result = await MuseQuotaService.fetchUsage(
+            forceRefresh: forceRefresh,
+            manualCookieHeader: manualCookie,
+            userDefaults: userDefaults
+        )
+
+        await MainActor.run {
+            self.lastMuseRefreshAt = Date()
+            if let q = result.quota {
+                self.museQuota = q
+            }
+            self.museFetchStatus = result.status
+            self.isRefreshingMuse = false
+        }
     }
     
     private static func emailsDiffer(_ a: String?, _ b: String?) -> Bool {

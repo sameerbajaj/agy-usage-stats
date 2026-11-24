@@ -982,4 +982,170 @@ public enum MenuBarAccountTarget: String, Codable, CaseIterable, Identifiable {
     public var id: String { rawValue }
 }
 
+// MARK: - Muse (muse.ai) Quota Models
+
+nonisolated public enum MuseFetchStatus: Equatable, Sendable {
+    case idle
+    case loading
+    case connected
+    case missingSession(String)
+    case sessionExpired(String)
+    case error(String)
+}
+
+nonisolated public struct MuseQuotaInfo: Codable, Equatable, Hashable, Sendable {
+    public let planName: String
+    public let subscriptionType: String
+    public let percentUsed: Double
+    public let resetsAt: Date?
+    public let statusSubtitle: String?
+    public let usageRowLabel: String?
+    public let usageRowValueLabel: String?
+    public let quotaStatus: String?
+    public let topupRowLabel: String?
+    public let topupRowValueLabel: String?
+    public let topupBalance: Double?
+    public let topupTotal: Double?
+    public let renewsAt: Date?
+    public let lastUpdated: Date
+
+    public init(
+        planName: String,
+        subscriptionType: String,
+        percentUsed: Double,
+        resetsAt: Date? = nil,
+        statusSubtitle: String? = nil,
+        usageRowLabel: String? = nil,
+        usageRowValueLabel: String? = nil,
+        quotaStatus: String? = nil,
+        topupRowLabel: String? = nil,
+        topupRowValueLabel: String? = nil,
+        topupBalance: Double? = nil,
+        topupTotal: Double? = nil,
+        renewsAt: Date? = nil,
+        lastUpdated: Date = Date()
+    ) {
+        self.planName = planName
+        self.subscriptionType = subscriptionType
+        self.percentUsed = min(100.0, max(0.0, percentUsed))
+        self.resetsAt = resetsAt
+        self.statusSubtitle = statusSubtitle
+        self.usageRowLabel = usageRowLabel
+        self.usageRowValueLabel = usageRowValueLabel
+        self.quotaStatus = quotaStatus
+        self.topupRowLabel = topupRowLabel
+        self.topupRowValueLabel = topupRowValueLabel
+        self.topupBalance = topupBalance
+        self.topupTotal = topupTotal
+        self.renewsAt = renewsAt
+        self.lastUpdated = lastUpdated
+    }
+
+    public var remainingFraction: Double {
+        max(0.0, min(1.0, (100.0 - percentUsed) / 100.0))
+    }
+
+    public var remainingPercent: Double {
+        remainingFraction * 100.0
+    }
+
+    public var shortPlanBadge: String {
+        let lower = "\(subscriptionType) \(planName)".lowercased()
+        if lower.contains("maximum") || lower.contains("max") { return "MAX" }
+        if lower.contains("power") { return "POWER" }
+        if lower.contains("free") { return "FREE" }
+        return subscriptionType.uppercased()
+    }
+
+    public var topupRemainingFraction: Double? {
+        guard let balance = topupBalance, let total = topupTotal, total > 0 else { return nil }
+        return max(0.0, min(1.0, balance / total))
+    }
+
+    public var topupTokensLeftText: String? {
+        if let extracted = Self.extractTokensLeft(from: topupRowValueLabel) {
+            return extracted
+        }
+        if let label = topupRowValueLabel, !label.isEmpty {
+            return label
+        }
+        if let balance = topupBalance, balance > 0 {
+            return String(format: "$%.2f left", balance / 1_000_000.0)
+        }
+        return nil
+    }
+
+    public var weeklyTokensLeftText: String? {
+        Self.extractTokensLeft(from: usageRowValueLabel)
+    }
+
+    public func compactCountdown(now: Date = Date()) -> String? {
+        guard let resetsAt else { return nil }
+        let diff = resetsAt.timeIntervalSince(now)
+        guard diff > 0 else { return "Resetting…" }
+        let totalMinutes = Int(diff) / 60
+        let days = totalMinutes / (24 * 60)
+        let hours = (totalMinutes % (24 * 60)) / 60
+        let minutes = totalMinutes % 60
+        if days > 0 {
+            return "\(days)d \(hours)h"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(max(1, minutes))m"
+        }
+    }
+
+    public func ultraCompactCountdown(now: Date = Date()) -> String? {
+        guard let resetsAt else { return nil }
+        let diff = resetsAt.timeIntervalSince(now)
+        guard diff > 0 else { return "now" }
+        let totalMinutes = Int(diff) / 60
+        let days = totalMinutes / (24 * 60)
+        let hours = (totalMinutes % (24 * 60)) / 60
+        if days > 0 {
+            return "\(days)d"
+        } else if hours > 0 {
+            return "\(hours)h"
+        } else {
+            return "\(max(1, totalMinutes))m"
+        }
+    }
+
+    public func normalizedForCurrentTime(now: Date = Date()) -> MuseQuotaInfo {
+        guard let resetsAt, resetsAt <= now, percentUsed > 0 else {
+            return self
+        }
+        return MuseQuotaInfo(
+            planName: planName,
+            subscriptionType: subscriptionType,
+            percentUsed: 0.0,
+            resetsAt: nil,
+            statusSubtitle: "Weekly limit reset",
+            usageRowLabel: usageRowLabel,
+            usageRowValueLabel: "0% used",
+            quotaStatus: quotaStatus,
+            topupRowLabel: topupRowLabel,
+            topupRowValueLabel: topupRowValueLabel,
+            topupBalance: topupBalance,
+            topupTotal: topupTotal,
+            renewsAt: renewsAt,
+            lastUpdated: lastUpdated
+        )
+    }
+
+    private static func extractTokensLeft(from label: String?) -> String? {
+        guard let label,
+              let regex = try? NSRegularExpression(pattern: #"\(([^()]+ tokens left)\)"#) else {
+            return nil
+        }
+        let ns = label as NSString
+        guard let match = regex.firstMatch(in: label, range: NSRange(location: 0, length: ns.length)),
+              match.numberOfRanges > 1 else {
+            return nil
+        }
+        return ns.substring(with: match.range(at: 1))
+    }
+}
+
 

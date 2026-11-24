@@ -78,6 +78,9 @@ public struct MenuBarPopover: View {
             viewModel.setup()
             Task {
                 await viewModel.refreshQuotaOnly(forceRefresh: false)
+                if viewModel.showMuseTracking {
+                    await viewModel.refreshMuseQuota(forceRefresh: false)
+                }
             }
         }
     }
@@ -101,7 +104,7 @@ public struct MenuBarPopover: View {
                         .font(.system(size: 11.5, weight: .black, design: .monospaced))
                         .foregroundStyle(theme.textPrimary)
                     
-                    Text("usage stats")
+                    Text(viewModel.showMuseTracking ? "· muse stats" : "usage stats")
                         .font(.system(size: 11.5, weight: .light, design: .monospaced))
                         .foregroundStyle(theme.textSecondary)
                 }
@@ -110,7 +113,7 @@ public struct MenuBarPopover: View {
                 
                 // Refresh & Settings Gear controls
                 HStack(spacing: 4) {
-                    if viewModel.isRefreshing {
+                    if viewModel.isRefreshing || viewModel.isRefreshingMuse {
                         ProgressView()
                             .controlSize(.mini)
                             .frame(width: 24, height: 24)
@@ -118,6 +121,9 @@ public struct MenuBarPopover: View {
                         Button {
                             Task {
                                 await viewModel.refresh()
+                                if viewModel.showMuseTracking {
+                                    await viewModel.refreshMuseQuota(forceRefresh: true)
+                                }
                             }
                         } label: {
                             Image(systemName: "arrow.clockwise")

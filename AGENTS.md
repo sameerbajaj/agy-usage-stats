@@ -90,6 +90,12 @@ Context and operational guidelines for agentic development on **agy-usage-stats*
    - `AgyFileWatcher` watches `<cliDir>/log`, `cli.log` target, and `antigravity-oauth-token` via kqueue so `/login` refreshes `AgyStatsViewModel.activeConsumerEmail` and the UI within `<500ms`.
    - `SettingsTabView` & `OverviewTabView` surface per-account credit/usage differentiation (`SubscriptionAccountSummary`, `GOOGLE_ONE_AI` peak-delta credits, per-account credit pools, and single-email Subscription pill filtering with cached snapshots).
 
+11. **Muse (`muse.ai`) Tracking & Optional GCP Toggle**:
+   - `MuseQuotaService` (`nonisolated`, zero locks across `await`) fetches Meta Muse weekly usage, exact `resetsAt` timestamp, plan tier, renewal date, and non-expiring additional/top-up tokens via `POST https://muse.ai/` (`fetchSubscriptionAction` Next.js Server Action) using `Sec-Fetch-*` + `Accept: text/x-component` headers and React Flight row parsing.
+   - Caches the `Next-Action` ID in `UserDefaults` (`agy_museActionId`) and automatically rediscovers it from `/_next/static/(immutable/)?chunks/*.js` on `400/404/409` redeploys (without sending cookies to static chunks).
+   - Resolves browser session cookies automatically off-main-thread via `agentcookie cookies --domain muse.ai` (30-min in-memory cache with 1x auto-refresh on 401/403/auth redirect) or an optional manual `Cookie:` header override in Settings.
+   - Independently toggleable via `showMuseTracking`, `showMuseInMenuBar` (`Remaining %`, `Used %`, `Remaining + Reset` rendered via CoreGraphics `sparkles` badge in `AgyMenuBarRenderer`), and `showGcpTab` (so users can replace GCP with Muse in both the top tab bar and menu bar).
+
 ## Release & Deployment Workflow
 
 To publish updates and install the official build without triggering update banners:

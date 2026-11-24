@@ -9,6 +9,7 @@ import SwiftUI
 
 public struct OverviewTabView: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.openURL) private var openURL
     let viewModel: AgyStatsViewModel
 
     public enum CostTimeframe: String, CaseIterable, Identifiable {
@@ -31,6 +32,7 @@ public struct OverviewTabView: View {
 
     private enum ResolvedTabSelection {
         case subscription(SubscriptionAccountSummary)
+        case muse
         case gcp(project: String)
         case all
     }
@@ -39,6 +41,18 @@ public struct OverviewTabView: View {
     @AppStorage("agy_selectedAccountTabId") private var selectedAccountTabId: String = "auto"
     @State private var selectedBucketId: String? = nil
     @State private var hoveredBucketId: String? = nil
+
+    private static let museResetDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE, MMM d 'at' h:mm a zzz"
+        return f
+    }()
+
+    private static let museRenewDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, yyyy"
+        return f
+    }()
 
     private static let weekdayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -318,7 +332,10 @@ public struct OverviewTabView: View {
 
         let selection: ResolvedTabSelection
         let accountFilter: AccountFilter
-        if activeId == "gcp" {
+        if activeId == "muse" && viewModel.showMuseTracking {
+            selection = .muse
+            accountFilter = .all
+        } else if activeId == "gcp" {
             selection = .gcp(project: viewModel.stats.gcpProject ?? "clawdbot-485304")
             accountFilter = .gcp
         } else if activeId.hasPrefix("sub:") {
@@ -383,6 +400,12 @@ public struct OverviewTabView: View {
             }
             tokens = metrics.tokens
             breakdown = metrics.modelBreakdown
+
+        case .muse:
+            cost = 0
+            tokens = 0
+            queries = 0
+            breakdown = [:]
 
         case .gcp:
             if let pinned {
@@ -533,6 +556,8 @@ public struct OverviewTabView: View {
                     switch snapshot.selection {
                     case .subscription(let summary):
                         subscriptionTabBody(summary: summary, snapshot: snapshot)
+                    case .muse:
+                        museTabBody()
                     case .gcp(let project):
                         gcpTabBody(project: project, snapshot: snapshot)
                     case .all:
@@ -574,6 +599,10 @@ public struct OverviewTabView: View {
                                 Circle()
                                     .fill(theme.costGreen)
                                     .frame(width: 5, height: 5)
+                            } else if case .muse = tab {
+                                Circle()
+                                    .fill(Color(red: 0.45, green: 0.42, blue: 1.0))
+                                    .frame(width: 5, height: 5)
                             }
                             Text(tabLabel(for: tab))
                                 .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium, design: .rounded))
@@ -605,6 +634,28 @@ public struct OverviewTabView: View {
                                 }
                             } label: {
                                 Label("Hide from top bar", systemImage: "eye.slash")
+                            }
+                        } else if case .muse = tab {
+                            Button {
+                                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                                    viewModel.showMuseTracking = false
+                                    if selectedAccountTabId == "muse" {
+                                        selectedAccountTabId = "auto"
+                                    }
+                                }
+                            } label: {
+                                Label("Hide 'Muse' tab", systemImage: "eye.slash")
+                            }
+                        } else if case .gcp = tab {
+                            Button {
+                                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                                    viewModel.showGcpTab = false
+                                    if selectedAccountTabId == "gcp" {
+                                        selectedAccountTabId = "auto"
+                                    }
+                                }
+                            } label: {
+                                Label("Hide 'GCP' tab", systemImage: "eye.slash")
                             }
                         } else if case .all = tab, tabs.count > 1 {
                             Button {
@@ -715,6 +766,8 @@ public struct OverviewTabView: View {
         switch tab {
         case .subscription(_, let label, _, _):
             return label
+        case .muse:
+            return "Muse"
         case .gcp:
             return "GCP"
         case .all:
@@ -1036,6 +1089,358 @@ public struct OverviewTabView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
+        }
+        .themedCardStyle(theme: theme)
+    }
+
+    // MARK: - Case 1b: Muse (muse.ai) Tab View
+
+    @ViewBuilder
+    private func museTabBody() -> some View {
+        let museAccent = Color(red: 0.45, green: 0.42, blue: 1.0)
+        let quota = viewModel.museQuota?.normalizedForCurrentTime()
+
+        VStack(spacing: 0) {
+            // Identity Header Row
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(museAccent)
+
+                Text(quota?.planName ?? "Muse (muse.ai)")
+                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+
+                if let quota {
+                    pillBadge(quota.shortPlanBadge, foreground: museAccent, background: museAccent.opacity(0.14))
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    if let url = URL(string: "https://muse.ai/?settings_tab=general") {
+                        openURL(url)
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("muse.ai")
+                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundStyle(theme.textSecondary)
+                    .padding(.horizontal, 6.5)
+                    .padding(.vertical, 2.5)
+                    .background(Capsule().fill(theme.surfaceSecondary))
+                    .overlay(Capsule().stroke(theme.cardStroke, lineWidth: 0.6))
+                }
+                .buttonStyle(.plain)
+                .help("Open Muse usage settings in browser")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+
+            Rectangle().fill(theme.divider).frame(height: 1)
+
+            if let quota {
+                // Weekly Allowance Section
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(museAccent)
+                            .frame(width: 6, height: 6)
+                        Text("Weekly Allowance")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(theme.textPrimary)
+                        Spacer()
+                        Text(String(format: "%.0f%% used", quota.percentUsed))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+
+                    HStack(spacing: 8) {
+                        Text("Left")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: 34, alignment: .leading)
+
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(theme.progressTrack)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(healthColor(for: quota.remainingFraction))
+                                    .frame(width: max(0, geo.size.width * CGFloat(quota.remainingFraction)))
+                            }
+                        }
+                        .frame(height: 6)
+
+                        Text(String(format: "%.0f%%", quota.remainingPercent))
+                            .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(healthColor(for: quota.remainingFraction))
+                            .frame(width: 36, alignment: .trailing)
+
+                        if let countdown = quota.compactCountdown() {
+                            Text(countdown)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(theme.textPrimary)
+                                .frame(width: 66, alignment: .trailing)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    // Exact Reset Date/Time + Paid Tokens Left
+                    VStack(alignment: .leading, spacing: 3) {
+                        if let resetsAt = quota.resetsAt {
+                            HStack(spacing: 5) {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .foregroundStyle(theme.textSecondary)
+                                Text("Resets \(Self.museResetDateFormatter.string(from: resetsAt))")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.9))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                        } else if let subtitle = quota.statusSubtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+
+                        if let tokensLeft = quota.weeklyTokensLeftText {
+                            Text("Weekly pool: \(tokensLeft)")
+                                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+                // Additional / Top-Up Tokens Section
+                if let topupFrac = quota.topupRemainingFraction, let topupText = quota.topupTokensLeftText {
+                    Rectangle().fill(theme.divider).frame(height: 1)
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(theme.costGreen)
+                                .frame(width: 6, height: 6)
+                            Text(quota.topupRowLabel ?? "Additional Tokens")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(theme.textPrimary)
+                            Spacer()
+                            pillBadge("NEVER EXPIRES", foreground: theme.costGreen, background: theme.costGreen.opacity(0.12))
+                        }
+
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(theme.progressTrack)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(theme.costGreen)
+                                    .frame(width: max(0, geo.size.width * CGFloat(topupFrac)))
+                            }
+                        }
+                        .frame(height: 5.5)
+
+                        HStack {
+                            Text(quota.topupRowValueLabel ?? topupText)
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary)
+                            Spacer()
+                            Text(String(format: "%.0f%% left", topupFrac * 100.0))
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.costGreen)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                }
+
+                // Footer: Renewal, Updated Time, Sync Button, Warning if stale
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    if case .sessionExpired(let msg) = viewModel.museFetchStatus {
+                        HStack(spacing: 5) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(theme.claudeAccent)
+                            Text(msg)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(theme.claudeAccent)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else if case .error(let msg) = viewModel.museFetchStatus {
+                        HStack(spacing: 5) {
+                            Image(systemName: "exclamationmark.circle")
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(theme.textSecondary)
+                            Text(msg)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(theme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        if let renewsAt = quota.renewsAt {
+                            Text("Renews \(Self.museRenewDateFormatter.string(from: renewsAt))")
+                                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(theme.textSecondary)
+                        } else {
+                            let rel = Self.snapshotRelativeFormatter.localizedString(for: quota.lastUpdated, relativeTo: Date())
+                            Text("Synced \(rel)")
+                                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(theme.textTertiary)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            Task {
+                                await viewModel.refreshMuseQuota(forceRefresh: true)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                if viewModel.isRefreshingMuse {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 9, weight: .bold))
+                                }
+                                Text("Refresh")
+                                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(museAccent)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.isRefreshingMuse)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            } else {
+                // Loading / Missing Session / Error Empty State
+                VStack(alignment: .leading, spacing: 8) {
+                    switch viewModel.museFetchStatus {
+                    case .loading, .idle:
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Syncing live usage from muse.ai…")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                    case .missingSession(let msg), .sessionExpired(let msg), .error(let msg):
+                        Text(msg)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    case .connected:
+                        Text("No Muse usage data yet.")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button {
+                            Task {
+                                await viewModel.refreshMuseQuota(forceRefresh: true)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("Retry Sync")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(museAccent)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4.5)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(museAccent.opacity(0.14)))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.isRefreshingMuse)
+
+                        Button {
+                            if let url = URL(string: "https://muse.ai") {
+                                openURL(url)
+                            }
+                        } label: {
+                            Text("Sign in at muse.ai")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundStyle(theme.textSecondary)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4.5)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(theme.surfaceSecondary))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+            }
+        }
+        .themedCardStyle(theme: theme)
+
+        // Quick Menu Bar Display Controls Card
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show Muse in Menu Bar")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(theme.textPrimary)
+                    Text("Display Muse weekly status next to AGY icon")
+                        .font(.system(size: 9, weight: .regular))
+                        .foregroundStyle(theme.textSecondary)
+                }
+                Spacer()
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { viewModel.showMuseInMenuBar },
+                        set: { viewModel.showMuseInMenuBar = $0 }
+                    )
+                )
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+
+            if viewModel.showMuseInMenuBar {
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                HStack {
+                    Text("Menu Bar Format")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                    Spacer()
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { viewModel.museMenuBarDisplayStyle },
+                            set: { viewModel.museMenuBarDisplayStyle = $0 }
+                        )
+                    ) {
+                        ForEach(MuseMenuBarDisplayStyle.allCases) { style in
+                            Text(style.rawValue).tag(style)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
         }
         .themedCardStyle(theme: theme)
     }
