@@ -226,6 +226,12 @@ public final class AgyStatsViewModel {
             userDefaults.set(showCostSummary, forKey: "agy_showCostSummary")
         }
     }
+
+    public var showAllAccountTab: Bool {
+        didSet {
+            userDefaults.set(showAllAccountTab, forKey: "agy_showAllAccountTab")
+        }
+    }
     
     public var selectedTheme: AppTheme {
         didSet {
@@ -334,8 +340,11 @@ public final class AgyStatsViewModel {
     private var accountCreditPools: [String: Double] = [:]
     private var accountCreditBaselineTimestamps: [String: Double] = [:]
 
-    // Dismissed/hidden consumer accounts (persisted, auto-restored if active or accruing new today spend > $0.005)
+    // Dismissed/hidden consumer accounts:
+    // - dismissedConsumerEmails: legacy auto-dismissed unused accounts (auto-restored if active or accruing new today spend > $0.005)
+    // - hiddenConsumerEmails: explicitly hidden accounts from Settings / top bar (stays hidden even with historical/today spend; only auto-restores if user logs back into it)
     public var dismissedConsumerEmails: Set<String> = []
+    public var hiddenConsumerEmails: Set<String> = []
 
     public func dismissAccount(_ email: String) {
         let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -350,20 +359,60 @@ public final class AgyStatsViewModel {
         AgyQuotaService.removePersistedAccount(key, userDefaults: userDefaults)
     }
 
-    private func reconcileDismissedConsumerEmails() {
-        guard !dismissedConsumerEmails.isEmpty else { return }
-        var updated = dismissedConsumerEmails
+    /// Toggles visibility of a non-active subscription account in the top tab bar & Overview without losing its record in Settings.
+    public func setAccountHidden(_ hidden: Bool, for email: String) {
+        let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return }
+        if hidden {
+            if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+               active == key {
+                return
+            }
+            if hiddenConsumerEmails.insert(key).inserted {
+                userDefaults.set(Array(hiddenConsumerEmails).sorted(), forKey: "agy_hiddenConsumerEmails")
+            }
+        } else {
+            if hiddenConsumerEmails.remove(key) != nil {
+                userDefaults.set(Array(hiddenConsumerEmails).sorted(), forKey: "agy_hiddenConsumerEmails")
+            }
+            if dismissedConsumerEmails.remove(key) != nil {
+                userDefaults.set(Array(dismissedConsumerEmails).sorted(), forKey: "agy_dismissedConsumerEmails")
+            }
+        }
+    }
+
+    public func isAccountHidden(_ email: String) -> Bool {
+        let key = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !key.isEmpty else { return false }
         if let active = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-           !active.isEmpty {
-            updated.remove(active)
+           active == key {
+            return false
         }
-        for (account, cost) in stats.accountTodayTotals where cost > 0.005 {
-            let key = account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            updated.remove(key)
+        return hiddenConsumerEmails.contains(key) || dismissedConsumerEmails.contains(key)
+    }
+
+    private func reconcileDismissedConsumerEmails() {
+        let activeLower = activeConsumerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if !dismissedConsumerEmails.isEmpty {
+            var updated = dismissedConsumerEmails
+            if let active = activeLower, !active.isEmpty {
+                updated.remove(active)
+            }
+            for (account, cost) in stats.accountTodayTotals where cost > 0.005 {
+                let key = account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                updated.remove(key)
+            }
+            if updated != dismissedConsumerEmails {
+                dismissedConsumerEmails = updated
+                userDefaults.set(Array(updated).sorted(), forKey: "agy_dismissedConsumerEmails")
+            }
         }
-        if updated != dismissedConsumerEmails {
-            dismissedConsumerEmails = updated
-            userDefaults.set(Array(updated).sorted(), forKey: "agy_dismissedConsumerEmails")
+
+        if !hiddenConsumerEmails.isEmpty, let active = activeLower, !active.isEmpty {
+            if hiddenConsumerEmails.remove(active) != nil {
+                userDefaults.set(Array(hiddenConsumerEmails).sorted(), forKey: "agy_hiddenConsumerEmails")
+            }
         }
     }
 
@@ -413,7 +462,7 @@ public final class AgyStatsViewModel {
             .reduce(0.0) { $0 + $1.cost }
     }
 
-    public var subscriptionAccountSummaries: [SubscriptionAccountSummary] {
+    private func buildSubscriptionAccountSummaries(includeHidden: Bool) -> [SubscriptionAccountSummary] {
         var displayEmailByLower: [String: String] = [:]
 
         func registerEmail(_ candidate: String?) {
@@ -472,8 +521,13 @@ public final class AgyStatsViewModel {
         let summaries = displayEmailByLower.compactMap { (key, displayEmail) -> SubscriptionAccountSummary? in
             let isActive = (key == activeKey)
             let todayCost = sumDouble(stats.accountTodayTotals, key: key)
-            if dismissedConsumerEmails.contains(key) && !isActive && todayCost <= 0.005 {
-                return nil
+            if !includeHidden && !isActive {
+                if hiddenConsumerEmails.contains(key) {
+                    return nil
+                }
+                if dismissedConsumerEmails.contains(key) && todayCost <= 0.005 {
+                    return nil
+                }
             }
             let liveMatchingQuota: AgyQuotaInfo? = {
                 guard let q = stats.quotaInfo,
@@ -531,6 +585,14 @@ public final class AgyStatsViewModel {
             }
             return lhs.email.lowercased() < rhs.email.lowercased()
         }
+    }
+
+    public var subscriptionAccountSummaries: [SubscriptionAccountSummary] {
+        buildSubscriptionAccountSummaries(includeHidden: false)
+    }
+
+    public var allKnownSubscriptionAccountSummaries: [SubscriptionAccountSummary] {
+        buildSubscriptionAccountSummaries(includeHidden: true)
     }
 
     // MARK: - Option B Smart Account Tab Descriptors
@@ -630,7 +692,9 @@ public final class AgyStatsViewModel {
         if stats.gcpTotalCost > 0 || stats.gcpTodayCost > 0 || gcpCreditPool > 0 || stats.isGcpActive {
             tabs.append(.gcp(project: stats.gcpProject ?? "clawdbot-485304"))
         }
-        tabs.append(.all)
+        if showAllAccountTab || tabs.isEmpty {
+            tabs.append(.all)
+        }
         return tabs
     }
 
@@ -720,6 +784,12 @@ public final class AgyStatsViewModel {
         } else {
             self.showCostSummary = true
         }
+
+        if userDefaults.object(forKey: "agy_showAllAccountTab") != nil {
+            self.showAllAccountTab = userDefaults.bool(forKey: "agy_showAllAccountTab")
+        } else {
+            self.showAllAccountTab = true
+        }
         
         let savedTheme = userDefaults.string(forKey: "agy_selectedTheme")
         if let savedTheme, let theme = AppTheme(rawValue: savedTheme) {
@@ -805,6 +875,14 @@ public final class AgyStatsViewModel {
         if let savedDismissed = userDefaults.array(forKey: "agy_dismissedConsumerEmails") as? [String] {
             self.dismissedConsumerEmails = Set(
                 savedDismissed
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+            )
+        }
+
+        if let savedHidden = userDefaults.array(forKey: "agy_hiddenConsumerEmails") as? [String] {
+            self.hiddenConsumerEmails = Set(
+                savedHidden
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                     .filter { !$0.isEmpty }
             )

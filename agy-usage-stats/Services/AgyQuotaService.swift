@@ -239,9 +239,16 @@ public actor AgyQuotaService {
         }
     }
 
+    private struct ResetTimeObservation {
+        let resetDate: Date
+        let observedAt: Date
+        let lastDetectedStarted: Bool?
+    }
+
     private static var lastActivePort: Int? = nil
     private static var cachedQuota: CachedQuota? = nil
     private static var cachedDetectedPorts: CachedPorts? = nil
+    private static var bucketResetObservations: [String: ResetTimeObservation] = [:]
     private static let cacheTTL: TimeInterval = 4.0
     private static let nilCacheTTL: TimeInterval = 15.0
     private static let portsCacheTTL: TimeInterval = 5.0
@@ -946,6 +953,87 @@ public actor AgyQuotaService {
         return token ?? getCsrfToken()
     }
 
+    /// Compares consecutive live `resetTime` timestamps per `(email, bucketId)` so even if upstream AGY CLI
+    /// changes its wording or reports 99–100% with a floating `now + window` timestamp, forward-drifting
+    /// timestamps are automatically flagged as `isTimerStarted = false`.
+    public static func annotateTimerStates(_ info: AgyQuotaInfo, now: Date = Date()) -> AgyQuotaInfo {
+        let emailKey = normalizeEmailKey(info.email) ?? "_default"
+        let annotatedGroups: [AgyQuotaGroup] = quotaLock.withLock {
+            info.groups.map { group in
+                let annotatedBuckets = group.buckets.map { bucket -> AgyQuotaBucket in
+                    guard !bucket.disabled, let resetDate = bucket.parsedResetDate else {
+                        return bucket
+                    }
+                    let obsKey = "\(emailKey)::\(bucket.bucketId)"
+                    let frac = bucket.remainingFraction ?? 1.0
+                    var detectedStarted: Bool? = bucket.isTimerStarted
+
+                    if let prev = bucketResetObservations[obsKey] {
+                        let elapsed = now.timeIntervalSince(prev.observedAt)
+                        if elapsed >= 2.0 {
+                            let resetDelta = resetDate.timeIntervalSince(prev.resetDate)
+                            if resetDelta >= 1.5 && resetDelta <= elapsed + 15.0 && frac >= 0.98 {
+                                // `resetTime` slid forward along with wall-clock time -> window timer has not begun
+                                detectedStarted = false
+                            } else if abs(resetDelta) < 1.5 && frac < 0.999 {
+                                // `resetTime` is anchored while quota is consumed -> active countdown
+                                detectedStarted = true
+                            } else if resetDelta < -60.0 || resetDelta > elapsed + 60.0 {
+                                // Genuine window rollover/reset; clear stale state
+                                detectedStarted = nil
+                            } else {
+                                detectedStarted = prev.lastDetectedStarted
+                            }
+                            bucketResetObservations[obsKey] = ResetTimeObservation(
+                                resetDate: resetDate,
+                                observedAt: now,
+                                lastDetectedStarted: detectedStarted
+                            )
+                        } else {
+                            detectedStarted = prev.lastDetectedStarted
+                        }
+                    } else {
+                        bucketResetObservations[obsKey] = ResetTimeObservation(
+                            resetDate: resetDate,
+                            observedAt: now,
+                            lastDetectedStarted: detectedStarted
+                        )
+                    }
+
+                    guard detectedStarted != bucket.isTimerStarted else { return bucket }
+                    return AgyQuotaBucket(
+                        bucketId: bucket.bucketId,
+                        displayName: bucket.displayName,
+                        remainingFraction: bucket.remainingFraction,
+                        resetDescription: bucket.resetDescription,
+                        disabled: bucket.disabled,
+                        resetTime: bucket.resetTime,
+                        isTimerStarted: detectedStarted
+                    )
+                }
+                return AgyQuotaGroup(
+                    displayName: group.displayName,
+                    description: group.description,
+                    buckets: annotatedBuckets
+                )
+            }
+        }
+        return AgyQuotaInfo(
+            email: info.email,
+            plan: info.plan,
+            groups: annotatedGroups,
+            googleOneAiCredits: info.googleOneAiCredits,
+            minimumCreditAmountForUsage: info.minimumCreditAmountForUsage,
+            lastUpdated: info.lastUpdated
+        )
+    }
+
+    public static func resetTimerObservations() {
+        quotaLock.withLock {
+            bucketResetObservations.removeAll()
+        }
+    }
+
     private static func fetchFromPort(_ port: Int) async -> AgyQuotaInfo? {
 
         // 1. Prepare RetrieveUserQuotaSummary
@@ -1038,7 +1126,7 @@ public actor AgyQuotaService {
                 return nil
             }
 
-            let info = AgyQuotaInfo(
+            let rawInfo = AgyQuotaInfo(
                 email: email,
                 plan: plan,
                 groups: groups,
@@ -1046,6 +1134,7 @@ public actor AgyQuotaService {
                 minimumCreditAmountForUsage: minimumCreditAmountForUsage,
                 lastUpdated: now
             )
+            let info = annotateTimerStates(rawInfo, now: now)
             if normalizeEmailKey(email) != nil {
                 saveQuotaSnapshotForAccount(info)
             }

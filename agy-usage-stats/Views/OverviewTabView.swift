@@ -594,6 +594,31 @@ public struct OverviewTabView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        if case .subscription(let email, _, _, let isActive) = tab, !isActive {
+                            Button {
+                                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                                    viewModel.setAccountHidden(true, for: email)
+                                    if selectedAccountTabId == tab.id {
+                                        selectedAccountTabId = "auto"
+                                    }
+                                }
+                            } label: {
+                                Label("Hide from top bar", systemImage: "eye.slash")
+                            }
+                        } else if case .all = tab, tabs.count > 1 {
+                            Button {
+                                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                                    viewModel.showAllAccountTab = false
+                                    if selectedAccountTabId == "all" {
+                                        selectedAccountTabId = "auto"
+                                    }
+                                }
+                            } label: {
+                                Label("Hide 'All' tab", systemImage: "eye.slash")
+                            }
+                        }
+                    }
                 }
             }
             .padding(3)
@@ -639,7 +664,19 @@ public struct OverviewTabView: View {
                     .contentShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
-            .help("\(single.email) (Unused)")
+            .help("\(single.email) (Unused — right-click to hide)")
+            .contextMenu {
+                Button {
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        viewModel.setAccountHidden(true, for: single.email)
+                        if selectedAccountTabId == "sub:\(single.id)" {
+                            selectedAccountTabId = "auto"
+                        }
+                    }
+                } label: {
+                    Label("Hide \(single.email)", systemImage: "eye.slash")
+                }
+            }
         } else {
             Menu {
                 ForEach(overflow) { sub in
@@ -736,29 +773,55 @@ public struct OverviewTabView: View {
             return nil
         }()
 
+        let hasUnstartedWeeklyTimer: Bool = {
+            guard summary.isActive, let quota else { return false }
+            return quota.groups.contains { group in
+                group.buckets.contains { !$0.disabled && $0.isWeeklyBucket && $0.isWindowTimerIdle() }
+            }
+        }()
+
         return VStack(spacing: 0) {
             // Identity Header Row
             HStack(spacing: 6) {
+                Circle()
+                    .fill(summary.isActive ? theme.costGreen : theme.textTertiary.opacity(0.55))
+                    .frame(width: 6, height: 6)
+
                 Text(summary.email)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
 
                 Spacer(minLength: 4)
 
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     if let tierLabel {
                         let tierColor = tierLabel == "ULTRA" ? theme.geminiAccent : (tierLabel == "PRO" ? theme.costGreen : theme.textSecondary)
                         pillBadge(tierLabel, foreground: tierColor, background: tierColor.opacity(0.14))
                     }
 
-                    if summary.isActive {
-                        pillBadge("ACTIVE", foreground: theme.costGreen, background: theme.costGreen.opacity(0.14))
-                    } else if !summary.hasAnyHistoricalUsage {
-                        pillBadge("UNUSED", foreground: theme.textSecondary, background: theme.badgeBackground)
-                    } else {
-                        pillBadge("CACHED", foreground: theme.textSecondary, background: theme.badgeBackground)
+                    if !summary.isActive {
+                        Button {
+                            withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                                viewModel.setAccountHidden(true, for: summary.email)
+                                selectedAccountTabId = "auto"
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "eye.slash")
+                                    .font(.system(size: 8.5, weight: .semibold))
+                                Text("Hide")
+                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(theme.textSecondary)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 2.5)
+                            .background(Capsule().fill(theme.surfaceSecondary))
+                            .overlay(Capsule().stroke(theme.cardStroke, lineWidth: 0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Hide this account from the top bar (can be re-enabled in Settings)")
                     }
                 }
             }
@@ -767,34 +830,16 @@ public struct OverviewTabView: View {
 
             Rectangle().fill(theme.divider).frame(height: 1)
 
-            // Compact 2-Column Quota Grid
+            // Full-Width Stacked Quota Sections
             if let quota, !quota.groups.isEmpty {
-                let groups = quota.groups
                 VStack(spacing: 0) {
-                    ForEach(Array(stride(from: 0, to: groups.count, by: 2)), id: \.self) { startIndex in
-                        if startIndex > 0 {
+                    ForEach(Array(quota.groups.enumerated()), id: \.element.id) { index, group in
+                        if index > 0 {
                             Rectangle().fill(theme.divider).frame(height: 1)
                         }
-                        let leftGroup = groups[startIndex]
-                        let rightGroup = (startIndex + 1 < groups.count) ? groups[startIndex + 1] : nil
-
-                        HStack(alignment: .top, spacing: 0) {
-                            compactQuotaColumn(group: leftGroup)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
-
-                            if let rightGroup {
-                                Rectangle()
-                                    .fill(theme.divider)
-                                    .frame(width: 1)
-
-                                compactQuotaColumn(group: rightGroup)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 9)
-                            }
-                        }
+                        quotaGroupSection(group: group)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
                     }
                 }
             } else {
@@ -807,6 +852,23 @@ public struct OverviewTabView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
+            }
+
+            if hasUnstartedWeeklyTimer {
+                Rectangle().fill(theme.divider).frame(height: 1)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.claudeAccent)
+                    Text("Weekly reset timer hasn't started — send \"hi\" in agy to start the clock")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
             }
 
             // Optional 1-line AI Credits / Pool footer
@@ -834,64 +896,93 @@ public struct OverviewTabView: View {
         .themedCardStyle(theme: theme)
     }
 
-    private func compactQuotaColumn(group: AgyQuotaGroup) -> some View {
+    private func quotaGroupSection(group: AgyQuotaGroup) -> some View {
         let accent = compactGroupAccent(group.displayName)
         return VStack(alignment: .leading, spacing: 8) {
-            Text(compactGroupTitle(group.displayName))
-                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                .foregroundStyle(accent)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(accent)
+                    .frame(width: 6, height: 6)
+
+                Text(readableGroupTitle(group.displayName))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+
+            VStack(spacing: 7) {
+                ForEach(group.sortedBuckets) { bucket in
+                    quotaBucketRow(bucket: bucket)
+                }
+            }
+        }
+    }
+
+    private func quotaBucketRow(bucket: AgyQuotaBucket) -> some View {
+        let isIdle = bucket.isWindowTimerIdle()
+
+        return HStack(spacing: 8) {
+            Text(readableBucketLabel(bucket))
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(bucket.disabled ? theme.textTertiary : theme.textSecondary)
+                .frame(width: 46, alignment: .leading)
                 .lineLimit(1)
 
-            ForEach(group.sortedBuckets) { bucket in
-                VStack(alignment: .leading, spacing: 3.5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(compactBucketLabel(bucket))
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(bucket.disabled ? theme.textTertiary : theme.textSecondary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 4)
-
-                        if bucket.disabled {
-                            Text("—")
-                                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                                .foregroundStyle(theme.textTertiary)
-                        } else if let fraction = bucket.remainingFraction {
-                            Text(String(format: "%.2f%%", fraction * 100.0))
-                                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                                .foregroundStyle(healthColor(for: fraction))
-                        } else {
-                            Text("unlimited")
-                                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                    }
-
-                    if !bucket.disabled, let fraction = bucket.remainingFraction {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 2.5)
-                                    .fill(theme.progressTrack)
-                                RoundedRectangle(cornerRadius: 2.5)
-                                    .fill(healthColor(for: fraction))
-                                    .frame(width: max(0, geo.size.width * CGFloat(min(1.0, max(0.0, fraction)))))
-                            }
-                        }
-                        .frame(height: 4.5)
-                    }
-
-                    if bucket.disabled {
-                        Text(bucket.resetDescription ?? "Disabled")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(theme.dangerRed.opacity(0.85))
-                            .lineLimit(2)
-                    } else if let countdown = formatCompactCountdown(bucket: bucket) {
-                        Text(countdown)
-                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textTertiary)
-                            .lineLimit(1)
+            if bucket.disabled {
+                Text(bucket.resetDescription ?? "Disabled")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.dangerRed.opacity(0.9))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let fraction = bucket.remainingFraction {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(theme.progressTrack)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(healthColor(for: fraction))
+                            .frame(width: max(0, geo.size.width * CGFloat(min(1.0, max(0.0, fraction)))))
                     }
                 }
+                .frame(height: 6)
+
+                Text(String(format: "%.0f%%", fraction * 100.0))
+                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(healthColor(for: fraction))
+                    .frame(width: 36, alignment: .trailing)
+                    .help(String(format: "%.2f%% remaining", fraction * 100.0))
+
+                if isIdle {
+                    HStack(spacing: 3) {
+                        Image(systemName: "pause.circle")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Not started")
+                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(theme.claudeAccent)
+                    .frame(width: 78, alignment: .trailing)
+                    .lineLimit(1)
+                    .help("Reset clock hasn't started yet — send a quick message (e.g. \"hi\") in agy to start the countdown.")
+                } else if let countdown = formatCompactCountdown(bucket: bucket) {
+                    Text(countdown)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(width: 78, alignment: .trailing)
+                        .lineLimit(1)
+                        .help(bucket.resetDescription ?? "Resets in \(countdown)")
+                } else {
+                    Text("—")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.textTertiary)
+                        .frame(width: 78, alignment: .trailing)
+                }
+            } else {
+                Text("Unlimited")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
@@ -1566,17 +1657,17 @@ public struct OverviewTabView: View {
             .overlay(Capsule().stroke(foreground.opacity(0.28), lineWidth: 0.6))
     }
 
-    private func compactGroupTitle(_ displayName: String) -> String {
+    private func readableGroupTitle(_ displayName: String) -> String {
         let lower = displayName.lowercased()
-        if lower.contains("neon") { return "GEMINI 4 NEON" }
-        if lower.contains("hydrogen") { return "GEMINI 4 HYDROGEN" }
-        if lower.contains("carbon") { return "GEMINI 4 CARBON" }
-        if lower.contains("argon") { return "GEMINI 4 ARGON" }
-        if lower.contains("gemini") { return "GEMINI" }
+        if lower.contains("neon") { return "Gemini 4 Neon" }
+        if lower.contains("hydrogen") { return "Gemini 4 Hydrogen" }
+        if lower.contains("carbon") { return "Gemini 4 Carbon" }
+        if lower.contains("argon") { return "Gemini 4 Argon" }
+        if lower.contains("gemini") { return "Gemini" }
         if lower.contains("claude") || lower.contains("gpt") || lower.contains("anthropic") || lower.contains("openai") || lower.contains("sonnet") || lower.contains("opus") {
-            return "CLAUDE & GPT"
+            return "Claude & GPT"
         }
-        return displayName.uppercased()
+        return displayName
     }
 
     private func compactGroupAccent(_ displayName: String) -> Color {
@@ -1587,14 +1678,12 @@ public struct OverviewTabView: View {
         return theme.geminiAccent
     }
 
-    private func compactBucketLabel(_ bucket: AgyQuotaBucket) -> String {
-        let name = bucket.displayName.lowercased()
-        let id = bucket.bucketId.lowercased()
-        if name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five") {
-            return "5h"
+    private func readableBucketLabel(_ bucket: AgyQuotaBucket) -> String {
+        if bucket.isFiveHourBucket {
+            return "5-Hour"
         }
-        if name.contains("week") || id.contains("week") {
-            return "Wk"
+        if bucket.isWeeklyBucket {
+            return "Weekly"
         }
         return bucket.displayName
     }
@@ -1621,6 +1710,9 @@ public struct OverviewTabView: View {
     }
 
     private func formatCompactCountdown(bucket: AgyQuotaBucket) -> String? {
+        if bucket.isWindowTimerIdle() {
+            return nil
+        }
         if let resetTimeStr = bucket.resetTime,
            let date = AgyQuotaInfo.parseResetTime(resetTimeStr) {
             let diff = date.timeIntervalSince(Date())

@@ -2960,6 +2960,186 @@ struct agy_usage_statsTests {
         }
         await mainActorTask.value
     }
+
+    @Test func testQuotaBucketUnstartedTimerHeuristicAndDriftDetection() {
+        AgyQuotaService.resetTimerObservations()
+        defer { AgyQuotaService.resetTimerObservations() }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let t0 = Date(timeIntervalSince1970: 1_795_000_000)
+
+        // 1. Heuristic detection: 100% with nil description and floating now+5h / now+7d -> idle
+        let idle5h = AgyQuotaBucket(
+            bucketId: "3p-5h",
+            displayName: "Five Hour Limit Remaining",
+            remainingFraction: 1.0,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: iso.string(from: t0.addingTimeInterval(5 * 3600))
+        )
+        let idleWeekly = AgyQuotaBucket(
+            bucketId: "gemini-weekly",
+            displayName: "Weekly Limit Remaining",
+            remainingFraction: 0.99,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: iso.string(from: t0.addingTimeInterval(7 * 86400))
+        )
+        let active5h = AgyQuotaBucket(
+            bucketId: "gemini-5h",
+            displayName: "Five Hour Limit Remaining",
+            remainingFraction: 0.42,
+            resetDescription: "You have used some of your 5-hour limit, it will fully refresh in 1 hour, 39 minutes.",
+            disabled: false,
+            resetTime: iso.string(from: t0.addingTimeInterval(99 * 60))
+        )
+        let disabledBucket = AgyQuotaBucket(
+            bucketId: "disabled-wk",
+            displayName: "Weekly Limit Remaining",
+            remainingFraction: 0.0,
+            resetDescription: "Disabled",
+            disabled: true,
+            resetTime: nil
+        )
+
+        #expect(idle5h.isWindowTimerIdle(now: t0) == true)
+        #expect(idleWeekly.isWindowTimerIdle(now: t0) == true)
+        #expect(active5h.isWindowTimerIdle(now: t0) == false)
+        #expect(disabledBucket.isWindowTimerIdle(now: t0) == false)
+
+        // 2. Live drift detection: even when upstream adds a non-empty description and reports 99%,
+        // if resetTime slides forward with wall-clock time across consecutive polls, flag isTimerStarted = false.
+        let driftingPoll1 = AgyQuotaInfo(
+            email: "drift@acme.org",
+            plan: "Google AI Pro",
+            groups: [
+                AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+                    AgyQuotaBucket(
+                        bucketId: "gemini-weekly",
+                        displayName: "Weekly Limit Remaining",
+                        remainingFraction: 0.99,
+                        resetDescription: "Resets in 6 days, 13 hours",
+                        disabled: false,
+                        resetTime: iso.string(from: t0.addingTimeInterval(6 * 86400 + 13 * 3600))
+                    ),
+                    AgyQuotaBucket(
+                        bucketId: "gemini-5h",
+                        displayName: "Five Hour Limit Remaining",
+                        remainingFraction: 0.85,
+                        resetDescription: "Resets in 4 hours",
+                        disabled: false,
+                        resetTime: iso.string(from: t0.addingTimeInterval(4 * 3600))
+                    )
+                ])
+            ]
+        )
+        _ = AgyQuotaService.annotateTimerStates(driftingPoll1, now: t0)
+
+        let t1 = t0.addingTimeInterval(15)
+        let driftingPoll2 = AgyQuotaInfo(
+            email: "drift@acme.org",
+            plan: "Google AI Pro",
+            groups: [
+                AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+                    // resetTime advanced by +15s alongside wall clock -> unstarted!
+                    AgyQuotaBucket(
+                        bucketId: "gemini-weekly",
+                        displayName: "Weekly Limit Remaining",
+                        remainingFraction: 0.99,
+                        resetDescription: "Resets in 6 days, 13 hours",
+                        disabled: false,
+                        resetTime: iso.string(from: t0.addingTimeInterval(6 * 86400 + 13 * 3600 + 15))
+                    ),
+                    // resetTime stayed anchored at t0 + 4h -> started!
+                    AgyQuotaBucket(
+                        bucketId: "gemini-5h",
+                        displayName: "Five Hour Limit Remaining",
+                        remainingFraction: 0.85,
+                        resetDescription: "Resets in 4 hours",
+                        disabled: false,
+                        resetTime: iso.string(from: t0.addingTimeInterval(4 * 3600))
+                    )
+                ])
+            ]
+        )
+        let annotated = AgyQuotaService.annotateTimerStates(driftingPoll2, now: t1)
+        let weeklyBucket = annotated.groups.first?.buckets.first(where: { $0.bucketId == "gemini-weekly" })
+        let fiveHourBucket = annotated.groups.first?.buckets.first(where: { $0.bucketId == "gemini-5h" })
+
+        #expect(weeklyBucket?.isTimerStarted == false)
+        #expect(weeklyBucket?.isWindowTimerIdle(now: t1) == true)
+        #expect(fiveHourBucket?.isTimerStarted == true)
+        #expect(fiveHourBucket?.isWindowTimerIdle(now: t1) == false)
+    }
+
+    @Test func testSetAccountHiddenTogglesTopBarVisibilityAndPreservesSettingsList() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let group = AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+            AgyQuotaBucket(bucketId: "g-5h", displayName: "5-Hour", remainingFraction: 0.80, disabled: false)
+        ])
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "primary@acme.io", plan: "Google AI Pro", groups: [group]),
+            userDefaults: isolatedDefaults
+        )
+        AgyQuotaService.saveQuotaSnapshotForAccount(
+            AgyQuotaInfo(email: "oldaccount@acme.io", plan: "Google AI Pro", groups: [group]),
+            userDefaults: isolatedDefaults
+        )
+
+        let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.activeConsumerEmail = "primary@acme.io"
+        var stats = AgyUsageStats.empty
+        stats.discoveredConsumerEmails = ["primary@acme.io", "oldaccount@acme.io"]
+        stats.accountTodayTotals = ["primary@acme.io": 5.0, "oldaccount@acme.io": 2.50]
+        stats.accountCostTotals = ["primary@acme.io": 40.0, "oldaccount@acme.io": 18.0]
+        stats.accountQueryTotals = ["primary@acme.io": 20, "oldaccount@acme.io": 9]
+        stats.gcpProject = "gcp-proj-1"
+        stats.gcpTotalCost = 12.0
+        vm.stats = stats
+
+        #expect(vm.subscriptionAccountSummaries.count == 2)
+        #expect(vm.allKnownSubscriptionAccountSummaries.count == 2)
+
+        // Hiding an inactive account with today & historical spend removes it from top bar & summaries
+        // while keeping it toggleable in Settings (allKnownSubscriptionAccountSummaries)
+        vm.setAccountHidden(true, for: "oldaccount@acme.io")
+        #expect(vm.isAccountHidden("oldaccount@acme.io") == true)
+        #expect(vm.subscriptionAccountSummaries.map(\.id) == ["primary@acme.io"])
+        #expect(vm.allKnownSubscriptionAccountSummaries.map(\.id).sorted() == ["oldaccount@acme.io", "primary@acme.io"])
+
+        // Must stay hidden even when stats refresh with todayCost > 0.005
+        vm.stats = stats
+        #expect(vm.subscriptionAccountSummaries.map(\.id) == ["primary@acme.io"])
+
+        // Sole visible Pro subscription tab cleanly labels as "Pro" alongside GCP & All
+        #expect(vm.primaryAccountTabs == [
+            .subscription(email: "primary@acme.io", label: "Pro", tierBadge: "PRO", isActive: true),
+            .gcp(project: "gcp-proj-1"),
+            .all
+        ])
+
+        // Active account cannot be hidden
+        vm.setAccountHidden(true, for: "primary@acme.io")
+        #expect(vm.isAccountHidden("primary@acme.io") == false)
+
+        // Toggling showAllAccountTab hides/restores .all tab
+        vm.showAllAccountTab = false
+        #expect(vm.primaryAccountTabs == [
+            .subscription(email: "primary@acme.io", label: "Pro", tierBadge: "PRO", isActive: true),
+            .gcp(project: "gcp-proj-1")
+        ])
+        vm.showAllAccountTab = true
+        #expect(vm.primaryAccountTabs.last == .all)
+
+        // Re-enabling hidden account restores it immediately
+        vm.setAccountHidden(false, for: "oldaccount@acme.io")
+        #expect(vm.isAccountHidden("oldaccount@acme.io") == false)
+        #expect(vm.subscriptionAccountSummaries.count == 2)
+    }
 }
 
 

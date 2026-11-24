@@ -154,6 +154,8 @@ nonisolated public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hash
     public let resetDescription: String?
     public let disabled: Bool
     public let resetTime: String?
+    /// Optional server/drift-verified flag: `false` when consecutive polls show `resetTime` sliding forward with wall-clock time (timer not started), `true` when anchored and counting down.
+    public let isTimerStarted: Bool?
 
     public init(
         bucketId: String,
@@ -161,7 +163,8 @@ nonisolated public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hash
         remainingFraction: Double? = nil,
         resetDescription: String? = nil,
         disabled: Bool = false,
-        resetTime: String? = nil
+        resetTime: String? = nil,
+        isTimerStarted: Bool? = nil
     ) {
         self.bucketId = bucketId
         self.displayName = displayName
@@ -169,11 +172,63 @@ nonisolated public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hash
         self.resetDescription = resetDescription
         self.disabled = disabled
         self.resetTime = resetTime
+        self.isTimerStarted = isTimerStarted
     }
 
     public var parsedResetDate: Date? {
         guard let resetTime = resetTime else { return nil }
         return AgyQuotaInfo.parseResetTime(resetTime)
+    }
+
+    public var isWeeklyBucket: Bool {
+        let name = displayName.lowercased()
+        let id = bucketId.lowercased()
+        return name.contains("week") || id.contains("week")
+    }
+
+    public var isFiveHourBucket: Bool {
+        let name = displayName.lowercased()
+        let id = bucketId.lowercased()
+        return name.contains("5h") || id.contains("5h") || name.contains("five") || id.contains("five")
+    }
+
+    /// Returns `true` when the bucket's reset countdown clock has not actually started yet
+    /// (e.g. AGY CLI returns 100% / ~99% with a floating `now + 5h` / `now + 7d` timestamp and no active refresh description,
+    /// or consecutive live polls observed `resetTime` drifting forward with wall-clock time).
+    public func isWindowTimerIdle(now: Date = Date()) -> Bool {
+        guard !disabled else { return false }
+        if let explicit = isTimerStarted {
+            return !explicit
+        }
+
+        let frac = remainingFraction ?? 1.0
+        let hasActiveDescription = !(resetDescription?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+
+        if frac >= 0.999 {
+            if resetTime == nil || !hasActiveDescription {
+                return true
+            }
+            if let resetDate = parsedResetDate {
+                let diff = resetDate.timeIntervalSince(now)
+                if isFiveHourBucket && diff >= (5.0 * 3600.0 - 120.0) {
+                    return true
+                }
+                if isWeeklyBucket && diff >= (7.0 * 86400.0 - 300.0) {
+                    return true
+                }
+            }
+        } else if frac >= 0.985 && !hasActiveDescription {
+            guard let resetDate = parsedResetDate else { return true }
+            let diff = resetDate.timeIntervalSince(now)
+            if isFiveHourBucket && diff >= (5.0 * 3600.0 - 120.0) {
+                return true
+            }
+            if isWeeklyBucket && diff >= (7.0 * 86400.0 - 300.0) {
+                return true
+            }
+        }
+
+        return false
     }
 
     public func normalizedForCurrentTime(now: Date = Date()) -> AgyQuotaBucket {
@@ -187,7 +242,8 @@ nonisolated public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hash
                 remainingFraction: 1.0,
                 resetDescription: resetDescription,
                 disabled: disabled,
-                resetTime: nil
+                resetTime: nil,
+                isTimerStarted: false
             )
         }
         return self

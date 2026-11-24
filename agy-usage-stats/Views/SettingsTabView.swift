@@ -122,16 +122,20 @@ struct SettingsTabView: View {
 
     // MARK: - Subscription Accounts & Credit Status
     private var subscriptionAccountsSection: some View {
-        let summaries = viewModel.subscriptionAccountSummaries
+        let summaries = viewModel.allKnownSubscriptionAccountSummaries
+        let visibleCount = summaries.filter { !viewModel.isAccountHidden($0.email) }.count
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("subscription accounts & credit status")
+                Text("subscription accounts & visibility")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
                     .foregroundStyle(theme.textSecondary)
                 Spacer()
                 if !summaries.isEmpty {
-                    Text("\(summaries.count) account\(summaries.count == 1 ? "" : "s")")
+                    let countText = visibleCount < summaries.count
+                        ? "\(visibleCount)/\(summaries.count) shown"
+                        : "\(summaries.count) account\(summaries.count == 1 ? "" : "s")"
+                    Text(countText)
                         .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(theme.textTertiary)
                 }
@@ -159,7 +163,7 @@ struct SettingsTabView: View {
 
                 Rectangle().fill(theme.divider).frame(height: 0.75)
 
-                Text("Switch accounts anytime in terminal via agy /login — active quota & spend attribution switch automatically.")
+                Text("Toggle inactive accounts off to keep the top bar clean. Switch active accounts anytime via agy /login.")
                     .font(.system(size: 8.5, weight: .regular))
                     .foregroundStyle(theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -370,6 +374,24 @@ struct SettingsTabView: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .controlSize(.small)
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show 'All' Combined Tab")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Include combined All Accounts tab in the top bar")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showAllAccountTab)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
                 }
 
                 Rectangle().fill(theme.divider).frame(height: 0.75)
@@ -620,10 +642,17 @@ private struct SubscriptionAccountRowView: View {
         return raw.uppercased()
     }
 
+    private var isHidden: Bool {
+        viewModel.isAccountHidden(summary.email)
+    }
+
     private var statusBadge: (text: String, foreground: Color, background: Color) {
         if summary.isActive {
             let text = summary.hasAnyUsageToday ? "ACTIVE · IN USE" : "ACTIVE · UNTOUCHED"
             return (text, theme.costGreen, theme.costGreen.opacity(0.14))
+        }
+        if isHidden {
+            return ("HIDDEN", theme.textTertiary, theme.badgeBackground)
         }
         if !summary.hasAnyHistoricalUsage {
             return ("UNUSED · $0.00", theme.textSecondary, theme.badgeBackground)
@@ -702,17 +731,21 @@ private struct SubscriptionAccountRowView: View {
                     .background(Capsule().fill(badge.background))
 
                 if !summary.isActive {
-                    Button {
-                        viewModel.dismissAccount(summary.email)
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(theme.textTertiary)
-                            .padding(3)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Hide account from list")
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { !viewModel.isAccountHidden(summary.email) },
+                            set: { show in
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    viewModel.setAccountHidden(!show, for: summary.email)
+                                }
+                            }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .help(isHidden ? "Show account in top tab bar" : "Hide account from top tab bar")
                 }
             }
 
@@ -721,6 +754,7 @@ private struct SubscriptionAccountRowView: View {
                 .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(summary.quotaInfo?.groups.isEmpty == false ? theme.textSecondary : theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
+                .opacity(isHidden ? 0.55 : 1.0)
 
             // Third line: Token Spend & Optional Credit Pool
             HStack(alignment: .center, spacing: 6) {
@@ -732,7 +766,7 @@ private struct SubscriptionAccountRowView: View {
 
                 Spacer(minLength: 4)
 
-                if summary.creditPool <= 0 && !isAddingPool {
+                if !isHidden && summary.creditPool <= 0 && !isAddingPool {
                     Button {
                         draftPoolText = ""
                         isAddingPool = true
@@ -744,6 +778,7 @@ private struct SubscriptionAccountRowView: View {
                     .buttonStyle(.plain)
                 }
             }
+            .opacity(isHidden ? 0.55 : 1.0)
 
             if summary.creditPool > 0 {
                 let remainingFraction = max(0.0, min(1.0, summary.creditRemaining / summary.creditPool))
