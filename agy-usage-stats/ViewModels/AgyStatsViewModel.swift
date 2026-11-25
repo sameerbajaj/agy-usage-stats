@@ -108,6 +108,13 @@ public enum MuseMenuBarDisplayStyle: String, Codable, CaseIterable, Identifiable
     public var id: String { rawValue }
 }
 
+public enum MuseMenuBarIconStyle: String, Codable, CaseIterable, Identifiable {
+    case bear = "Bear"
+    case letterM = "Muse 'm'"
+
+    public var id: String { rawValue }
+}
+
 public enum MenuBarLayoutStyle: String, Codable, CaseIterable, Identifiable {
     case compactStacked = "Compact Stacked"
     case barsOnly = "Bars Only"
@@ -336,6 +343,18 @@ public final class AgyStatsViewModel {
     public var compactBottomSlot: MenuBarSlotSource {
         didSet {
             userDefaults.set(compactBottomSlot.rawValue, forKey: "agy_compactBottomSlot")
+        }
+    }
+
+    public var showMenuBarRowIcons: Bool {
+        didSet {
+            userDefaults.set(showMenuBarRowIcons, forKey: "agy_showMenuBarRowIcons")
+        }
+    }
+
+    public var museMenuBarIconStyle: MuseMenuBarIconStyle {
+        didSet {
+            userDefaults.set(museMenuBarIconStyle.rawValue, forKey: "agy_museMenuBarIconStyle")
         }
     }
 
@@ -975,6 +994,19 @@ public final class AgyStatsViewModel {
             self.compactBottomSlot = .museWeekly
         }
 
+        if userDefaults.object(forKey: "agy_showMenuBarRowIcons") != nil {
+            self.showMenuBarRowIcons = userDefaults.bool(forKey: "agy_showMenuBarRowIcons")
+        } else {
+            self.showMenuBarRowIcons = true
+        }
+
+        if let savedMuseIcon = userDefaults.string(forKey: "agy_museMenuBarIconStyle"),
+           let parsedMuseIcon = MuseMenuBarIconStyle(rawValue: savedMuseIcon) {
+            self.museMenuBarIconStyle = parsedMuseIcon
+        } else {
+            self.museMenuBarIconStyle = .bear
+        }
+
         if let savedMuseStyle = userDefaults.string(forKey: "agy_museMenuBarDisplayStyle"),
            let parsedMuseStyle = MuseMenuBarDisplayStyle(rawValue: savedMuseStyle) {
             self.museMenuBarDisplayStyle = parsedMuseStyle
@@ -1540,6 +1572,7 @@ public final class AgyStatsViewModel {
             }
             let pacing = muse.pacing(now: now)
             return CompactMenuBarSlotData(
+                kind: .muse,
                 remainingFraction: muse.remainingFraction,
                 displayPercent: muse.remainingPercent,
                 paceMarkerFraction: showMenuBarPaceIndicator ? pacing?.expectedRemainingFraction : nil,
@@ -1571,6 +1604,7 @@ public final class AgyStatsViewModel {
             let isIdle = bucket.isWindowTimerIdle(now: now)
             let pacing = bucket.pacing(now: now)
             return CompactMenuBarSlotData(
+                kind: .antigravity,
                 remainingFraction: clamped,
                 displayPercent: clamped * 100.0,
                 paceMarkerFraction: (showMenuBarPaceIndicator && !isIdle) ? pacing?.expectedRemainingFraction : nil,
@@ -1621,6 +1655,8 @@ public final class AgyStatsViewModel {
                     slots: slots,
                     barsOnly: menuBarLayoutStyle == .barsOnly,
                     detail: detail,
+                    showRowIcons: showMenuBarRowIcons,
+                    museIconStyle: museMenuBarIconStyle,
                     colorByPacing: colorMenuBarByPacing,
                     showMenuBarSpend: showMenuBarSpend,
                     menuBarSpendSource: menuBarSpendSource,
@@ -1663,6 +1699,7 @@ public final class AgyStatsViewModel {
             musePercentUsed: activeMuseQuota?.percentUsed,
             museResetShortText: activeMuseQuota?.ultraCompactCountdown(),
             museDisplayStyle: museMenuBarDisplayStyle,
+            museIconStyle: museMenuBarIconStyle,
             showPaceIndicator: showMenuBarPaceIndicator,
             colorByPacing: colorMenuBarByPacing,
             activePaceMarkerFraction: activeAgyRingPacing?.expectedRemainingFraction,

@@ -217,6 +217,48 @@ struct SettingsTabView: View {
                             .labelsHidden()
                             .controlSize(.small)
                         }
+
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Show Row Icons")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Show AGY chevron & Muse icon beside each row")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $viewModel.showMenuBarRowIcons.animation(.easeInOut(duration: 0.2)))
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .labelsHidden()
+                        }
+                    }
+
+                    if viewModel.showMuseTracking && (viewModel.menuBarLayoutStyle == .compactStacked && viewModel.showMenuBarRowIcons) {
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Muse Icon")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Cute bear avatar or minimalist 'm'")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Picker("", selection: $viewModel.museMenuBarIconStyle) {
+                                ForEach(MuseMenuBarIconStyle.allCases) { icon in
+                                    Text(icon.rawValue).tag(icon)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
+                        }
                     }
                 } else {
                     Rectangle().fill(theme.divider).frame(height: 0.75)
@@ -354,6 +396,28 @@ struct SettingsTabView: View {
                             Picker("", selection: $viewModel.museMenuBarDisplayStyle) {
                                 ForEach(MuseMenuBarDisplayStyle.allCases) { style in
                                     Text(style.rawValue).tag(style)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
+                        }
+
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Muse Icon")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Cute bear avatar or minimalist 'm'")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Picker("", selection: $viewModel.museMenuBarIconStyle) {
+                                ForEach(MuseMenuBarIconStyle.allCases) { icon in
+                                    Text(icon.rawValue).tag(icon)
                                 }
                             }
                             .pickerStyle(.menu)

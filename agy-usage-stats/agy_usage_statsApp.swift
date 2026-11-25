@@ -137,6 +137,12 @@ struct MenuBarLabel: View {
 // MARK: - Presentation Resolver
 
 public struct CompactMenuBarSlotData: Equatable {
+    public enum Kind: Equatable {
+        case antigravity
+        case muse
+    }
+
+    public let kind: Kind
     public let remainingFraction: Double
     public let displayPercent: Double
     public let paceMarkerFraction: Double?
@@ -146,6 +152,7 @@ public struct CompactMenuBarSlotData: Equatable {
     public let isIdle: Bool
 
     public init(
+        kind: Kind = .antigravity,
         remainingFraction: Double,
         displayPercent: Double,
         paceMarkerFraction: Double? = nil,
@@ -154,6 +161,7 @@ public struct CompactMenuBarSlotData: Equatable {
         accentColor: NSColor = MenuBarPresentationResolver.healthyGreenColor,
         isIdle: Bool = false
     ) {
+        self.kind = kind
         self.remainingFraction = max(0.0, min(1.0, remainingFraction))
         self.displayPercent = displayPercent
         self.paceMarkerFraction = paceMarkerFraction
@@ -309,7 +317,7 @@ public enum MenuBarPresentationResolver {
     }()
 
     public static let compactTimeFont: NSFont = {
-        let baseDesc = NSFont.systemFont(ofSize: 7.5, weight: .semibold).fontDescriptor.withDesign(.rounded)
+        let baseDesc = NSFont.systemFont(ofSize: 8.5, weight: .bold).fontDescriptor.withDesign(.rounded)
         if let baseDesc {
             let monoDesc = baseDesc.addingAttributes([
                 .featureSettings: [
@@ -319,9 +327,9 @@ public enum MenuBarPresentationResolver {
                     ]
                 ]
             ])
-            return NSFont(descriptor: monoDesc, size: 7.5) ?? NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .semibold)
+            return NSFont(descriptor: monoDesc, size: 8.5) ?? NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
         }
-        return NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .semibold)
+        return NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
     }()
 
     public static func resolveQuotaText(
@@ -644,6 +652,8 @@ public enum AgyMenuBarRenderer {
         slots: [CompactMenuBarSlotData],
         barsOnly: Bool = false,
         detail: CompactMenuBarDetail = .barAndPercent,
+        showRowIcons: Bool = true,
+        museIconStyle: MuseMenuBarIconStyle = .bear,
         colorByPacing: Bool = false,
         showMenuBarSpend: Bool = false,
         menuBarSpendSource: MenuBarSpendSource = .gcpToday,
@@ -656,6 +666,7 @@ public enum AgyMenuBarRenderer {
         let showBar = barsOnly || detail != .percentOnly
         let showPercent = !barsOnly
         let showTime = !barsOnly && detail == .barPercentAndTime
+        let includeIcons = showRowIcons && !barsOnly
 
         // Resolve optional spend badge
         let spendBadge: IconPresentationState.SpendBadge?
@@ -692,9 +703,10 @@ public enum AgyMenuBarRenderer {
             let rf = Int((s.remainingFraction * 100.0).rounded())
             let dp = Int((s.displayPercent * 10.0).rounded())
             let pm = s.paceMarkerFraction.map { Int(($0 * 100.0).rounded()) } ?? -1
-            return "\(rf)_\(dp)_\(pm)_\(s.resetShortText ?? "")_\(s.pacing?.status.hashValue ?? 0)"
+            let k = (s.kind == .muse) ? "m" : "a"
+            return "\(k)_\(rf)_\(dp)_\(pm)_\(s.resetShortText ?? "")_\(s.pacing?.status.hashValue ?? 0)"
         }.joined(separator: "|")
-        let cacheKey = "compact_\(barsOnly)_\(detail.rawValue)_\(colorByPacing)_\(slotKeys)_\(spendBadge?.text ?? "")_\(spendBadge?.icon.hashValue ?? 0)"
+        let cacheKey = "compact_\(barsOnly)_\(detail.rawValue)_\(includeIcons)_\(museIconStyle.rawValue)_\(colorByPacing)_\(slotKeys)_\(spendBadge?.text ?? "")_\(spendBadge?.icon.hashValue ?? 0)"
         if let cached = cachedCompactIcon, cached.key == cacheKey {
             return cached.image
         }
@@ -704,7 +716,9 @@ public enum AgyMenuBarRenderer {
         let timeFont = MenuBarPresentationResolver.compactTimeFont
         let spendFont = MenuBarPresentationResolver.menuBarFont
 
-        let barWidth: CGFloat = barsOnly ? 20.0 : 21.0
+        let iconColWidth: CGFloat = includeIcons ? 7.5 : 0.0
+        let iconGap: CGFloat = includeIcons ? 3.0 : 0.0
+        let barWidth: CGFloat = barsOnly ? 20.0 : 20.0
         let barHeight: CGFloat = barsOnly ? 4.8 : 4.2
 
         let pctStrings: [String] = activeSlots.map { String(format: "%.0f%%", $0.displayPercent.rounded()) }
@@ -749,6 +763,9 @@ public enum AgyMenuBarRenderer {
         }
 
         var totalW: CGFloat = 1.5
+        if includeIcons {
+            totalW += iconColWidth + iconGap
+        }
         if showBar {
             totalW += barWidth
         }
@@ -757,7 +774,7 @@ public enum AgyMenuBarRenderer {
             totalW += maxPctWidth
         }
         if showTime && maxTimeWidth > 0 {
-            totalW += 2.5 + maxTimeWidth
+            totalW += 3.5 + maxTimeWidth
         }
         if spendBadge != nil {
             totalW += 3.5 + 1.0 + 3.5
@@ -770,12 +787,13 @@ public enum AgyMenuBarRenderer {
         }
         totalW += 1.5
 
-        let rowCentersY: [CGFloat] = activeSlots.count == 2 ? [13.2, 4.8] : [9.0]
+        let rowCentersY: [CGFloat] = activeSlots.count == 2 ? [13.3, 4.7] : [9.0]
 
         let img = NSImage(size: NSSize(width: max(20.0, ceil(totalW)), height: h), flipped: false) { _ in
-            let barStartX: CGFloat = 1.5
+            let iconCenterX: CGFloat = 1.5 + (iconColWidth / 2.0)
+            let barStartX: CGFloat = 1.5 + (includeIcons ? iconColWidth + iconGap : 0.0)
             let pctColX: CGFloat = barStartX + (showBar ? barWidth + 3.5 : 0.0)
-            let timeColX: CGFloat = pctColX + maxPctWidth + 2.5
+            let timeColX: CGFloat = pctColX + maxPctWidth + 3.5
 
             for (idx, slot) in activeSlots.enumerated() {
                 let cy = rowCentersY[idx]
@@ -784,6 +802,20 @@ public enum AgyMenuBarRenderer {
                     pacing: slot.pacing,
                     colorByPacing: colorByPacing
                 )
+
+                if includeIcons {
+                    switch slot.kind {
+                    case .antigravity:
+                        drawMiniAgyChevron(center: NSPoint(x: iconCenterX, y: cy), color: NSColor.labelColor.withAlphaComponent(0.90))
+                    case .muse:
+                        switch museIconStyle {
+                        case .bear:
+                            drawCuteBearHead(center: NSPoint(x: iconCenterX, y: cy), scale: 1.0)
+                        case .letterM:
+                            drawMuseMonogram(center: NSPoint(x: iconCenterX, y: cy), color: MenuBarPresentationResolver.museIndigoColor, scale: 1.05)
+                        }
+                    }
+                }
 
                 if showBar {
                     let barY = cy - (barHeight / 2.0)
@@ -824,17 +856,18 @@ public enum AgyMenuBarRenderer {
                 if showTime && maxTimeWidth > 0 {
                     let tStr = timeStrings[idx]
                     if !tStr.isEmpty {
-                        let tAttrs: [NSAttributedString.Key: Any] = [.font: timeFont, .foregroundColor: NSColor.secondaryLabelColor]
+                        // Crisp high-contrast adaptive color (bright soft white in dark mode, dark charcoal in light mode)
+                        let tAttrs: [NSAttributedString.Key: Any] = [.font: timeFont, .foregroundColor: NSColor.labelColor.withAlphaComponent(0.88)]
                         let tSize = (tStr as NSString).size(withAttributes: tAttrs)
                         let drawX = timeColX + (maxTimeWidth - tSize.width)
-                        let drawY = cy - (tSize.height / 2.0) + 0.2
+                        let drawY = cy - (tSize.height / 2.0) + 0.3
                         tStr.draw(at: NSPoint(x: drawX, y: drawY), withAttributes: tAttrs)
                     }
                 }
             }
 
             if spendBadge != nil {
-                var currentX = pctColX + (showPercent ? maxPctWidth : 0.0) + (showTime && maxTimeWidth > 0 ? 2.5 + maxTimeWidth : 0.0)
+                var currentX = pctColX + (showPercent ? maxPctWidth : 0.0) + (showTime && maxTimeWidth > 0 ? 3.5 + maxTimeWidth : 0.0)
                 if !showPercent && showBar {
                     currentX = barStartX + barWidth
                 }
@@ -892,6 +925,7 @@ public enum AgyMenuBarRenderer {
         musePercentUsed: Double? = nil,
         museResetShortText: String? = nil,
         museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent,
+        museIconStyle: MuseMenuBarIconStyle = .bear,
         showPaceIndicator: Bool = true,
         colorByPacing: Bool = false,
         activePaceMarkerFraction: Double? = nil,
@@ -937,7 +971,7 @@ public enum AgyMenuBarRenderer {
         let agyPaceBucket = presentation.paceMarkerFraction.map { Int(($0 * 100.0).rounded()) } ?? -1
         let musePaceBucket = presentation.museBadge?.paceMarkerFraction.map { Int(($0 * 100.0).rounded()) } ?? -1
         let museFillBucket = presentation.museBadge.map { Int(($0.ringFraction * 100.0).rounded()) } ?? -1
-        let cacheKey = "\(queriesToday)_\(litColor.description)_\(presentation.text)_\(presentation.textColor.description)_\(presentation.gaugeStyle)_p\(agyPaceBucket)_\(presentation.spendBadge?.icon.hashValue ?? 0)_\(presentation.spendBadge?.text ?? "")_\(presentation.spendBadge?.iconColor.description ?? "")_\(presentation.museBadge?.text ?? "")_\(presentation.museBadge?.textColor.description ?? "")_mf\(museFillBucket)_mp\(musePaceBucket)"
+        let cacheKey = "\(queriesToday)_\(litColor.description)_\(presentation.text)_\(presentation.textColor.description)_\(presentation.gaugeStyle)_p\(agyPaceBucket)_\(presentation.spendBadge?.icon.hashValue ?? 0)_\(presentation.spendBadge?.text ?? "")_\(presentation.spendBadge?.iconColor.description ?? "")_\(presentation.museBadge?.text ?? "")_\(presentation.museBadge?.textColor.description ?? "")_mf\(museFillBucket)_mp\(musePaceBucket)_mi\(museIconStyle.rawValue)"
         if let cached = cachedAntigravityIcon, cached.key == cacheKey {
             return cached.image
         }
@@ -1173,6 +1207,7 @@ public enum AgyMenuBarRenderer {
                     fraction: muse.ringFraction,
                     strokeColor: muse.ringColor,
                     markColor: muse.iconColor,
+                    iconStyle: museIconStyle,
                     paceMarkerFraction: muse.paceMarkerFraction
                 )
                 currentX += museRingSlotWidth + 3.5
@@ -1242,6 +1277,7 @@ public enum AgyMenuBarRenderer {
         fraction: Double,
         strokeColor: NSColor,
         markColor: NSColor,
+        iconStyle: MuseMenuBarIconStyle = .bear,
         paceMarkerFraction: Double? = nil
     ) {
         // Draw Background Track
@@ -1269,33 +1305,105 @@ public enum AgyMenuBarRenderer {
             drawPaceTick(center: center, radius: radius, expectedFraction: paceFrac)
         }
 
-        // Draw Crisp 2-Arch Muse "m" Mark inside center (sized cleanly with clear negative space at 16px)
+        // Draw Muse Avatar (Cute Bear or Crisp 2-Arch "m") inside center
+        switch iconStyle {
+        case .bear:
+            drawCuteBearHead(center: center, scale: 0.92)
+        case .letterM:
+            drawMuseMonogram(center: center, color: markColor, scale: 1.0)
+        }
+    }
+
+    private static func drawMiniAgyChevron(center: NSPoint, color: NSColor) {
+        let chevron = NSBezierPath()
+        chevron.move(to: NSPoint(x: center.x - 2.6, y: center.y - 1.5))
+        chevron.line(to: NSPoint(x: center.x, y: center.y + 1.8))
+        chevron.line(to: NSPoint(x: center.x + 2.6, y: center.y - 1.5))
+        chevron.lineWidth = 1.35
+        chevron.lineCapStyle = .round
+        chevron.lineJoinStyle = .round
+        color.setStroke()
+        chevron.stroke()
+    }
+
+    private static func drawMuseMonogram(center: NSPoint, color: NSColor, scale: CGFloat) {
         let mPath = NSBezierPath()
         let cx = center.x
         let cy = center.y
-        let w: CGFloat = 2.4
-        let topY = cy + 1.45
-        let botY = cy - 1.45
+        let w: CGFloat = 2.4 * scale
+        let topY = cy + 1.45 * scale
+        let botY = cy - 1.45 * scale
         mPath.move(to: NSPoint(x: cx - w, y: botY))
-        mPath.line(to: NSPoint(x: cx - w, y: topY - 0.8))
+        mPath.line(to: NSPoint(x: cx - w, y: topY - 0.8 * scale))
         mPath.curve(
-            to: NSPoint(x: cx, y: topY - 0.8),
-            controlPoint1: NSPoint(x: cx - w, y: topY + 0.55),
-            controlPoint2: NSPoint(x: cx, y: topY + 0.55)
+            to: NSPoint(x: cx, y: topY - 0.8 * scale),
+            controlPoint1: NSPoint(x: cx - w, y: topY + 0.55 * scale),
+            controlPoint2: NSPoint(x: cx, y: topY + 0.55 * scale)
         )
         mPath.line(to: NSPoint(x: cx, y: botY))
-        mPath.move(to: NSPoint(x: cx, y: topY - 0.8))
+        mPath.move(to: NSPoint(x: cx, y: topY - 0.8 * scale))
         mPath.curve(
-            to: NSPoint(x: cx + w, y: topY - 0.8),
-            controlPoint1: NSPoint(x: cx, y: topY + 0.55),
-            controlPoint2: NSPoint(x: cx + w, y: topY + 0.55)
+            to: NSPoint(x: cx + w, y: topY - 0.8 * scale),
+            controlPoint1: NSPoint(x: cx, y: topY + 0.55 * scale),
+            controlPoint2: NSPoint(x: cx + w, y: topY + 0.55 * scale)
         )
         mPath.line(to: NSPoint(x: cx + w, y: botY))
         mPath.lineWidth = 0.9
         mPath.lineCapStyle = .round
         mPath.lineJoinStyle = .round
-        markColor.setStroke()
+        color.setStroke()
         mPath.stroke()
+    }
+
+    /// Crisp geometric cute bear head silhouette (warm honey-caramel ears + round head + cream snout + dark eyes/nose)
+    /// designed specifically to read unmistakably at 7x7pt on Retina macOS menu bars in both Light and Dark modes.
+    private static func drawCuteBearHead(center: NSPoint, scale: CGFloat) {
+        let cx = center.x
+        let cy = center.y
+        let furColor = NSColor(red: 0.80, green: 0.56, blue: 0.35, alpha: 1.0)
+        let innerEarColor = NSColor(red: 0.95, green: 0.82, blue: 0.68, alpha: 1.0)
+        let snoutColor = NSColor(red: 0.96, green: 0.86, blue: 0.74, alpha: 1.0)
+        let featureColor = NSColor(red: 0.22, green: 0.13, blue: 0.08, alpha: 1.0)
+
+        let earR: CGFloat = 1.35 * scale
+        let earOffsetX: CGFloat = 2.05 * scale
+        let earOffsetY: CGFloat = 1.85 * scale
+
+        // Outer ears
+        furColor.setFill()
+        NSBezierPath(ovalIn: NSRect(x: cx - earOffsetX - earR, y: cy + earOffsetY - earR, width: earR * 2, height: earR * 2)).fill()
+        NSBezierPath(ovalIn: NSRect(x: cx + earOffsetX - earR, y: cy + earOffsetY - earR, width: earR * 2, height: earR * 2)).fill()
+
+        // Inner ear highlights
+        let innerR: CGFloat = 0.65 * scale
+        innerEarColor.setFill()
+        NSBezierPath(ovalIn: NSRect(x: cx - earOffsetX - innerR, y: cy + earOffsetY - innerR, width: innerR * 2, height: innerR * 2)).fill()
+        NSBezierPath(ovalIn: NSRect(x: cx + earOffsetX - innerR, y: cy + earOffsetY - innerR, width: innerR * 2, height: innerR * 2)).fill()
+
+        // Main round head
+        let headRx: CGFloat = 2.75 * scale
+        let headRy: CGFloat = 2.45 * scale
+        let headCy = cy - 0.35 * scale
+        furColor.setFill()
+        NSBezierPath(ovalIn: NSRect(x: cx - headRx, y: headCy - headRy, width: headRx * 2, height: headRy * 2)).fill()
+
+        // Cream snout
+        let snoutW: CGFloat = 2.3 * scale
+        let snoutH: CGFloat = 1.55 * scale
+        snoutColor.setFill()
+        NSBezierPath(ovalIn: NSRect(x: cx - snoutW / 2, y: headCy - snoutH * 0.88, width: snoutW, height: snoutH)).fill()
+
+        // Eyes & tiny nose
+        featureColor.setFill()
+        let eyeR: CGFloat = 0.44 * scale
+        let eyeX: CGFloat = 0.98 * scale
+        let eyeY: CGFloat = headCy + 0.55 * scale
+        NSBezierPath(ovalIn: NSRect(x: cx - eyeX - eyeR, y: eyeY - eyeR, width: eyeR * 2, height: eyeR * 2)).fill()
+        NSBezierPath(ovalIn: NSRect(x: cx + eyeX - eyeR, y: eyeY - eyeR, width: eyeR * 2, height: eyeR * 2)).fill()
+
+        let noseW: CGFloat = 0.95 * scale
+        let noseH: CGFloat = 0.65 * scale
+        NSBezierPath(ovalIn: NSRect(x: cx - noseW / 2, y: headCy - 0.52 * scale, width: noseW, height: noseH)).fill()
     }
 
     private static func drawPaceTick(center: NSPoint, radius: CGFloat, expectedFraction: Double) {

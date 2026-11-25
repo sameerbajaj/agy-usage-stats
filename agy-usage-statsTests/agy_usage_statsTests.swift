@@ -3451,20 +3451,22 @@ struct agy_usage_statsTests {
             resetsAt: now.addingTimeInterval(6 * 86400)
         )
 
-        // Verify slot resolution
+        // Verify slot resolution & kind tagging
         let topSlot = vm.resolveCompactSlot(.agyActiveFiveHour, now: now)
         let bottomSlot = vm.resolveCompactSlot(.museWeekly, now: now)
         #expect(topSlot != nil)
+        #expect(topSlot?.kind == .antigravity)
         #expect(abs((topSlot?.remainingFraction ?? 0) - 0.64) < 0.001)
         #expect(topSlot?.paceMarkerFraction != nil)
         #expect(topSlot?.resetShortText == "2h")
         #expect(bottomSlot != nil)
+        #expect(bottomSlot?.kind == .muse)
         #expect(abs((bottomSlot?.remainingFraction ?? 0) - 0.99) < 0.001)
         #expect(bottomSlot?.paceMarkerFraction != nil)
         #expect(bottomSlot?.resetShortText == "6d")
         #expect(vm.resolveCompactSlot(.none, now: now) == nil)
 
-        // Compare widths across all menu bar layout styles
+        // Compare widths across all menu bar layout styles (with row icons on & off)
         vm.menuBarLayoutStyle = .classicRings
         let classicWidth = vm.makeMenuBarImage().size.width
 
@@ -3472,21 +3474,23 @@ struct agy_usage_statsTests {
         let barsOnlyWidth = vm.makeMenuBarImage().size.width
 
         vm.menuBarLayoutStyle = .compactStacked
+        vm.showMenuBarRowIcons = false
         vm.compactMenuBarDetail = .percentOnly
-        let percentOnlyWidth = vm.makeMenuBarImage().size.width
+        let percentOnlyNoIconsWidth = vm.makeMenuBarImage().size.width
 
+        vm.showMenuBarRowIcons = true
         vm.compactMenuBarDetail = .barAndPercent
-        let barAndPercentWidth = vm.makeMenuBarImage().size.width
+        let barAndPercentWithIconsWidth = vm.makeMenuBarImage().size.width
 
         vm.compactMenuBarDetail = .barPercentAndTime
-        let barPercentAndTimeWidth = vm.makeMenuBarImage().size.width
+        let barPercentAndTimeWithIconsWidth = vm.makeMenuBarImage().size.width
 
         #expect(barsOnlyWidth <= 26.0)
-        #expect(percentOnlyWidth <= 34.0)
-        #expect(barAndPercentWidth <= 58.0)
-        #expect(barPercentAndTimeWidth <= 78.0)
-        #expect(barAndPercentWidth < classicWidth * 0.65)
-        #expect(barPercentAndTimeWidth < classicWidth)
+        #expect(percentOnlyNoIconsWidth <= 34.0)
+        #expect(barAndPercentWithIconsWidth <= 68.0)
+        #expect(barPercentAndTimeWithIconsWidth <= 88.0)
+        #expect(barAndPercentWithIconsWidth < classicWidth * 0.72)
+        #expect(barPercentAndTimeWithIconsWidth < classicWidth)
     }
 }
 
