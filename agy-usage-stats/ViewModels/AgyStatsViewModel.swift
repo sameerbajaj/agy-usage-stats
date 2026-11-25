@@ -108,6 +108,44 @@ public enum MuseMenuBarDisplayStyle: String, Codable, CaseIterable, Identifiable
     public var id: String { rawValue }
 }
 
+public enum MenuBarLayoutStyle: String, Codable, CaseIterable, Identifiable {
+    case compactStacked = "Compact Stacked"
+    case barsOnly = "Bars Only"
+    case classicRings = "Classic Rings"
+
+    public var id: String { rawValue }
+}
+
+public enum CompactMenuBarDetail: String, Codable, CaseIterable, Identifiable {
+    case barAndPercent = "Bar + %"
+    case barPercentAndTime = "Bar + % + Time"
+    case percentOnly = "% Only"
+
+    public var id: String { rawValue }
+}
+
+public enum MenuBarSlotSource: String, Codable, CaseIterable, Identifiable {
+    case agyActiveFiveHour = "AGY Active (5h)"
+    case agyActiveWeekly = "AGY Active (Weekly)"
+    case agyActiveAuto = "AGY Active (Auto)"
+    case geminiFiveHour = "Gemini (5h)"
+    case geminiWeekly = "Gemini (Weekly)"
+    case claudeFiveHour = "Claude (5h)"
+    case claudeWeekly = "Claude (Weekly)"
+    case museWeekly = "Muse (Weekly)"
+    case none = "Off"
+
+    public var id: String { rawValue }
+
+    public static var topSlotCases: [MenuBarSlotSource] {
+        allCases.filter { $0 != .none }
+    }
+
+    public static var bottomSlotCases: [MenuBarSlotSource] {
+        [.museWeekly, .agyActiveWeekly, .agyActiveFiveHour, .geminiWeekly, .claudeFiveHour, .claudeWeekly, .none]
+    }
+}
+
 public struct WeeklyLimitInfo {
     public let remainingFraction: Double?
     public let resetTimeDescription: String?
@@ -274,6 +312,30 @@ public final class AgyStatsViewModel {
     public var colorMenuBarByPacing: Bool {
         didSet {
             userDefaults.set(colorMenuBarByPacing, forKey: "agy_colorMenuBarByPacing")
+        }
+    }
+
+    public var menuBarLayoutStyle: MenuBarLayoutStyle {
+        didSet {
+            userDefaults.set(menuBarLayoutStyle.rawValue, forKey: "agy_menuBarLayoutStyle")
+        }
+    }
+
+    public var compactMenuBarDetail: CompactMenuBarDetail {
+        didSet {
+            userDefaults.set(compactMenuBarDetail.rawValue, forKey: "agy_compactMenuBarDetail")
+        }
+    }
+
+    public var compactTopSlot: MenuBarSlotSource {
+        didSet {
+            userDefaults.set(compactTopSlot.rawValue, forKey: "agy_compactTopSlot")
+        }
+    }
+
+    public var compactBottomSlot: MenuBarSlotSource {
+        didSet {
+            userDefaults.set(compactBottomSlot.rawValue, forKey: "agy_compactBottomSlot")
         }
     }
 
@@ -885,6 +947,34 @@ public final class AgyStatsViewModel {
             self.colorMenuBarByPacing = false
         }
 
+        if let savedLayout = userDefaults.string(forKey: "agy_menuBarLayoutStyle"),
+           let parsedLayout = MenuBarLayoutStyle(rawValue: savedLayout) {
+            self.menuBarLayoutStyle = parsedLayout
+        } else {
+            self.menuBarLayoutStyle = .compactStacked
+        }
+
+        if let savedDetail = userDefaults.string(forKey: "agy_compactMenuBarDetail"),
+           let parsedDetail = CompactMenuBarDetail(rawValue: savedDetail) {
+            self.compactMenuBarDetail = parsedDetail
+        } else {
+            self.compactMenuBarDetail = .barAndPercent
+        }
+
+        if let savedTop = userDefaults.string(forKey: "agy_compactTopSlot"),
+           let parsedTop = MenuBarSlotSource(rawValue: savedTop), parsedTop != .none {
+            self.compactTopSlot = parsedTop
+        } else {
+            self.compactTopSlot = .agyActiveFiveHour
+        }
+
+        if let savedBottom = userDefaults.string(forKey: "agy_compactBottomSlot"),
+           let parsedBottom = MenuBarSlotSource(rawValue: savedBottom) {
+            self.compactBottomSlot = parsedBottom
+        } else {
+            self.compactBottomSlot = .museWeekly
+        }
+
         if let savedMuseStyle = userDefaults.string(forKey: "agy_museMenuBarDisplayStyle"),
            let parsedMuseStyle = MuseMenuBarDisplayStyle(rawValue: savedMuseStyle) {
             self.museMenuBarDisplayStyle = parsedMuseStyle
@@ -1422,6 +1512,76 @@ public final class AgyStatsViewModel {
         getBucket(forGroup: getClaudeGroup(), target: iconQuotaLimitTarget)?.pacing()
     }
 
+    private func ultraCompactCountdown(for bucket: AgyQuotaBucket, now: Date = Date()) -> String? {
+        guard !bucket.isWindowTimerIdle(now: now),
+              let resetDate = bucket.parsedResetDate else { return nil }
+        let diff = resetDate.timeIntervalSince(now)
+        guard diff > 0 else { return "now" }
+        let totalMinutes = Int(diff) / 60
+        let days = totalMinutes / (24 * 60)
+        let hours = (totalMinutes % (24 * 60)) / 60
+        if days > 0 {
+            return "\(days)d"
+        } else if hours > 0 {
+            return "\(hours)h"
+        } else {
+            return "\(max(1, totalMinutes))m"
+        }
+    }
+
+    public func resolveCompactSlot(_ source: MenuBarSlotSource, now: Date = Date()) -> CompactMenuBarSlotData? {
+        switch source {
+        case .none:
+            return nil
+
+        case .museWeekly:
+            guard showMuseTracking, let muse = museQuota?.normalizedForCurrentTime(now: now) else {
+                return nil
+            }
+            let pacing = muse.pacing(now: now)
+            return CompactMenuBarSlotData(
+                remainingFraction: muse.remainingFraction,
+                displayPercent: muse.remainingPercent,
+                paceMarkerFraction: showMenuBarPaceIndicator ? pacing?.expectedRemainingFraction : nil,
+                pacing: pacing,
+                resetShortText: muse.ultraCompactCountdown(now: now),
+                accentColor: MenuBarPresentationResolver.museIndigoColor,
+                isIdle: false
+            )
+
+        case .agyActiveFiveHour, .agyActiveWeekly, .agyActiveAuto,
+             .geminiFiveHour, .geminiWeekly, .claudeFiveHour, .claudeWeekly:
+            let group: AgyQuotaGroup?
+            let target: IconQuotaLimitTarget
+            switch source {
+            case .agyActiveFiveHour: group = getActiveGroup(); target = .fiveHour
+            case .agyActiveWeekly:   group = getActiveGroup(); target = .weekly
+            case .agyActiveAuto:     group = getActiveGroup(); target = .auto
+            case .geminiFiveHour:    group = getGeminiGroup(); target = .fiveHour
+            case .geminiWeekly:      group = getGeminiGroup(); target = .weekly
+            case .claudeFiveHour:    group = getClaudeGroup(); target = .fiveHour
+            case .claudeWeekly:      group = getClaudeGroup(); target = .weekly
+            default:                 return nil
+            }
+            guard let bucket = getBucket(forGroup: group, target: target),
+                  let frac = bucket.remainingFraction else {
+                return nil
+            }
+            let clamped = max(0.0, min(1.0, frac))
+            let isIdle = bucket.isWindowTimerIdle(now: now)
+            let pacing = bucket.pacing(now: now)
+            return CompactMenuBarSlotData(
+                remainingFraction: clamped,
+                displayPercent: clamped * 100.0,
+                paceMarkerFraction: (showMenuBarPaceIndicator && !isIdle) ? pacing?.expectedRemainingFraction : nil,
+                pacing: pacing,
+                resetShortText: ultraCompactCountdown(for: bucket, now: now),
+                accentColor: MenuBarPresentationResolver.healthyGreenColor,
+                isIdle: isIdle
+            )
+        }
+    }
+
     public func makeMenuBarImage(litColor: Color? = nil) -> NSImage {
         let color: Color
         if let litColor {
@@ -1444,6 +1604,31 @@ public final class AgyStatsViewModel {
                 color = Color(red: 0.65, green: 0.45, blue: 1.0)
             } else {
                 color = .primary.opacity(0.65)
+            }
+        }
+
+        if menuBarLayoutStyle == .compactStacked || menuBarLayoutStyle == .barsOnly {
+            let slots = [
+                resolveCompactSlot(compactTopSlot),
+                resolveCompactSlot(compactBottomSlot)
+            ].compactMap { $0 }
+
+            if !slots.isEmpty {
+                let detail: CompactMenuBarDetail = (menuBarLayoutStyle == .barsOnly)
+                    ? .barAndPercent
+                    : compactMenuBarDetail
+                return AgyMenuBarRenderer.makeCompactStackedImage(
+                    slots: slots,
+                    barsOnly: menuBarLayoutStyle == .barsOnly,
+                    detail: detail,
+                    colorByPacing: colorMenuBarByPacing,
+                    showMenuBarSpend: showMenuBarSpend,
+                    menuBarSpendSource: menuBarSpendSource,
+                    spendAmount: menuBarSpendAmount,
+                    gcpTodayCost: stats.gcpTodayCost,
+                    gcpTotalCost: stats.gcpTotalCost,
+                    todayCost: stats.todayCostEstimate
+                )
             }
         }
 

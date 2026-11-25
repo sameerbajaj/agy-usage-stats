@@ -3403,6 +3403,91 @@ struct agy_usage_statsTests {
         #expect(ticksOff.paceMarkerFraction == nil)
         #expect(ticksOff.museBadge?.paceMarkerFraction == nil)
     }
+
+    @Test func testCompactStackedMenuBarLayoutsSlotsAndWidths() {
+        let suiteName = "test-suite-\(UUID().uuidString)"
+        let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+        defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        let vm = AgyStatsViewModel(userDefaults: isolatedDefaults)
+        vm.showMenuBarSpend = false
+        vm.showModelUsageInIcon = true
+        vm.showMuseTracking = true
+        vm.showMuseInMenuBar = true
+        vm.stats.quotaInfo = AgyQuotaInfo(
+            email: "primary@acme.io",
+            plan: "Google AI Pro",
+            groups: [
+                AgyQuotaGroup(displayName: "Gemini Models", buckets: [
+                    AgyQuotaBucket(
+                        bucketId: "gemini-5h",
+                        displayName: "Five Hour Limit Remaining",
+                        remainingFraction: 0.64,
+                        resetDescription: "Refreshes in 2 hours",
+                        disabled: false,
+                        resetTime: iso.string(from: now.addingTimeInterval(2 * 3600)),
+                        isTimerStarted: true
+                    ),
+                    AgyQuotaBucket(
+                        bucketId: "gemini-weekly",
+                        displayName: "Weekly Limit Remaining",
+                        remainingFraction: 0.80,
+                        resetDescription: "Refreshes in 5 days",
+                        disabled: false,
+                        resetTime: iso.string(from: now.addingTimeInterval(5 * 86400)),
+                        isTimerStarted: true
+                    )
+                ])
+            ]
+        )
+        vm.museQuota = MuseQuotaInfo(
+            planName: "Muse Free",
+            subscriptionType: "FREE",
+            percentUsed: 1.0,
+            resetsAt: now.addingTimeInterval(6 * 86400)
+        )
+
+        // Verify slot resolution
+        let topSlot = vm.resolveCompactSlot(.agyActiveFiveHour, now: now)
+        let bottomSlot = vm.resolveCompactSlot(.museWeekly, now: now)
+        #expect(topSlot != nil)
+        #expect(abs((topSlot?.remainingFraction ?? 0) - 0.64) < 0.001)
+        #expect(topSlot?.paceMarkerFraction != nil)
+        #expect(topSlot?.resetShortText == "2h")
+        #expect(bottomSlot != nil)
+        #expect(abs((bottomSlot?.remainingFraction ?? 0) - 0.99) < 0.001)
+        #expect(bottomSlot?.paceMarkerFraction != nil)
+        #expect(bottomSlot?.resetShortText == "6d")
+        #expect(vm.resolveCompactSlot(.none, now: now) == nil)
+
+        // Compare widths across all menu bar layout styles
+        vm.menuBarLayoutStyle = .classicRings
+        let classicWidth = vm.makeMenuBarImage().size.width
+
+        vm.menuBarLayoutStyle = .barsOnly
+        let barsOnlyWidth = vm.makeMenuBarImage().size.width
+
+        vm.menuBarLayoutStyle = .compactStacked
+        vm.compactMenuBarDetail = .percentOnly
+        let percentOnlyWidth = vm.makeMenuBarImage().size.width
+
+        vm.compactMenuBarDetail = .barAndPercent
+        let barAndPercentWidth = vm.makeMenuBarImage().size.width
+
+        vm.compactMenuBarDetail = .barPercentAndTime
+        let barPercentAndTimeWidth = vm.makeMenuBarImage().size.width
+
+        #expect(barsOnlyWidth <= 26.0)
+        #expect(percentOnlyWidth <= 34.0)
+        #expect(barAndPercentWidth <= 58.0)
+        #expect(barPercentAndTimeWidth <= 78.0)
+        #expect(barAndPercentWidth < classicWidth * 0.65)
+        #expect(barPercentAndTimeWidth < classicWidth)
+    }
 }
 
 

@@ -136,6 +136,34 @@ struct MenuBarLabel: View {
 
 // MARK: - Presentation Resolver
 
+public struct CompactMenuBarSlotData: Equatable {
+    public let remainingFraction: Double
+    public let displayPercent: Double
+    public let paceMarkerFraction: Double?
+    public let pacing: QuotaPacing?
+    public let resetShortText: String?
+    public let accentColor: NSColor
+    public let isIdle: Bool
+
+    public init(
+        remainingFraction: Double,
+        displayPercent: Double,
+        paceMarkerFraction: Double? = nil,
+        pacing: QuotaPacing? = nil,
+        resetShortText: String? = nil,
+        accentColor: NSColor = MenuBarPresentationResolver.healthyGreenColor,
+        isIdle: Bool = false
+    ) {
+        self.remainingFraction = max(0.0, min(1.0, remainingFraction))
+        self.displayPercent = displayPercent
+        self.paceMarkerFraction = paceMarkerFraction
+        self.pacing = pacing
+        self.resetShortText = resetShortText
+        self.accentColor = accentColor
+        self.isIdle = isIdle
+    }
+}
+
 public struct IconPresentationState: Equatable {
     public enum GaugeStyle: Equatable {
         case none
@@ -262,6 +290,38 @@ public enum MenuBarPresentationResolver {
             return NSFont(descriptor: monoDesc, size: 11.0) ?? NSFont.monospacedDigitSystemFont(ofSize: 11.0, weight: .bold)
         }
         return NSFont.monospacedDigitSystemFont(ofSize: 11.0, weight: .bold)
+    }()
+
+    public static let compactMenuBarFont: NSFont = {
+        let baseDesc = NSFont.systemFont(ofSize: 8.5, weight: .bold).fontDescriptor.withDesign(.rounded)
+        if let baseDesc {
+            let monoDesc = baseDesc.addingAttributes([
+                .featureSettings: [
+                    [
+                        NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+                        NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector
+                    ]
+                ]
+            ])
+            return NSFont(descriptor: monoDesc, size: 8.5) ?? NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
+        }
+        return NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .bold)
+    }()
+
+    public static let compactTimeFont: NSFont = {
+        let baseDesc = NSFont.systemFont(ofSize: 7.5, weight: .semibold).fontDescriptor.withDesign(.rounded)
+        if let baseDesc {
+            let monoDesc = baseDesc.addingAttributes([
+                .featureSettings: [
+                    [
+                        NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+                        NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector
+                    ]
+                ]
+            ])
+            return NSFont(descriptor: monoDesc, size: 7.5) ?? NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .semibold)
+        }
+        return NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .semibold)
     }()
 
     public static func resolveQuotaText(
@@ -578,6 +638,233 @@ public enum MenuBarPresentationResolver {
 
 public enum AgyMenuBarRenderer {
     private static var cachedAntigravityIcon: (key: String, image: NSImage)? = nil
+    private static var cachedCompactIcon: (key: String, image: NSImage)? = nil
+
+    public static func makeCompactStackedImage(
+        slots: [CompactMenuBarSlotData],
+        barsOnly: Bool = false,
+        detail: CompactMenuBarDetail = .barAndPercent,
+        colorByPacing: Bool = false,
+        showMenuBarSpend: Bool = false,
+        menuBarSpendSource: MenuBarSpendSource = .gcpToday,
+        spendAmount: Double = 0.0,
+        gcpTodayCost: Double? = nil,
+        gcpTotalCost: Double? = nil,
+        todayCost: Double? = nil
+    ) -> NSImage {
+        let activeSlots = Array(slots.prefix(2))
+        let showBar = barsOnly || detail != .percentOnly
+        let showPercent = !barsOnly
+        let showTime = !barsOnly && detail == .barPercentAndTime
+
+        // Resolve optional spend badge
+        let spendBadge: IconPresentationState.SpendBadge?
+        if showMenuBarSpend {
+            let iconType: IconPresentationState.SpendBadge.IconType
+            let iconColor: NSColor
+            let amount: Double
+            switch menuBarSpendSource {
+            case .gcpToday:
+                iconType = .cloud
+                iconColor = MenuBarPresentationResolver.gcpBlueColor
+                amount = gcpTodayCost ?? spendAmount
+            case .gcpTotal:
+                iconType = .cloud
+                iconColor = MenuBarPresentationResolver.gcpBlueColor
+                amount = gcpTotalCost ?? spendAmount
+            case .apiToday:
+                iconType = .dollar
+                iconColor = MenuBarPresentationResolver.apiGreenColor
+                amount = todayCost ?? spendAmount
+            }
+            spendBadge = IconPresentationState.SpendBadge(
+                icon: iconType,
+                iconColor: iconColor,
+                text: String(format: "$%.2f", amount),
+                textColor: NSColor.labelColor
+            )
+        } else {
+            spendBadge = nil
+        }
+
+        // Build deterministic cache key
+        let slotKeys = activeSlots.map { s in
+            let rf = Int((s.remainingFraction * 100.0).rounded())
+            let dp = Int((s.displayPercent * 10.0).rounded())
+            let pm = s.paceMarkerFraction.map { Int(($0 * 100.0).rounded()) } ?? -1
+            return "\(rf)_\(dp)_\(pm)_\(s.resetShortText ?? "")_\(s.pacing?.status.hashValue ?? 0)"
+        }.joined(separator: "|")
+        let cacheKey = "compact_\(barsOnly)_\(detail.rawValue)_\(colorByPacing)_\(slotKeys)_\(spendBadge?.text ?? "")_\(spendBadge?.icon.hashValue ?? 0)"
+        if let cached = cachedCompactIcon, cached.key == cacheKey {
+            return cached.image
+        }
+
+        let h: CGFloat = 18.0
+        let pctFont = MenuBarPresentationResolver.compactMenuBarFont
+        let timeFont = MenuBarPresentationResolver.compactTimeFont
+        let spendFont = MenuBarPresentationResolver.menuBarFont
+
+        let barWidth: CGFloat = barsOnly ? 20.0 : 21.0
+        let barHeight: CGFloat = barsOnly ? 4.8 : 4.2
+
+        let pctStrings: [String] = activeSlots.map { String(format: "%.0f%%", $0.displayPercent.rounded()) }
+        let timeStrings: [String] = activeSlots.map { $0.resetShortText ?? "" }
+
+        var maxPctWidth: CGFloat = 0
+        if showPercent {
+            for s in pctStrings {
+                let w = (s as NSString).size(withAttributes: [.font: pctFont]).width
+                maxPctWidth = max(maxPctWidth, ceil(w))
+            }
+        }
+
+        var maxTimeWidth: CGFloat = 0
+        if showTime {
+            for s in timeStrings where !s.isEmpty {
+                let w = (s as NSString).size(withAttributes: [.font: timeFont]).width
+                maxTimeWidth = max(maxTimeWidth, ceil(w))
+            }
+        }
+
+        // Measure optional spend badge
+        var cloudSymbolImg: NSImage? = nil
+        var dollarSymbolImg: NSImage? = nil
+        var spendAmountStr = ""
+        var spendAttributes: [NSAttributedString.Key: Any] = [:]
+        var spendTextSize = NSSize.zero
+        if let spend = spendBadge {
+            spendAttributes = [.font: spendFont, .foregroundColor: spend.textColor]
+            if spend.icon == .cloud {
+                let config = NSImage.SymbolConfiguration(pointSize: 9.0, weight: .semibold)
+                    .applying(.init(paletteColors: [spend.iconColor]))
+                cloudSymbolImg = NSImage(systemSymbolName: "cloud.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+                spendAmountStr = spend.text
+            } else {
+                let config = NSImage.SymbolConfiguration(pointSize: 9.0, weight: .bold)
+                    .applying(.init(paletteColors: [spend.iconColor]))
+                dollarSymbolImg = NSImage(systemSymbolName: "dollarsign", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+                spendAmountStr = spend.text.replacingOccurrences(of: "$", with: "")
+            }
+            spendTextSize = (spendAmountStr as NSString).size(withAttributes: spendAttributes)
+        }
+
+        var totalW: CGFloat = 1.5
+        if showBar {
+            totalW += barWidth
+        }
+        if showPercent {
+            if showBar { totalW += 3.5 }
+            totalW += maxPctWidth
+        }
+        if showTime && maxTimeWidth > 0 {
+            totalW += 2.5 + maxTimeWidth
+        }
+        if spendBadge != nil {
+            totalW += 3.5 + 1.0 + 3.5
+            if let cloud = cloudSymbolImg {
+                totalW += cloud.size.width + 2.5
+            } else if let dollar = dollarSymbolImg {
+                totalW += dollar.size.width + 1.5
+            }
+            totalW += spendTextSize.width
+        }
+        totalW += 1.5
+
+        let rowCentersY: [CGFloat] = activeSlots.count == 2 ? [13.2, 4.8] : [9.0]
+
+        let img = NSImage(size: NSSize(width: max(20.0, ceil(totalW)), height: h), flipped: false) { _ in
+            let barStartX: CGFloat = 1.5
+            let pctColX: CGFloat = barStartX + (showBar ? barWidth + 3.5 : 0.0)
+            let timeColX: CGFloat = pctColX + maxPctWidth + 2.5
+
+            for (idx, slot) in activeSlots.enumerated() {
+                let cy = rowCentersY[idx]
+                let rowColor = MenuBarPresentationResolver.metricColor(
+                    for: slot.remainingFraction,
+                    pacing: slot.pacing,
+                    colorByPacing: colorByPacing
+                )
+
+                if showBar {
+                    let barY = cy - (barHeight / 2.0)
+                    let trackRect = NSRect(x: barStartX, y: barY, width: barWidth, height: barHeight)
+                    let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: barHeight / 2.0, yRadius: barHeight / 2.0)
+                    NSColor.labelColor.withAlphaComponent(0.20).setFill()
+                    trackPath.fill()
+
+                    let fillW = barWidth * CGFloat(slot.remainingFraction)
+                    if fillW > 0.6 {
+                        let clampedFillW = max(min(barWidth, fillW), min(barWidth, barHeight * 0.75))
+                        let fillRect = NSRect(x: barStartX, y: barY, width: clampedFillW, height: barHeight)
+                        let fillPath = NSBezierPath(roundedRect: fillRect, xRadius: barHeight / 2.0, yRadius: barHeight / 2.0)
+                        rowColor.setFill()
+                        fillPath.fill()
+                    }
+
+                    if let paceFrac = slot.paceMarkerFraction {
+                        let rawTickX = barStartX + barWidth * CGFloat(max(0.0, min(1.0, paceFrac)))
+                        let tickX = min(max(barStartX + 1.5, rawTickX), barStartX + barWidth - 1.5)
+                        let tickH = barHeight + 2.2
+                        let tickRect = NSRect(x: tickX - 0.65, y: cy - (tickH / 2.0), width: 1.3, height: tickH)
+                        let tickPath = NSBezierPath(roundedRect: tickRect, xRadius: 0.65, yRadius: 0.65)
+                        NSColor.labelColor.withAlphaComponent(0.95).setFill()
+                        tickPath.fill()
+                    }
+                }
+
+                if showPercent {
+                    let str = pctStrings[idx]
+                    let attrs: [NSAttributedString.Key: Any] = [.font: pctFont, .foregroundColor: rowColor]
+                    let size = (str as NSString).size(withAttributes: attrs)
+                    let drawX = pctColX + (maxPctWidth - size.width)
+                    let drawY = cy - (size.height / 2.0) + 0.3
+                    str.draw(at: NSPoint(x: drawX, y: drawY), withAttributes: attrs)
+                }
+
+                if showTime && maxTimeWidth > 0 {
+                    let tStr = timeStrings[idx]
+                    if !tStr.isEmpty {
+                        let tAttrs: [NSAttributedString.Key: Any] = [.font: timeFont, .foregroundColor: NSColor.secondaryLabelColor]
+                        let tSize = (tStr as NSString).size(withAttributes: tAttrs)
+                        let drawX = timeColX + (maxTimeWidth - tSize.width)
+                        let drawY = cy - (tSize.height / 2.0) + 0.2
+                        tStr.draw(at: NSPoint(x: drawX, y: drawY), withAttributes: tAttrs)
+                    }
+                }
+            }
+
+            if spendBadge != nil {
+                var currentX = pctColX + (showPercent ? maxPctWidth : 0.0) + (showTime && maxTimeWidth > 0 ? 2.5 + maxTimeWidth : 0.0)
+                if !showPercent && showBar {
+                    currentX = barStartX + barWidth
+                }
+                let sepX = currentX + 3.5
+                let sepRect = NSRect(x: sepX, y: (h - 8.0) / 2.0, width: 1.0, height: 8.0)
+                let sepPath = NSBezierPath(roundedRect: sepRect, xRadius: 0.5, yRadius: 0.5)
+                NSColor.labelColor.withAlphaComponent(0.22).setFill()
+                sepPath.fill()
+                currentX = sepX + 1.0 + 3.5
+
+                if let cloud = cloudSymbolImg {
+                    let iconY = (h - cloud.size.height) / 2.0
+                    cloud.draw(in: NSRect(x: currentX, y: iconY, width: cloud.size.width, height: cloud.size.height))
+                    currentX += cloud.size.width + 2.5
+                } else if let dollar = dollarSymbolImg {
+                    let iconY = (h - dollar.size.height) / 2.0
+                    dollar.draw(in: NSRect(x: currentX, y: iconY, width: dollar.size.width, height: dollar.size.height))
+                    currentX += dollar.size.width + 1.5
+                }
+
+                let spendY = (h - spendTextSize.height) / 2.0
+                spendAmountStr.draw(at: NSPoint(x: currentX, y: spendY), withAttributes: spendAttributes)
+            }
+
+            return true
+        }
+        img.isTemplate = false
+        cachedCompactIcon = (cacheKey, img)
+        return img
+    }
 
     public static func makeAntigravityImage(
         queriesToday: Int,
@@ -982,47 +1269,29 @@ public enum AgyMenuBarRenderer {
             drawPaceTick(center: center, radius: radius, expectedFraction: paceFrac)
         }
 
-        // Draw Official Muse Cursive "m" Wave Mark inside center
+        // Draw Crisp 2-Arch Muse "m" Mark inside center (sized cleanly with clear negative space at 16px)
         let mPath = NSBezierPath()
         let cx = center.x
         let cy = center.y
-        mPath.move(to: NSPoint(x: cx - 2.9, y: cy - 0.3))
+        let w: CGFloat = 2.4
+        let topY = cy + 1.45
+        let botY = cy - 1.45
+        mPath.move(to: NSPoint(x: cx - w, y: botY))
+        mPath.line(to: NSPoint(x: cx - w, y: topY - 0.8))
         mPath.curve(
-            to: NSPoint(x: cx - 1.5, y: cy + 1.7),
-            controlPoint1: NSPoint(x: cx - 2.5, y: cy + 0.9),
-            controlPoint2: NSPoint(x: cx - 1.9, y: cy + 1.7)
+            to: NSPoint(x: cx, y: topY - 0.8),
+            controlPoint1: NSPoint(x: cx - w, y: topY + 0.55),
+            controlPoint2: NSPoint(x: cx, y: topY + 0.55)
         )
+        mPath.line(to: NSPoint(x: cx, y: botY))
+        mPath.move(to: NSPoint(x: cx, y: topY - 0.8))
         mPath.curve(
-            to: NSPoint(x: cx - 1.3, y: cy - 1.6),
-            controlPoint1: NSPoint(x: cx - 1.1, y: cy + 1.7),
-            controlPoint2: NSPoint(x: cx - 1.6, y: cy - 1.6)
+            to: NSPoint(x: cx + w, y: topY - 0.8),
+            controlPoint1: NSPoint(x: cx, y: topY + 0.55),
+            controlPoint2: NSPoint(x: cx + w, y: topY + 0.55)
         )
-        mPath.curve(
-            to: NSPoint(x: cx + 0.1, y: cy + 1.5),
-            controlPoint1: NSPoint(x: cx - 0.8, y: cy - 1.6),
-            controlPoint2: NSPoint(x: cx - 0.4, y: cy + 1.5)
-        )
-        mPath.curve(
-            to: NSPoint(x: cx + 0.4, y: cy - 1.6),
-            controlPoint1: NSPoint(x: cx + 0.5, y: cy + 1.5),
-            controlPoint2: NSPoint(x: cx + 0.1, y: cy - 1.6)
-        )
-        mPath.curve(
-            to: NSPoint(x: cx + 1.7, y: cy + 1.0),
-            controlPoint1: NSPoint(x: cx + 0.9, y: cy - 1.6),
-            controlPoint2: NSPoint(x: cx + 1.3, y: cy + 1.0)
-        )
-        mPath.curve(
-            to: NSPoint(x: cx + 2.1, y: cy - 1.6),
-            controlPoint1: NSPoint(x: cx + 2.1, y: cy + 1.0),
-            controlPoint2: NSPoint(x: cx + 1.7, y: cy - 1.6)
-        )
-        mPath.curve(
-            to: NSPoint(x: cx + 2.9, y: cy - 0.3),
-            controlPoint1: NSPoint(x: cx + 2.5, y: cy - 1.6),
-            controlPoint2: NSPoint(x: cx + 2.7, y: cy - 0.9)
-        )
-        mPath.lineWidth = 1.1
+        mPath.line(to: NSPoint(x: cx + w, y: botY))
+        mPath.lineWidth = 0.9
         mPath.lineCapStyle = .round
         mPath.lineJoinStyle = .round
         markColor.setStroke()

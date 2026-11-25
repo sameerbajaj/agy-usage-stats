@@ -129,156 +129,249 @@ struct SettingsTabView: View {
                 .padding(.horizontal, 4)
 
             VStack(spacing: 8) {
-                // AGY Gauge & Percentage
+                // Layout Style Selector
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Show AGY Remaining %")
+                        Text("Layout Style")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Display percentage next to the AGY ring icon")
+                        Text("Choose compact dual-row bars or classic side-by-side rings")
                             .font(.system(size: 8.5, weight: .regular))
                             .foregroundStyle(theme.textSecondary)
                     }
                     Spacer()
-                    Toggle("", isOn: $viewModel.showModelUsageInIcon.animation(.easeInOut(duration: 0.2)))
+                    Picker("", selection: $viewModel.menuBarLayoutStyle.animation(.easeInOut(duration: 0.2))) {
+                        ForEach(MenuBarLayoutStyle.allCases) { style in
+                            Text(style.rawValue).tag(style)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+
+                if viewModel.menuBarLayoutStyle != .classicRings {
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Top Row")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Primary allowance bar & readout")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $viewModel.compactTopSlot) {
+                            ForEach(MenuBarSlotSource.topSlotCases) { src in
+                                Text(src.rawValue).tag(src)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Bottom Row")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Secondary bar (or Off for single row)")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $viewModel.compactBottomSlot) {
+                            ForEach(MenuBarSlotSource.bottomSlotCases) { src in
+                                Text(src.rawValue).tag(src)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+
+                    if viewModel.menuBarLayoutStyle == .compactStacked {
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Compact Details")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Balance density vs. horizontal width")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Picker("", selection: $viewModel.compactMenuBarDetail) {
+                                ForEach(CompactMenuBarDetail.allCases) { detail in
+                                    Text(detail.rawValue).tag(detail)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
+                        }
+                    }
+                } else {
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    // Classic Rings: AGY Gauge & Percentage
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show AGY Remaining %")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Display percentage next to the AGY ring icon")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $viewModel.showModelUsageInIcon.animation(.easeInOut(duration: 0.2)))
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                    }
+
+                    if viewModel.showModelUsageInIcon {
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("AGY Tracked Model")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Model group for icon ring & percentage")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Picker("", selection: $viewModel.selectedModelForIcon) {
+                                ForEach(IconModelSelection.primaryCases) { sel in
+                                    Text(sel.rawValue).tag(sel)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
+                        }
+
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Percentage Window")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Quota window shown as the number")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Picker("", selection: $viewModel.iconQuotaLimitTarget) {
+                                ForEach(IconQuotaLimitTarget.allCases) { sel in
+                                    Text(sel.rawValue).tag(sel)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
+                        }
+
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Ring Gauge Window")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Quota window rendered around the A-icon")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
+                            }
+                            Spacer()
+                            Picker("", selection: $viewModel.iconCircleFillMetric) {
+                                ForEach(IconCircleFillMetric.allCases) { sel in
+                                    Text(sel.rawValue).tag(sel)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
+                        }
+                    }
+
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    // Muse Menu Bar Badge (Classic Rings)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show Muse in Menu Bar")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Display Muse ring & % next to AGY")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { viewModel.showMuseTracking && viewModel.showMuseInMenuBar },
+                                set: { enabled in
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        if enabled && !viewModel.showMuseTracking {
+                                            viewModel.showMuseTracking = true
+                                        }
+                                        viewModel.showMuseInMenuBar = enabled
+                                    }
+                                }
+                            )
+                        )
                         .toggleStyle(.switch)
                         .controlSize(.small)
                         .labelsHidden()
-                }
+                    }
 
-                if viewModel.showModelUsageInIcon {
-                    Rectangle().fill(theme.divider).frame(height: 0.75)
+                    if viewModel.showMuseTracking && viewModel.showMuseInMenuBar {
+                        Rectangle().fill(theme.divider).frame(height: 0.75)
 
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("AGY Tracked Model")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(theme.textPrimary.opacity(0.85))
-                            Text("Model group for icon ring & percentage")
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                        Spacer()
-                        Picker("", selection: $viewModel.selectedModelForIcon) {
-                            ForEach(IconModelSelection.primaryCases) { sel in
-                                Text(sel.rawValue).tag(sel)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Muse Badge Format")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
+                                Text("Metric shown next to Muse ring")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textSecondary)
                             }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.small)
-                    }
-
-                    Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Percentage Window")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(theme.textPrimary.opacity(0.85))
-                            Text("Quota window shown as the number")
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                        Spacer()
-                        Picker("", selection: $viewModel.iconQuotaLimitTarget) {
-                            ForEach(IconQuotaLimitTarget.allCases) { sel in
-                                Text(sel.rawValue).tag(sel)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.small)
-                    }
-
-                    Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Ring Gauge Window")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(theme.textPrimary.opacity(0.85))
-                            Text("Quota window rendered around the A-icon")
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                        Spacer()
-                        Picker("", selection: $viewModel.iconCircleFillMetric) {
-                            ForEach(IconCircleFillMetric.allCases) { sel in
-                                Text(sel.rawValue).tag(sel)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.small)
-                    }
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                // Muse Menu Bar Badge
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show Muse in Menu Bar")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Display Muse weekly badge next to AGY")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { viewModel.showMuseTracking && viewModel.showMuseInMenuBar },
-                            set: { enabled in
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    if enabled && !viewModel.showMuseTracking {
-                                        viewModel.showMuseTracking = true
-                                    }
-                                    viewModel.showMuseInMenuBar = enabled
+                            Spacer()
+                            Picker("", selection: $viewModel.museMenuBarDisplayStyle) {
+                                ForEach(MuseMenuBarDisplayStyle.allCases) { style in
+                                    Text(style.rawValue).tag(style)
                                 }
                             }
-                        )
-                    )
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .labelsHidden()
-                }
-
-                if viewModel.showMuseTracking && viewModel.showMuseInMenuBar {
-                    Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Muse Badge Format")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(theme.textPrimary.opacity(0.85))
-                            Text("Metric shown next to sparkles icon")
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .controlSize(.small)
                         }
-                        Spacer()
-                        Picker("", selection: $viewModel.museMenuBarDisplayStyle) {
-                            ForEach(MuseMenuBarDisplayStyle.allCases) { style in
-                                Text(style.rawValue).tag(style)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.small)
                     }
                 }
 
                 Rectangle().fill(theme.divider).frame(height: 0.75)
 
-                // Pacing Indicators on AGY & Muse Rings
+                // Pacing Indicators (applies to all layouts)
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Show Pace Tick on Rings")
+                        Text("Show Pace Marker")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Mark steady linear pace directly on AGY & Muse rings")
+                        Text("Mark steady linear pace directly on bars & rings")
                             .font(.system(size: 8.5, weight: .regular))
                             .foregroundStyle(theme.textSecondary)
                     }
