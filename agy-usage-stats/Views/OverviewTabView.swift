@@ -975,69 +975,102 @@ public struct OverviewTabView: View {
 
     private func quotaBucketRow(bucket: AgyQuotaBucket) -> some View {
         let isIdle = bucket.isWindowTimerIdle()
+        let pacing = bucket.pacing()
 
-        return HStack(spacing: 8) {
-            Text(readableBucketLabel(bucket))
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(bucket.disabled ? theme.textTertiary : theme.textSecondary)
-                .frame(width: 46, alignment: .leading)
-                .lineLimit(1)
-
-            if bucket.disabled {
-                Text(bucket.resetDescription ?? "Disabled")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(theme.dangerRed.opacity(0.9))
+        return VStack(alignment: .leading, spacing: 2.5) {
+            HStack(spacing: 8) {
+                Text(readableBucketLabel(bucket))
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(bucket.disabled ? theme.textTertiary : theme.textSecondary)
+                    .frame(width: 44, alignment: .leading)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if let fraction = bucket.remainingFraction {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(theme.progressTrack)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(healthColor(for: fraction))
-                            .frame(width: max(0, geo.size.width * CGFloat(min(1.0, max(0.0, fraction)))))
-                    }
-                }
-                .frame(height: 6)
 
-                Text(String(format: "%.0f%%", fraction * 100.0))
-                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(healthColor(for: fraction))
-                    .frame(width: 36, alignment: .trailing)
-                    .help(String(format: "%.2f%% remaining", fraction * 100.0))
-
-                if isIdle {
-                    HStack(spacing: 3) {
-                        Image(systemName: "pause.circle")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("Not started")
-                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundStyle(theme.claudeAccent)
-                    .frame(width: 78, alignment: .trailing)
-                    .lineLimit(1)
-                    .help("Reset clock hasn't started yet — send a quick message (e.g. \"hi\") in agy to start the countdown.")
-                } else if let countdown = formatCompactCountdown(bucket: bucket) {
-                    Text(countdown)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textSecondary)
-                        .frame(width: 78, alignment: .trailing)
+                if bucket.disabled {
+                    Text(bucket.resetDescription ?? "Disabled")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.dangerRed.opacity(0.9))
                         .lineLimit(1)
-                        .help(bucket.resetDescription ?? "Resets in \(countdown)")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let fraction = bucket.remainingFraction {
+                    PacedQuotaProgressBar(
+                        fraction: fraction,
+                        fillColor: healthColor(for: fraction),
+                        pacing: pacing,
+                        theme: theme
+                    )
+
+                    Text(QuotaPacing.formatSmartPercent(fraction * 100.0))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(healthColor(for: fraction))
+                        .frame(width: 42, alignment: .trailing)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .help(String(format: "%.2f%% remaining", fraction * 100.0))
+
+                    if isIdle {
+                        HStack(spacing: 3) {
+                            Image(systemName: "pause.circle")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("Not started")
+                                .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundStyle(theme.claudeAccent)
+                        .frame(width: 74, alignment: .trailing)
+                        .lineLimit(1)
+                        .help("Reset clock hasn't started yet — send a quick message (e.g. \"hi\") in agy to start the countdown.")
+                    } else if let countdown = formatCompactCountdown(bucket: bucket) {
+                        Text(countdown)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textSecondary)
+                            .frame(width: 74, alignment: .trailing)
+                            .lineLimit(1)
+                            .help(bucket.resetDescription ?? "Resets in \(countdown)")
+                    } else {
+                        Text("—")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
+                            .frame(width: 74, alignment: .trailing)
+                    }
                 } else {
-                    Text("—")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.textTertiary)
-                        .frame(width: 78, alignment: .trailing)
+                    Text("Unlimited")
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(theme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-            } else {
-                Text("Unlimited")
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(theme.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+
+            if let pacing {
+                pacingCaptionRow(pacing: pacing)
+                    .padding(.leading, 52)
             }
         }
+    }
+
+    private func pacingCaptionRow(pacing: QuotaPacing) -> some View {
+        let statusColor: Color = {
+            switch pacing.status {
+            case .surplus: return theme.costGreen.opacity(0.92)
+            case .onTrack: return theme.textTertiary
+            case .behind: return pacing.deltaFraction <= -0.15 ? theme.dangerRed : theme.claudeAccent
+            }
+        }()
+
+        return HStack(spacing: 4) {
+            Text(pacing.deltaLabel)
+                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(statusColor)
+
+            Text("·")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(theme.textTertiary)
+
+            Text(pacing.budgetLabel)
+                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(theme.textSecondary)
+
+            Spacer(minLength: 0)
+        }
+        .help(pacing.tooltipText)
     }
 
     private func unusedOverflowActionsPanel(summary: SubscriptionAccountSummary) -> some View {
@@ -1144,6 +1177,8 @@ public struct OverviewTabView: View {
             Rectangle().fill(theme.divider).frame(height: 1)
 
             if let quota {
+                let musePacing = quota.pacing()
+
                 // Weekly Allowance Section
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
@@ -1154,39 +1189,44 @@ public struct OverviewTabView: View {
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundStyle(theme.textPrimary)
                         Spacer()
-                        Text(String(format: "%.0f%% used", quota.percentUsed))
+                        Text("\(QuotaPacing.formatSmartPercent(quota.percentUsed)) used")
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundStyle(theme.textSecondary)
                     }
 
-                    HStack(spacing: 8) {
-                        Text("Left")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textSecondary)
-                            .frame(width: 34, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2.5) {
+                        HStack(spacing: 8) {
+                            Text("Left")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textSecondary)
+                                .frame(width: 34, alignment: .leading)
 
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(theme.progressTrack)
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(healthColor(for: quota.remainingFraction))
-                                    .frame(width: max(0, geo.size.width * CGFloat(quota.remainingFraction)))
+                            PacedQuotaProgressBar(
+                                fraction: quota.remainingFraction,
+                                fillColor: healthColor(for: quota.remainingFraction),
+                                pacing: musePacing,
+                                theme: theme
+                            )
+
+                            Text(QuotaPacing.formatSmartPercent(quota.remainingPercent))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(healthColor(for: quota.remainingFraction))
+                                .frame(width: 40, alignment: .trailing)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+
+                            if let countdown = quota.compactCountdown() {
+                                Text(countdown)
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(theme.textPrimary)
+                                    .frame(width: 66, alignment: .trailing)
+                                    .lineLimit(1)
                             }
                         }
-                        .frame(height: 6)
 
-                        Text(String(format: "%.0f%%", quota.remainingPercent))
-                            .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                            .foregroundStyle(healthColor(for: quota.remainingFraction))
-                            .frame(width: 36, alignment: .trailing)
-
-                        if let countdown = quota.compactCountdown() {
-                            Text(countdown)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(theme.textPrimary)
-                                .frame(width: 66, alignment: .trailing)
-                                .lineLimit(1)
+                        if let musePacing {
+                            pacingCaptionRow(pacing: musePacing)
+                                .padding(.leading, 42)
                         }
                     }
 
@@ -1252,9 +1292,10 @@ public struct OverviewTabView: View {
                                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundStyle(theme.textSecondary)
                             Spacer()
-                            Text(String(format: "%.0f%% left", topupFrac * 100.0))
+                            Text("\(QuotaPacing.formatSmartPercent(topupFrac * 100.0)) left")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundStyle(theme.costGreen)
+                                .help(String(format: "%.2f%% remaining", topupFrac * 100.0))
                         }
                     }
                     .padding(.horizontal, 12)
@@ -2151,6 +2192,64 @@ public struct OverviewTabView: View {
             return String(format: "%.0fK", Double(count) / 1_000.0)
         }
         return "\(count)"
+    }
+}
+
+private struct PaceMarkerTriangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct PacedQuotaProgressBar: View {
+    let fraction: Double
+    let fillColor: Color
+    let pacing: QuotaPacing?
+    let theme: ThemeColors
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(1, geo.size.width)
+            let clampedFill = min(1.0, max(0.0, fraction))
+            let barHeight: CGFloat = 6.0
+            let barY: CGFloat = 5.0
+
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(theme.progressTrack)
+                    .frame(width: width, height: barHeight)
+                    .offset(y: barY)
+
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(fillColor)
+                    .frame(width: max(0, width * CGFloat(clampedFill)), height: barHeight)
+                    .offset(y: barY)
+
+                if let pacing {
+                    let rawX = width * CGFloat(pacing.expectedRemainingFraction)
+                    let markerX = min(max(3.0, rawX), max(3.0, width - 3.0))
+
+                    // Crisp hairline tick slicing cleanly through the bar at steady-pace position
+                    RoundedRectangle(cornerRadius: 0.75)
+                        .fill(theme.textPrimary.opacity(0.92))
+                        .frame(width: 1.5, height: barHeight + 2.0)
+                        .offset(x: markerX - 0.75, y: barY - 1.0)
+
+                    // Tiny downward pace arrow perched directly above the tick
+                    PaceMarkerTriangle()
+                        .fill(theme.textPrimary.opacity(0.92))
+                        .frame(width: 5.5, height: 3.5)
+                        .offset(x: markerX - 2.75, y: 0.5)
+                }
+            }
+        }
+        .frame(height: 12)
+        .help(pacing?.tooltipText ?? "")
     }
 }
 

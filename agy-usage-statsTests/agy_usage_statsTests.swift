@@ -3286,6 +3286,71 @@ struct agy_usage_statsTests {
         #expect(comboState.museBadge?.text == "35% 2d")
         #expect(comboState.museBadge?.textColor == MenuBarPresentationResolver.warningAmberColor)
     }
+
+    @Test func testQuotaPacingCalculationAndSmartPercentFormatting() {
+        // 1. Smart decimal formatting: preserves genuine decimals without faking ".0" on integers
+        #expect(QuotaPacing.formatSmartPercent(42.36) == "42.4%")
+        #expect(QuotaPacing.formatSmartPercent(99.856) == "99.9%")
+        #expect(QuotaPacing.formatSmartPercent(2.7) == "2.7%")
+        #expect(QuotaPacing.formatSmartPercent(3.0) == "3%")
+        #expect(QuotaPacing.formatSmartPercent(100.0) == "100%")
+        #expect(QuotaPacing.formatSmartPercent(0.0) == "0%")
+
+        let now = Date(timeIntervalSince1970: 1_795_560_000)
+
+        // 2. Weekly surplus: halfway through 7-day window (3.5d left), 70% remaining -> +20% ahead, ~20%/day
+        let weeklySurplus = QuotaPacing.compute(
+            remainingFraction: 0.70,
+            resetsAt: now.addingTimeInterval(3.5 * 86400),
+            windowDuration: 7.0 * 86400,
+            now: now
+        )
+        #expect(weeklySurplus?.status == .surplus)
+        #expect(abs((weeklySurplus?.expectedRemainingFraction ?? 0) - 0.50) < 0.001)
+        #expect(weeklySurplus?.deltaLabel == "+20% ahead")
+        #expect(weeklySurplus?.budgetLabel == "~20%/day")
+
+        // 3. Weekly behind (< 24h left, matching live Muse 97% used / 3% left with 15h remaining)
+        let museQuota = MuseQuotaInfo(
+            planName: "Muse Free",
+            subscriptionType: "FREE",
+            percentUsed: 97.0,
+            resetsAt: now.addingTimeInterval(15.0 * 3600)
+        )
+        let musePacing = museQuota.pacing(now: now)
+        #expect(musePacing?.status == .behind)
+        #expect(musePacing?.deltaLabel == "-6% pace")
+        #expect(musePacing?.budgetLabel == "3% for 15h")
+
+        // 4. 5-Hour window: 2h left (40% expected), 50% remaining -> +10% ahead, ~25%/hr
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let active5hBucket = AgyQuotaBucket(
+            bucketId: "gemini-5h",
+            displayName: "Five Hour Limit Remaining",
+            remainingFraction: 0.50,
+            resetDescription: "Refreshes in 2 hours",
+            disabled: false,
+            resetTime: iso.string(from: now.addingTimeInterval(2.0 * 3600)),
+            isTimerStarted: true
+        )
+        let fiveHourPacing = active5hBucket.pacing(now: now)
+        #expect(fiveHourPacing?.status == .surplus)
+        #expect(fiveHourPacing?.deltaLabel == "+10% ahead")
+        #expect(fiveHourPacing?.budgetLabel == "~25%/hr")
+
+        // 5. Unstarted/idle bucket must NEVER render a misleading pace marker
+        let idleBucket = AgyQuotaBucket(
+            bucketId: "3p-5h",
+            displayName: "Five Hour Limit Remaining",
+            remainingFraction: 1.0,
+            resetDescription: nil,
+            disabled: false,
+            resetTime: iso.string(from: now.addingTimeInterval(5.0 * 3600)),
+            isTimerStarted: false
+        )
+        #expect(idleBucket.pacing(now: now) == nil)
+    }
 }
 
 

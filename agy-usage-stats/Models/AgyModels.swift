@@ -248,6 +248,29 @@ nonisolated public struct AgyQuotaBucket: Identifiable, Codable, Equatable, Hash
         }
         return self
     }
+
+    public func pacing(now: Date = Date()) -> QuotaPacing? {
+        guard !disabled,
+              !isWindowTimerIdle(now: now),
+              let remainingFraction,
+              let resetDate = parsedResetDate else {
+            return nil
+        }
+        let duration: TimeInterval
+        if isWeeklyBucket {
+            duration = 7.0 * 86400.0
+        } else if isFiveHourBucket {
+            duration = 5.0 * 3600.0
+        } else {
+            return nil
+        }
+        return QuotaPacing.compute(
+            remainingFraction: remainingFraction,
+            resetsAt: resetDate,
+            windowDuration: duration,
+            now: now
+        )
+    }
 }
 
 nonisolated public struct AgyQuotaGroup: Identifiable, Codable, Equatable, Hashable, Sendable {
@@ -1134,6 +1157,16 @@ nonisolated public struct MuseQuotaInfo: Codable, Equatable, Hashable, Sendable 
         )
     }
 
+    public func pacing(now: Date = Date()) -> QuotaPacing? {
+        guard let resetsAt else { return nil }
+        return QuotaPacing.compute(
+            remainingFraction: remainingFraction,
+            resetsAt: resetsAt,
+            windowDuration: 7.0 * 86400.0,
+            now: now
+        )
+    }
+
     private static func extractTokensLeft(from label: String?) -> String? {
         guard let label,
               let regex = try? NSRegularExpression(pattern: #"\(([^()]+ tokens left)\)"#) else {
@@ -1145,6 +1178,125 @@ nonisolated public struct MuseQuotaInfo: Codable, Equatable, Hashable, Sendable 
             return nil
         }
         return ns.substring(with: match.range(at: 1))
+    }
+}
+
+// MARK: - Quota Allowance Pacing Engine
+
+nonisolated public struct QuotaPacing: Equatable, Sendable {
+    public enum Status: Equatable, Sendable {
+        case surplus
+        case onTrack
+        case behind
+    }
+
+    public let expectedRemainingFraction: Double
+    public let actualRemainingFraction: Double
+    public let deltaFraction: Double
+    public let timeRemaining: TimeInterval
+    public let windowDuration: TimeInterval
+    public let status: Status
+
+    public var deltaPercentPoints: Double {
+        deltaFraction * 100.0
+    }
+
+    public var deltaLabel: String {
+        let rounded = Int(deltaPercentPoints.rounded())
+        if status == .onTrack || rounded == 0 {
+            return "On pace"
+        } else if rounded > 0 {
+            return "+\(rounded)% ahead"
+        } else {
+            return "\(rounded)% pace"
+        }
+    }
+
+    public var budgetLabel: String {
+        let remPct = actualRemainingFraction * 100.0
+        if remPct <= 0.05 {
+            return "Exhausted"
+        }
+        let isWeekly = windowDuration >= 2.0 * 86400.0
+        if isWeekly {
+            let daysLeft = timeRemaining / 86400.0
+            if daysLeft > 1.05 {
+                let perDay = remPct / daysLeft
+                return "~\(Self.formatRatePercent(perDay))%/day"
+            } else {
+                let hoursLeft = max(1, Int((timeRemaining / 3600.0).rounded()))
+                return "\(Self.formatSmartPercent(remPct)) for \(hoursLeft)h"
+            }
+        } else {
+            let hoursLeft = timeRemaining / 3600.0
+            if hoursLeft >= 1.0 {
+                let perHour = remPct / hoursLeft
+                return "~\(Self.formatRatePercent(perHour))%/hr"
+            } else {
+                let minsLeft = max(1, Int((timeRemaining / 60.0).rounded()))
+                return "\(Self.formatSmartPercent(remPct)) for \(minsLeft)m"
+            }
+        }
+    }
+
+    public var tooltipText: String {
+        let expectedStr = Self.formatSmartPercent(expectedRemainingFraction * 100.0)
+        let actualStr = Self.formatSmartPercent(actualRemainingFraction * 100.0)
+        let windowName = windowDuration >= 2.0 * 86400.0 ? "7-day" : "5-hour"
+        return "Steady-pace marker: \(expectedStr) expected left at this point in the \(windowName) window (\(actualStr) actual · \(deltaLabel) · safe budget: \(budgetLabel))."
+    }
+
+    /// Formats a percentage with 1 decimal ONLY when the source value actually has a fractional component
+    /// (e.g. AGY 42.36 -> "42.4%", Muse topup 99.86 -> "99.9%", Muse integer 3.0 -> "3%").
+    public static func formatSmartPercent(_ percent: Double) -> String {
+        let clamped = max(0.0, min(100.0, percent))
+        if clamped <= 0.05 { return "0%" }
+        if clamped >= 99.95 { return "100%" }
+        if abs(clamped - clamped.rounded()) < 0.05 {
+            return String(format: "%.0f%%", clamped.rounded())
+        }
+        return String(format: "%.1f%%", clamped)
+    }
+
+    private static func formatRatePercent(_ rate: Double) -> String {
+        if rate >= 10.0 {
+            return String(format: "%.0f", rate.rounded())
+        } else {
+            return String(format: "%.1f", max(0.1, rate))
+        }
+    }
+
+    public static func compute(
+        remainingFraction: Double,
+        resetsAt: Date,
+        windowDuration: TimeInterval,
+        now: Date = Date()
+    ) -> QuotaPacing? {
+        guard windowDuration > 0 else { return nil }
+        let rawRemaining = resetsAt.timeIntervalSince(now)
+        guard rawRemaining > 60.0, rawRemaining <= windowDuration + 300.0 else {
+            return nil
+        }
+        let clampedTime = min(windowDuration, rawRemaining)
+        let expected = max(0.0, min(1.0, clampedTime / windowDuration))
+        let actual = max(0.0, min(1.0, remainingFraction))
+        let delta = actual - expected
+        let status: Status
+        if delta >= 0.05 {
+            status = .surplus
+        } else if delta <= -0.05 {
+            status = .behind
+        } else {
+            status = .onTrack
+        }
+        return QuotaPacing(
+            expectedRemainingFraction: expected,
+            actualRemainingFraction: actual,
+            deltaFraction: delta,
+            timeRemaining: clampedTime,
+            windowDuration: windowDuration,
+            status: status
+        )
     }
 }
 

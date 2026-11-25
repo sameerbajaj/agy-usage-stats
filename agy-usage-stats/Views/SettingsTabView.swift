@@ -62,26 +62,20 @@ struct SettingsTabView: View {
 
             ScrollView {
                 VStack(spacing: 14) {
-                    // Live Menu Bar Preview Mini-Card
+                    // 1. Live Menu Bar Preview
                     menuBarPreviewSection
 
-                    // Muse (muse.ai) Tracking & Menu Bar
-                    museTrackingSection
+                    // 2. Menu Bar Display (AGY + Muse + Optional Spend in one place)
+                    menuBarDisplaySection
 
-                    // Subscription Accounts & Credit Status
+                    // 3. Tabs & Integrations (Muse, GCP, All Tab)
+                    tabsAndIntegrationsSection
+
+                    // 4. AGY Subscription Accounts & Visibility
                     subscriptionAccountsSection
 
-                    // Card 1: Subscription Quota
-                    subscriptionQuotaSection
-                    
-                    // Card 2: Cloud & API Spend
-                    cloudAndSpendSection
-
-                    // Card 3: Popover & Appearance
-                    popoverAppearanceSection
-                    
-                    // Card 4: CLI Data Path & Updates
-                    systemSection
+                    // 5. Appearance & System (Theme, CLI Path, Updates)
+                    appearanceAndSystemSection
                 }
                 .padding(12)
             }
@@ -90,7 +84,7 @@ struct SettingsTabView: View {
         .background(theme.surfacePrimary)
     }
     
-    // MARK: - Live Menu Bar Preview
+    // MARK: - 1. Live Menu Bar Preview
     private var menuBarPreviewSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -126,39 +120,233 @@ struct SettingsTabView: View {
         }
     }
 
-    // MARK: - Muse (muse.ai) Tracking
-    private var museTrackingSection: some View {
-        let museAccent = Color(red: 0.45, green: 0.42, blue: 1.0)
+    // MARK: - 2. Menu Bar Display (All Menu Bar Visual Controls Together)
+    private var menuBarDisplaySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("menu bar display")
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(theme.textSecondary)
+                .padding(.horizontal, 4)
 
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("muse (muse.ai) tracking")
-                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(theme.textSecondary)
-                Spacer()
-                if viewModel.showMuseTracking {
-                    if let q = viewModel.museQuota {
-                        Text(String(format: "%@ · %.0f%% left", q.shortPlanBadge, q.remainingPercent))
-                            .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(museAccent)
-                    } else if viewModel.isRefreshingMuse {
-                        Text("syncing…")
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.textTertiary)
+            VStack(spacing: 8) {
+                // AGY Gauge & Percentage
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show AGY Remaining %")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Display percentage next to the AGY ring icon")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showModelUsageInIcon.animation(.easeInOut(duration: 0.2)))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+
+                if viewModel.showModelUsageInIcon {
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("AGY Tracked Model")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Model group for icon ring & percentage")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $viewModel.selectedModelForIcon) {
+                            ForEach(IconModelSelection.primaryCases) { sel in
+                                Text(sel.rawValue).tag(sel)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Percentage Window")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Quota window shown as the number")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $viewModel.iconQuotaLimitTarget) {
+                            ForEach(IconQuotaLimitTarget.allCases) { sel in
+                                Text(sel.rawValue).tag(sel)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Ring Gauge Window")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Quota window rendered around the A-icon")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $viewModel.iconCircleFillMetric) {
+                            ForEach(IconCircleFillMetric.allCases) { sel in
+                                Text(sel.rawValue).tag(sel)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                // Muse Menu Bar Badge
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show Muse in Menu Bar")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Display Muse weekly badge next to AGY")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { viewModel.showMuseTracking && viewModel.showMuseInMenuBar },
+                            set: { enabled in
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    if enabled && !viewModel.showMuseTracking {
+                                        viewModel.showMuseTracking = true
+                                    }
+                                    viewModel.showMuseInMenuBar = enabled
+                                }
+                            }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                }
+
+                if viewModel.showMuseTracking && viewModel.showMuseInMenuBar {
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Muse Badge Format")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Metric shown next to sparkles icon")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $viewModel.museMenuBarDisplayStyle) {
+                            ForEach(MuseMenuBarDisplayStyle.allCases) { style in
+                                Text(style.rawValue).tag(style)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                // Optional Spend Badge
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show Spend Badge")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Optional cloud/API dollar spend in menu bar")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showMenuBarSpend.animation(.easeInOut(duration: 0.2)))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+
+                if viewModel.showMenuBarSpend {
+                    Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Spend Metric")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            Text("Source of dollar spend badge")
+                                .font(.system(size: 8.5, weight: .regular))
+                                .foregroundStyle(theme.textSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $viewModel.menuBarSpendSource) {
+                            ForEach(MenuBarSpendSource.allCases) { source in
+                                Text(source.rawValue).tag(source)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
                     }
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(10)
+            .themedCardStyle(theme: theme, isHovered: isHoveredQuota)
+            .onHover { h in isHoveredQuota = h }
+        }
+    }
+
+    // MARK: - 3. Tabs & Integrations (Muse, GCP, All Tab)
+    private var tabsAndIntegrationsSection: some View {
+        let museAccent = Color(red: 0.45, green: 0.42, blue: 1.0)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("tabs & integrations")
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(theme.textSecondary)
+                .padding(.horizontal, 4)
 
             VStack(spacing: 8) {
+                // Muse Integration
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Track Muse (muse.ai)")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Show Muse tab & track weekly limit + exact reset time")
+                        HStack(spacing: 5) {
+                            Text("Muse (muse.ai)")
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(theme.textPrimary.opacity(0.85))
+                            if viewModel.showMuseTracking, let q = viewModel.museQuota {
+                                Text("\(q.shortPlanBadge) · \(QuotaPacing.formatSmartPercent(q.remainingPercent)) left")
+                                    .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(museAccent)
+                            }
+                        }
+                        Text(viewModel.showMuseTracking ? museStatusCaption : "Track Muse weekly usage & exact reset timer")
                             .font(.system(size: 8.5, weight: .regular))
                             .foregroundStyle(theme.textSecondary)
+                            .lineLimit(2)
                     }
                     Spacer()
                     Toggle("", isOn: $viewModel.showMuseTracking.animation(.easeInOut(duration: 0.2)))
@@ -168,62 +356,11 @@ struct SettingsTabView: View {
                 }
 
                 if viewModel.showMuseTracking {
-                    Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Show Muse in Menu Bar")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(theme.textPrimary.opacity(0.85))
-                            Text("Display Muse weekly % badge alongside AGY icon")
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                        Spacer()
-                        Toggle("", isOn: $viewModel.showMuseInMenuBar.animation(.easeInOut(duration: 0.2)))
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
-                            .labelsHidden()
-                    }
-
-                    if viewModel.showMuseInMenuBar {
-                        Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Menu Bar Format")
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundStyle(theme.textPrimary.opacity(0.85))
-                                Text("Metric shown next to sparkles icon")
-                                    .font(.system(size: 8.5, weight: .regular))
-                                    .foregroundStyle(theme.textSecondary)
-                            }
-                            Spacer()
-                            Picker("", selection: $viewModel.museMenuBarDisplayStyle) {
-                                ForEach(MuseMenuBarDisplayStyle.allCases) { style in
-                                    Text(style.rawValue).tag(style)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .labelsHidden()
-                            .controlSize(.small)
-                        }
-                    }
-
-                    Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                    HStack(spacing: 6) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            let isManual = !viewModel.museManualCookieHeader.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            Text(isManual ? "Session: Manual Cookie" : "Session: Auto (Brave / agentcookie)")
-                                .font(.system(size: 9.5, weight: .medium))
-                                .foregroundStyle(theme.textPrimary.opacity(0.8))
-
-                            Text(museStatusCaption)
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
-                                .lineLimit(2)
-                        }
+                    HStack(spacing: 8) {
+                        let isManual = !viewModel.museManualCookieHeader.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        Text(isManual ? "Manual Cookie" : "Auto (Brave / agentcookie)")
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(theme.textTertiary)
 
                         Spacer()
 
@@ -256,6 +393,7 @@ struct SettingsTabView: View {
                         .buttonStyle(.plain)
                         .disabled(viewModel.isRefreshingMuse)
                     }
+                    .padding(.top, -2)
 
                     if isEditingMuseCookie {
                         VStack(alignment: .leading, spacing: 5) {
@@ -292,6 +430,71 @@ struct SettingsTabView: View {
                         }
                     }
                 }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                // GCP Cloud Billing Tab + Credit Pool (collapses cleanly when off!)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("GCP Cloud Billing Tab")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Show GCP project spend & credit pool tab")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showGcpTab.animation(.easeInOut(duration: 0.2)))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+
+                if viewModel.showGcpTab {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("GCP Credit Pool ($)")
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(theme.textSecondary)
+                            if viewModel.gcpCreditPool > 0 && viewModel.gcpCostSinceBaseline > 0 {
+                                Text(String(format: "$%.2f left ($%.2f used)", viewModel.gcpCreditRemaining, viewModel.gcpCostSinceBaseline))
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.costGreen)
+                            } else {
+                                Text("0 = unlimited spend tracking")
+                                    .font(.system(size: 8.5, weight: .regular))
+                                    .foregroundStyle(theme.textTertiary)
+                            }
+                        }
+                        Spacer()
+                        TextField("0", value: $viewModel.gcpCreditPool, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 10, design: .monospaced))
+                            .frame(width: 70)
+                            .multilineTextAlignment(.trailing)
+                            .controlSize(.small)
+                    }
+                    .padding(.leading, 8)
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                // 'All' Combined Tab
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show 'All' Combined Tab")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Include combined overview tab in the top bar")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showAllAccountTab)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
             }
             .padding(10)
             .themedCardStyle(theme: theme, isHovered: isHoveredMuse)
@@ -315,14 +518,14 @@ struct SettingsTabView: View {
         }
     }
 
-    // MARK: - Subscription Accounts & Credit Status
+    // MARK: - 4. AGY Subscription Accounts & Visibility
     private var subscriptionAccountsSection: some View {
         let summaries = viewModel.allKnownSubscriptionAccountSummaries
         let visibleCount = summaries.filter { !viewModel.isAccountHidden($0.email) }.count
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("subscription accounts & visibility")
+                Text("agy accounts")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
                     .foregroundStyle(theme.textSecondary)
                 Spacer()
@@ -368,212 +571,17 @@ struct SettingsTabView: View {
             .onHover { h in isHoveredAccounts = h }
         }
     }
-    
-    // MARK: - Card 1: Subscription Quota
-    private var subscriptionQuotaSection: some View {
+
+    // MARK: - 5. Appearance & System
+    private var appearanceAndSystemSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("menu bar — subscription quota")
+            Text("appearance & system")
                 .font(.system(size: 9.5, weight: .bold, design: .rounded))
                 .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 4)
 
             VStack(spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show Remaining %")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Display percentage text alongside the icon")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: $viewModel.showModelUsageInIcon.animation(.easeInOut(duration: 0.2)))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Tracked Model")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Targeted model group for icon gauge & %")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Picker("", selection: $viewModel.selectedModelForIcon) {
-                        ForEach(IconModelSelection.primaryCases) { sel in
-                            Text(sel.rawValue).tag(sel)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .controlSize(.small)
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Percentage Number")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Window period for percentage number text")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Picker("", selection: $viewModel.iconQuotaLimitTarget) {
-                        ForEach(IconQuotaLimitTarget.allCases) { sel in
-                            Text(sel.rawValue).tag(sel)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .controlSize(.small)
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Circle Ring Gauge")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Gauge metric rendered around the A-icon")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Picker("", selection: $viewModel.iconCircleFillMetric) {
-                        ForEach(IconCircleFillMetric.allCases) { sel in
-                            Text(sel.rawValue).tag(sel)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .controlSize(.small)
-                }
-            }
-            .padding(10)
-            .themedCardStyle(theme: theme, isHovered: isHoveredQuota)
-            .onHover { h in isHoveredQuota = h }
-        }
-    }
-
-    // MARK: - Card 2: Cloud & API Spend
-    private var cloudAndSpendSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("menu bar — cloud & api spend")
-                .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.textSecondary)
-                .padding(.horizontal, 4)
-
-            VStack(spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show GCP Tab")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Include GCP cloud billing tab in the top bar")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: $viewModel.showGcpTab.animation(.easeInOut(duration: 0.2)))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show Spend in Menu Bar")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Display spend badge next to quota icon")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: $viewModel.showMenuBarSpend.animation(.easeInOut(duration: 0.2)))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                }
-
-                if viewModel.showMenuBarSpend {
-                    Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Spend Metric")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(theme.textPrimary.opacity(0.85))
-                            Text("Source of spend calculation in menu bar")
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                        Spacer()
-                        Picker("", selection: $viewModel.menuBarSpendSource) {
-                            ForEach(MenuBarSpendSource.allCases) { source in
-                                Text(source.rawValue).tag(source)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .controlSize(.small)
-                    }
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("GCP Remaining Credit ($)")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        if viewModel.gcpCreditPool > 0 && viewModel.gcpCostSinceBaseline > 0 {
-                            Text(String(format: "$%.2f left ($%.2f used since baseline)", viewModel.gcpCreditRemaining, viewModel.gcpCostSinceBaseline))
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.costGreen)
-                        } else {
-                            Text("0 = unlimited spend tracking (no pool bar)")
-                                .font(.system(size: 8.5, weight: .regular))
-                                .foregroundStyle(theme.textSecondary)
-                        }
-                    }
-                    Spacer()
-                    TextField("0", value: $viewModel.gcpCreditPool, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .frame(width: 70)
-                        .multilineTextAlignment(.trailing)
-                        .controlSize(.small)
-                }
-            }
-            .padding(10)
-            .themedCardStyle(theme: theme, isHovered: isHoveredSpend)
-            .onHover { h in isHoveredSpend = h }
-        }
-    }
-
-    // MARK: - Card 3: Popover & Appearance
-    private var popoverAppearanceSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("popover & appearance")
-                .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.textSecondary)
-                .padding(.horizontal, 4)
-
-            VStack(spacing: 8) {
+                // Theme
                 HStack {
                     Text("Theme")
                         .font(.system(size: 10.5, weight: .medium))
@@ -590,74 +598,6 @@ struct SettingsTabView: View {
                 }
 
                 Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show 'All' Combined Tab")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Include combined All Accounts tab in the top bar")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: $viewModel.showAllAccountTab)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show Cost Breakdown")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Render model token cost breakdown card in popover")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: $viewModel.showCostSummary)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                }
-
-                Rectangle().fill(theme.divider).frame(height: 0.75)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show Tool Executions")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(theme.textPrimary.opacity(0.85))
-                        Text("Render agent tool calling activity in popover")
-                            .font(.system(size: 8.5, weight: .regular))
-                            .foregroundStyle(theme.textSecondary)
-                    }
-                    Spacer()
-                    Toggle("", isOn: $viewModel.showToolBreakdown)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                }
-            }
-            .padding(10)
-            .themedCardStyle(theme: theme, isHovered: isHoveredAppearance)
-            .onHover { h in isHoveredAppearance = h }
-        }
-    }
-    
-    // MARK: - Card 4: Data Path & App Updates Settings
-    private var systemSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("cli data path & application updates")
-                .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.textSecondary)
-                .padding(.horizontal, 4)
-            
-            VStack(spacing: 8) {
                 // CLI Path
                 if isEditingDir {
                     HStack(spacing: 8) {
