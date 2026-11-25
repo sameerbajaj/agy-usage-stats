@@ -3350,6 +3350,58 @@ struct agy_usage_statsTests {
             isTimerStarted: false
         )
         #expect(idleBucket.pacing(now: now) == nil)
+
+        // 6. Menu bar ring pace ticks & optional pace-driven coloring for BOTH AGY & Muse
+        let agyAheadState = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 4,
+            litColor: .white,
+            activeUsageFraction: 0.15,
+            activeFillFraction: 0.15,
+            geminiUsageFraction: 0.15,
+            geminiFillFraction: 0.15,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            showMuseBadge: true,
+            museRemainingFraction: 0.03,
+            musePercentUsed: 97.0,
+            museDisplayStyle: .remainingPercent,
+            showPaceIndicator: true,
+            colorByPacing: true,
+            activePaceMarkerFraction: 0.05,
+            activeNumberPacing: QuotaPacing.compute(remainingFraction: 0.15, resetsAt: now.addingTimeInterval(2 * 3600), windowDuration: 7 * 86400, now: now),
+            activeRingPacing: QuotaPacing.compute(remainingFraction: 0.15, resetsAt: now.addingTimeInterval(2 * 3600), windowDuration: 7 * 86400, now: now),
+            musePacing: musePacing
+        )
+        // AGY has 15% left with 2h left -> surplus -> green under colorByPacing + pace tick at 0.05
+        #expect(agyAheadState.paceMarkerFraction == 0.05)
+        #expect(agyAheadState.textColor == MenuBarPresentationResolver.healthyGreenColor)
+        #expect(agyAheadState.museBadge?.ringFraction == 0.03)
+        #expect(agyAheadState.museBadge?.paceMarkerFraction != nil)
+        #expect(agyAheadState.museBadge?.ringColor == MenuBarPresentationResolver.warningAmberColor)
+
+        // Turning showPaceIndicator off hides ticks on BOTH AGY & Muse rings
+        let ticksOff = MenuBarPresentationResolver.resolveIconPresentation(
+            showUsage: true,
+            selectedModel: .active,
+            queriesToday: 4,
+            litColor: .white,
+            activeUsageFraction: 0.70,
+            activeFillFraction: 0.70,
+            geminiUsageFraction: 0.70,
+            geminiFillFraction: 0.70,
+            claudeUsageFraction: nil,
+            claudeFillFraction: nil,
+            showMuseBadge: true,
+            museRemainingFraction: 0.70,
+            musePercentUsed: 30.0,
+            showPaceIndicator: false,
+            activePaceMarkerFraction: 0.50,
+            musePacing: weeklySurplus
+        )
+        #expect(ticksOff.paceMarkerFraction == nil)
+        #expect(ticksOff.museBadge?.paceMarkerFraction == nil)
     }
 }
 

@@ -272,6 +272,43 @@ struct SettingsTabView: View {
 
                 Rectangle().fill(theme.divider).frame(height: 0.75)
 
+                // Pacing Indicators on AGY & Muse Rings
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show Pace Tick on Rings")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Mark steady linear pace directly on AGY & Muse rings")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.showMenuBarPaceIndicator.animation(.easeInOut(duration: 0.2)))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Color by Pacing")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(theme.textPrimary.opacity(0.85))
+                        Text("Green when ahead/on pace, amber/red when burning fast")
+                            .font(.system(size: 8.5, weight: .regular))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $viewModel.colorMenuBarByPacing.animation(.easeInOut(duration: 0.2)))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                }
+
+                Rectangle().fill(theme.divider).frame(height: 0.75)
+
                 // Optional Spend Badge
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {

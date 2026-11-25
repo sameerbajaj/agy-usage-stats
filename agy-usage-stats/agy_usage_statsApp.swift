@@ -105,20 +105,23 @@ struct MenuBarLabel: View {
         }
         lines.append("Active: \(viewModel.activeModelDisplayName)")
         if let g = viewModel.geminiUsageFraction {
-            lines.append(String(format: "Gemini: %.0f%%", g * 100))
+            let paceSuffix = viewModel.geminiNumberPacing.map { " (\($0.deltaLabel) · \($0.budgetLabel))" } ?? ""
+            lines.append("Gemini: \(QuotaPacing.formatSmartPercent(g * 100))\(paceSuffix)")
         }
         if let carb = viewModel.carbonUsageFraction {
-            lines.append(String(format: "Carbon: %.0f%%", carb * 100))
+            lines.append("Carbon: \(QuotaPacing.formatSmartPercent(carb * 100))")
         }
         if let a = viewModel.argonUsageFraction {
-            lines.append(String(format: "Argon: %.0f%%", a * 100))
+            lines.append("Argon: \(QuotaPacing.formatSmartPercent(a * 100))")
         }
         if let c = viewModel.claudeUsageFraction {
-            lines.append(String(format: "Claude: %.0f%%", c * 100))
+            let paceSuffix = viewModel.claudeNumberPacing.map { " (\($0.deltaLabel) · \($0.budgetLabel))" } ?? ""
+            lines.append("Claude: \(QuotaPacing.formatSmartPercent(c * 100))\(paceSuffix)")
         }
         if viewModel.showMuseTracking, let muse = viewModel.museQuota?.normalizedForCurrentTime() {
             let resetPart = muse.compactCountdown().map { " · resets in \($0)" } ?? ""
-            lines.append(String(format: "Muse (%@): %.0f%% left (%.0f%% used)%@", muse.planName, muse.remainingPercent, muse.percentUsed, resetPart))
+            let pacePart = muse.pacing().map { " · \($0.deltaLabel), \($0.budgetLabel)" } ?? ""
+            lines.append("Muse (\(muse.planName)): \(QuotaPacing.formatSmartPercent(muse.remainingPercent)) left (\(QuotaPacing.formatSmartPercent(muse.percentUsed)) used)\(resetPart)\(pacePart)")
             if let topupText = muse.topupTokensLeftText {
                 lines.append("Muse Additional Tokens: \(topupText)")
             }
@@ -161,11 +164,24 @@ public struct IconPresentationState: Equatable {
 
     public struct MuseBadge: Equatable {
         public let iconColor: NSColor
+        public let ringFraction: Double
+        public let ringColor: NSColor
+        public let paceMarkerFraction: Double?
         public let text: String
         public let textColor: NSColor
 
-        public init(iconColor: NSColor, text: String, textColor: NSColor) {
+        public init(
+            iconColor: NSColor,
+            ringFraction: Double = 1.0,
+            ringColor: NSColor = MenuBarPresentationResolver.healthyGreenColor,
+            paceMarkerFraction: Double? = nil,
+            text: String,
+            textColor: NSColor
+        ) {
             self.iconColor = iconColor
+            self.ringFraction = ringFraction
+            self.ringColor = ringColor
+            self.paceMarkerFraction = paceMarkerFraction
             self.text = text
             self.textColor = textColor
         }
@@ -174,6 +190,7 @@ public struct IconPresentationState: Equatable {
     public let text: String
     public let textColor: NSColor
     public let gaugeStyle: GaugeStyle
+    public let paceMarkerFraction: Double?
     public let spendBadge: SpendBadge?
     public let museBadge: MuseBadge?
 
@@ -183,12 +200,14 @@ public struct IconPresentationState: Equatable {
         text: String,
         textColor: NSColor,
         gaugeStyle: GaugeStyle,
+        paceMarkerFraction: Double? = nil,
         spendBadge: SpendBadge? = nil,
         museBadge: MuseBadge? = nil
     ) {
         self.text = text
         self.textColor = textColor
         self.gaugeStyle = gaugeStyle
+        self.paceMarkerFraction = paceMarkerFraction
         self.spendBadge = spendBadge
         self.museBadge = museBadge
     }
@@ -214,6 +233,18 @@ public enum MenuBarPresentationResolver {
             return warningAmberColor
         } else {
             return lowRedColor
+        }
+    }
+
+    public static func metricColor(for fraction: Double, pacing: QuotaPacing?, colorByPacing: Bool) -> NSColor {
+        guard colorByPacing, let pacing else {
+            return healthColor(for: fraction)
+        }
+        switch pacing.status {
+        case .surplus, .onTrack:
+            return healthyGreenColor
+        case .behind:
+            return pacing.deltaFraction <= -0.15 ? lowRedColor : warningAmberColor
         }
     }
 
@@ -287,7 +318,13 @@ public enum MenuBarPresentationResolver {
         museRemainingFraction: Double? = nil,
         musePercentUsed: Double? = nil,
         museResetShortText: String? = nil,
-        museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent
+        museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent,
+        showPaceIndicator: Bool = true,
+        colorByPacing: Bool = false,
+        activePaceMarkerFraction: Double? = nil,
+        activeNumberPacing: QuotaPacing? = nil,
+        activeRingPacing: QuotaPacing? = nil,
+        musePacing: QuotaPacing? = nil
     ) -> IconPresentationState {
         let badge: IconPresentationState.SpendBadge?
         if showSpend {
@@ -337,20 +374,33 @@ public enum MenuBarPresentationResolver {
                     museText = pctPart
                 }
             }
+            let museColor = metricColor(for: clampedRem, pacing: musePacing, colorByPacing: colorByPacing)
             museBadge = IconPresentationState.MuseBadge(
                 iconColor: museIndigoColor,
+                ringFraction: clampedRem,
+                ringColor: museColor,
+                paceMarkerFraction: showPaceIndicator ? musePacing?.expectedRemainingFraction : nil,
                 text: museText,
-                textColor: healthColor(for: clampedRem)
+                textColor: museColor
             )
         } else {
             museBadge = nil
         }
 
+        let agyPaceMarker: Double? = showPaceIndicator ? (activePaceMarkerFraction ?? activeRingPacing?.expectedRemainingFraction) : nil
+
         func finish(_ text: String, _ textColor: NSColor, _ gaugeStyle: IconPresentationState.GaugeStyle) -> IconPresentationState {
-            IconPresentationState(
+            let resolvedMarker: Double?
+            if case .single = gaugeStyle {
+                resolvedMarker = agyPaceMarker
+            } else {
+                resolvedMarker = nil
+            }
+            return IconPresentationState(
                 text: text,
                 textColor: textColor,
                 gaugeStyle: gaugeStyle,
+                paceMarkerFraction: resolvedMarker,
                 spendBadge: badge,
                 museBadge: museBadge
             )
@@ -365,8 +415,8 @@ public enum MenuBarPresentationResolver {
             if let fraction = activeUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = activeFillFraction ?? fraction
-                let textColor = healthColor(for: fraction)
-                let strokeColor = healthColor(for: fill)
+                let textColor = metricColor(for: fraction, pacing: activeNumberPacing, colorByPacing: colorByPacing)
+                let strokeColor = metricColor(for: fill, pacing: activeRingPacing, colorByPacing: colorByPacing)
                 return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else if queriesToday > 0 {
                 let pctText = "\(queriesToday)q"
@@ -397,8 +447,8 @@ public enum MenuBarPresentationResolver {
             if let fraction = depletedFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = depletedFill ?? fraction
-                let textColor = healthColor(for: fraction)
-                let strokeColor = healthColor(for: fill)
+                let textColor = metricColor(for: fraction, pacing: activeNumberPacing, colorByPacing: colorByPacing)
+                let strokeColor = metricColor(for: fill, pacing: activeRingPacing, colorByPacing: colorByPacing)
                 return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else if queriesToday > 0 {
                 let pctText = "\(queriesToday)q"
@@ -411,8 +461,8 @@ public enum MenuBarPresentationResolver {
             if let fraction = geminiUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = geminiFillFraction ?? fraction
-                let textColor = healthColor(for: fraction)
-                let strokeColor = healthColor(for: fill)
+                let textColor = metricColor(for: fraction, pacing: activeNumberPacing, colorByPacing: colorByPacing)
+                let strokeColor = metricColor(for: fill, pacing: activeRingPacing, colorByPacing: colorByPacing)
                 return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
                 return finish("", litColor, .none)
@@ -422,8 +472,8 @@ public enum MenuBarPresentationResolver {
             if let fraction = carbonUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = carbonFillFraction ?? fraction
-                let textColor = healthColor(for: fraction)
-                let strokeColor = healthColor(for: fill)
+                let textColor = metricColor(for: fraction, pacing: activeNumberPacing, colorByPacing: colorByPacing)
+                let strokeColor = metricColor(for: fill, pacing: activeRingPacing, colorByPacing: colorByPacing)
                 return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
                 return finish("", litColor, .none)
@@ -433,8 +483,8 @@ public enum MenuBarPresentationResolver {
             if let fraction = argonUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = argonFillFraction ?? fraction
-                let textColor = healthColor(for: fraction)
-                let strokeColor = healthColor(for: fill)
+                let textColor = metricColor(for: fraction, pacing: activeNumberPacing, colorByPacing: colorByPacing)
+                let strokeColor = metricColor(for: fill, pacing: activeRingPacing, colorByPacing: colorByPacing)
                 return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
                 return finish("", litColor, .none)
@@ -444,8 +494,8 @@ public enum MenuBarPresentationResolver {
             if let fraction = claudeUsageFraction {
                 let pctText = String(format: "%.0f%%", fraction * 100)
                 let fill = claudeFillFraction ?? fraction
-                let textColor = healthColor(for: fraction)
-                let strokeColor = healthColor(for: fill)
+                let textColor = metricColor(for: fraction, pacing: activeNumberPacing, colorByPacing: colorByPacing)
+                let strokeColor = metricColor(for: fill, pacing: activeRingPacing, colorByPacing: colorByPacing)
                 return finish(pctText, textColor, .single(fraction: fill, strokeColor: strokeColor))
             } else {
                 return finish("", litColor, .none)
@@ -554,7 +604,13 @@ public enum AgyMenuBarRenderer {
         museRemainingFraction: Double? = nil,
         musePercentUsed: Double? = nil,
         museResetShortText: String? = nil,
-        museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent
+        museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent,
+        showPaceIndicator: Bool = true,
+        colorByPacing: Bool = false,
+        activePaceMarkerFraction: Double? = nil,
+        activeNumberPacing: QuotaPacing? = nil,
+        activeRingPacing: QuotaPacing? = nil,
+        musePacing: QuotaPacing? = nil
     ) -> NSImage {
         let litNS = NSColor(litColor)
         let presentation = MenuBarPresentationResolver.resolveIconPresentation(
@@ -582,10 +638,19 @@ public enum AgyMenuBarRenderer {
             museRemainingFraction: museRemainingFraction,
             musePercentUsed: musePercentUsed,
             museResetShortText: museResetShortText,
-            museDisplayStyle: museDisplayStyle
+            museDisplayStyle: museDisplayStyle,
+            showPaceIndicator: showPaceIndicator,
+            colorByPacing: colorByPacing,
+            activePaceMarkerFraction: activePaceMarkerFraction,
+            activeNumberPacing: activeNumberPacing,
+            activeRingPacing: activeRingPacing,
+            musePacing: musePacing
         )
 
-        let cacheKey = "\(queriesToday)_\(litColor.description)_\(presentation.text)_\(presentation.textColor.description)_\(presentation.gaugeStyle)_\(presentation.spendBadge?.icon.hashValue ?? 0)_\(presentation.spendBadge?.text ?? "")_\(presentation.spendBadge?.iconColor.description ?? "")_\(presentation.museBadge?.text ?? "")_\(presentation.museBadge?.textColor.description ?? "")"
+        let agyPaceBucket = presentation.paceMarkerFraction.map { Int(($0 * 100.0).rounded()) } ?? -1
+        let musePaceBucket = presentation.museBadge?.paceMarkerFraction.map { Int(($0 * 100.0).rounded()) } ?? -1
+        let museFillBucket = presentation.museBadge.map { Int(($0.ringFraction * 100.0).rounded()) } ?? -1
+        let cacheKey = "\(queriesToday)_\(litColor.description)_\(presentation.text)_\(presentation.textColor.description)_\(presentation.gaugeStyle)_p\(agyPaceBucket)_\(presentation.spendBadge?.icon.hashValue ?? 0)_\(presentation.spendBadge?.text ?? "")_\(presentation.spendBadge?.iconColor.description ?? "")_\(presentation.museBadge?.text ?? "")_\(presentation.museBadge?.textColor.description ?? "")_mf\(museFillBucket)_mp\(musePaceBucket)"
         if let cached = cachedAntigravityIcon, cached.key == cacheKey {
             return cached.image
         }
@@ -649,17 +714,14 @@ public enum AgyMenuBarRenderer {
             }
         }
 
-        // Measure Muse badge
-        var museSymbolImg: NSImage? = nil
+        // Measure Muse ring + badge
+        let museRingSlotWidth: CGFloat = 16.0
         var museTextStr: String = ""
         var museAttributes: [NSAttributedString.Key: Any] = [:]
         var museTextSize = NSSize.zero
 
         if let muse = presentation.museBadge {
             museAttributes = [.font: font, .foregroundColor: muse.textColor]
-            let config = NSImage.SymbolConfiguration(pointSize: 9.5, weight: .semibold)
-                .applying(.init(paletteColors: [muse.iconColor]))
-            museSymbolImg = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)?.withSymbolConfiguration(config)
             museTextStr = muse.text
             museTextSize = (museTextStr as NSString).size(withAttributes: museAttributes)
         }
@@ -680,9 +742,7 @@ public enum AgyMenuBarRenderer {
         }
         if presentation.museBadge != nil {
             totalW += 3.5 + 1.0 + 3.5 // Divider line
-            if let museSym = museSymbolImg {
-                totalW += museSym.size.width + 2.0
-            }
+            totalW += museRingSlotWidth + 3.5
             totalW += museTextSize.width
         }
         if presentation.hasText || presentation.spendBadge != nil || presentation.museBadge != nil {
@@ -695,7 +755,13 @@ public enum AgyMenuBarRenderer {
             // 1. Draw Gauges or Antigravity A-icon
             switch presentation.gaugeStyle {
             case .single(let fraction, let strokeColor):
-                drawGauge(center: NSPoint(x: 8.0, y: 8.0), radius: 5.5, fraction: fraction, strokeColor: strokeColor)
+                drawGauge(
+                    center: NSPoint(x: 8.0, y: 8.0),
+                    radius: 5.5,
+                    fraction: fraction,
+                    strokeColor: strokeColor,
+                    paceMarkerFraction: presentation.paceMarkerFraction
+                )
             case .both(let geminiFraction, let claudeFraction):
                 drawGauge(center: NSPoint(x: 6.0, y: 8.0), radius: 4.2, fraction: geminiFraction, strokeColor: MenuBarPresentationResolver.healthColor(for: geminiFraction), chevronSize: 2.0)
                 drawGauge(center: NSPoint(x: 16.0, y: 8.0), radius: 4.2, fraction: claudeFraction, strokeColor: MenuBarPresentationResolver.healthColor(for: claudeFraction), chevronSize: 2.0)
@@ -805,8 +871,8 @@ public enum AgyMenuBarRenderer {
                 currentX += spendTextSize.width
             }
 
-            // 4. Draw Muse Badge (Divider + Sparkles Icon + Health-Colored %)
-            if presentation.museBadge != nil {
+            // 4. Draw Muse Ring Gauge (Divider + Ring with Cursive 'm' & Pace Tick + %)
+            if let muse = presentation.museBadge {
                 let sepX = currentX + 3.5
                 let sepRect = NSRect(x: sepX, y: (h - 7.0) / 2.0, width: 1.0, height: 7.0)
                 let sepPath = NSBezierPath(roundedRect: sepRect, xRadius: 0.5, yRadius: 0.5)
@@ -814,11 +880,15 @@ public enum AgyMenuBarRenderer {
                 sepPath.fill()
                 currentX = sepX + 1.0 + 3.5
 
-                if let museSym = museSymbolImg {
-                    let iconY = (h - museSym.size.height) / 2.0
-                    museSym.draw(in: NSRect(x: currentX, y: iconY, width: museSym.size.width, height: museSym.size.height))
-                    currentX += museSym.size.width + 2.0
-                }
+                drawMuseGauge(
+                    center: NSPoint(x: currentX + 8.0, y: 8.0),
+                    radius: 5.5,
+                    fraction: muse.ringFraction,
+                    strokeColor: muse.ringColor,
+                    markColor: muse.iconColor,
+                    paceMarkerFraction: muse.paceMarkerFraction
+                )
+                currentX += museRingSlotWidth + 3.5
 
                 museTextStr.draw(at: NSPoint(x: currentX, y: textY), withAttributes: museAttributes)
                 currentX += museTextSize.width
@@ -831,7 +901,14 @@ public enum AgyMenuBarRenderer {
         return img
     }
 
-    public static func drawGauge(center: NSPoint, radius: CGFloat, fraction: Double, strokeColor: NSColor, chevronSize: CGFloat = 2.5) {
+    public static func drawGauge(
+        center: NSPoint,
+        radius: CGFloat,
+        fraction: Double,
+        strokeColor: NSColor,
+        chevronSize: CGFloat = 2.5,
+        paceMarkerFraction: Double? = nil
+    ) {
         // Draw Background Track
         let trackPath = NSBezierPath()
         trackPath.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
@@ -840,14 +917,22 @@ public enum AgyMenuBarRenderer {
         trackPath.stroke()
 
         // Draw Progress Arc
-        let progressPath = NSBezierPath()
-        let startAngle: CGFloat = 90.0
-        let endAngle: CGFloat = 90.0 - CGFloat(fraction * 360.0)
-        progressPath.appendArc(withCenter: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
-        progressPath.lineWidth = 1.6
-        progressPath.lineCapStyle = .round
-        strokeColor.setStroke()
-        progressPath.stroke()
+        let clamped = max(0.0, min(1.0, fraction))
+        if clamped > 0.002 {
+            let progressPath = NSBezierPath()
+            let startAngle: CGFloat = 90.0
+            let endAngle: CGFloat = 90.0 - CGFloat(clamped * 360.0)
+            progressPath.appendArc(withCenter: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
+            progressPath.lineWidth = 1.6
+            progressPath.lineCapStyle = .round
+            strokeColor.setStroke()
+            progressPath.stroke()
+        }
+
+        // Draw Steady-Pace Radial Tick on Perimeter
+        if let paceFrac = paceMarkerFraction {
+            drawPaceTick(center: center, radius: radius, expectedFraction: paceFrac)
+        }
 
         // Draw Tiny Chevron inside center
         let chevronPath = NSBezierPath()
@@ -862,6 +947,103 @@ public enum AgyMenuBarRenderer {
         chevronPath.lineJoinStyle = .round
         strokeColor.setStroke()
         chevronPath.stroke()
+    }
+
+    public static func drawMuseGauge(
+        center: NSPoint,
+        radius: CGFloat,
+        fraction: Double,
+        strokeColor: NSColor,
+        markColor: NSColor,
+        paceMarkerFraction: Double? = nil
+    ) {
+        // Draw Background Track
+        let trackPath = NSBezierPath()
+        trackPath.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
+        trackPath.lineWidth = 1.2
+        NSColor.labelColor.withAlphaComponent(0.15).setStroke()
+        trackPath.stroke()
+
+        // Draw Progress Arc
+        let clamped = max(0.0, min(1.0, fraction))
+        if clamped > 0.002 {
+            let progressPath = NSBezierPath()
+            let startAngle: CGFloat = 90.0
+            let endAngle: CGFloat = 90.0 - CGFloat(clamped * 360.0)
+            progressPath.appendArc(withCenter: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
+            progressPath.lineWidth = 1.6
+            progressPath.lineCapStyle = .round
+            strokeColor.setStroke()
+            progressPath.stroke()
+        }
+
+        // Draw Steady-Pace Radial Tick on Perimeter
+        if let paceFrac = paceMarkerFraction {
+            drawPaceTick(center: center, radius: radius, expectedFraction: paceFrac)
+        }
+
+        // Draw Official Muse Cursive "m" Wave Mark inside center
+        let mPath = NSBezierPath()
+        let cx = center.x
+        let cy = center.y
+        mPath.move(to: NSPoint(x: cx - 2.9, y: cy - 0.3))
+        mPath.curve(
+            to: NSPoint(x: cx - 1.5, y: cy + 1.7),
+            controlPoint1: NSPoint(x: cx - 2.5, y: cy + 0.9),
+            controlPoint2: NSPoint(x: cx - 1.9, y: cy + 1.7)
+        )
+        mPath.curve(
+            to: NSPoint(x: cx - 1.3, y: cy - 1.6),
+            controlPoint1: NSPoint(x: cx - 1.1, y: cy + 1.7),
+            controlPoint2: NSPoint(x: cx - 1.6, y: cy - 1.6)
+        )
+        mPath.curve(
+            to: NSPoint(x: cx + 0.1, y: cy + 1.5),
+            controlPoint1: NSPoint(x: cx - 0.8, y: cy - 1.6),
+            controlPoint2: NSPoint(x: cx - 0.4, y: cy + 1.5)
+        )
+        mPath.curve(
+            to: NSPoint(x: cx + 0.4, y: cy - 1.6),
+            controlPoint1: NSPoint(x: cx + 0.5, y: cy + 1.5),
+            controlPoint2: NSPoint(x: cx + 0.1, y: cy - 1.6)
+        )
+        mPath.curve(
+            to: NSPoint(x: cx + 1.7, y: cy + 1.0),
+            controlPoint1: NSPoint(x: cx + 0.9, y: cy - 1.6),
+            controlPoint2: NSPoint(x: cx + 1.3, y: cy + 1.0)
+        )
+        mPath.curve(
+            to: NSPoint(x: cx + 2.1, y: cy - 1.6),
+            controlPoint1: NSPoint(x: cx + 2.1, y: cy + 1.0),
+            controlPoint2: NSPoint(x: cx + 1.7, y: cy - 1.6)
+        )
+        mPath.curve(
+            to: NSPoint(x: cx + 2.9, y: cy - 0.3),
+            controlPoint1: NSPoint(x: cx + 2.5, y: cy - 1.6),
+            controlPoint2: NSPoint(x: cx + 2.7, y: cy - 0.9)
+        )
+        mPath.lineWidth = 1.1
+        mPath.lineCapStyle = .round
+        mPath.lineJoinStyle = .round
+        markColor.setStroke()
+        mPath.stroke()
+    }
+
+    private static func drawPaceTick(center: NSPoint, radius: CGFloat, expectedFraction: Double) {
+        let clamped = max(0.02, min(0.98, expectedFraction))
+        let angleRad = (90.0 - CGFloat(clamped * 360.0)) * .pi / 180.0
+        let dx = cos(angleRad)
+        let dy = sin(angleRad)
+        let rInner = radius - 1.4
+        let rOuter = radius + 1.85
+
+        let tickPath = NSBezierPath()
+        tickPath.move(to: NSPoint(x: center.x + dx * rInner, y: center.y + dy * rInner))
+        tickPath.line(to: NSPoint(x: center.x + dx * rOuter, y: center.y + dy * rOuter))
+        tickPath.lineWidth = 1.4
+        tickPath.lineCapStyle = .round
+        NSColor.labelColor.withAlphaComponent(0.95).setStroke()
+        tickPath.stroke()
     }
 }
 
@@ -890,7 +1072,13 @@ public func makeAntigravityImage(
     museRemainingFraction: Double? = nil,
     musePercentUsed: Double? = nil,
     museResetShortText: String? = nil,
-    museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent
+    museDisplayStyle: MuseMenuBarDisplayStyle = .remainingPercent,
+    showPaceIndicator: Bool = true,
+    colorByPacing: Bool = false,
+    activePaceMarkerFraction: Double? = nil,
+    activeNumberPacing: QuotaPacing? = nil,
+    activeRingPacing: QuotaPacing? = nil,
+    musePacing: QuotaPacing? = nil
 ) -> NSImage {
     AgyMenuBarRenderer.makeAntigravityImage(
         queriesToday: queriesToday,
@@ -917,7 +1105,13 @@ public func makeAntigravityImage(
         museRemainingFraction: museRemainingFraction,
         musePercentUsed: musePercentUsed,
         museResetShortText: museResetShortText,
-        museDisplayStyle: museDisplayStyle
+        museDisplayStyle: museDisplayStyle,
+        showPaceIndicator: showPaceIndicator,
+        colorByPacing: colorByPacing,
+        activePaceMarkerFraction: activePaceMarkerFraction,
+        activeNumberPacing: activeNumberPacing,
+        activeRingPacing: activeRingPacing,
+        musePacing: musePacing
     )
 }
 

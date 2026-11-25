@@ -265,6 +265,18 @@ public final class AgyStatsViewModel {
         }
     }
 
+    public var showMenuBarPaceIndicator: Bool {
+        didSet {
+            userDefaults.set(showMenuBarPaceIndicator, forKey: "agy_showMenuBarPaceIndicator")
+        }
+    }
+
+    public var colorMenuBarByPacing: Bool {
+        didSet {
+            userDefaults.set(colorMenuBarByPacing, forKey: "agy_colorMenuBarByPacing")
+        }
+    }
+
     public var museMenuBarDisplayStyle: MuseMenuBarDisplayStyle {
         didSet {
             userDefaults.set(museMenuBarDisplayStyle.rawValue, forKey: "agy_museMenuBarDisplayStyle")
@@ -861,6 +873,18 @@ public final class AgyStatsViewModel {
             self.showMuseInMenuBar = true
         }
 
+        if userDefaults.object(forKey: "agy_showMenuBarPaceIndicator") != nil {
+            self.showMenuBarPaceIndicator = userDefaults.bool(forKey: "agy_showMenuBarPaceIndicator")
+        } else {
+            self.showMenuBarPaceIndicator = true
+        }
+
+        if userDefaults.object(forKey: "agy_colorMenuBarByPacing") != nil {
+            self.colorMenuBarByPacing = userDefaults.bool(forKey: "agy_colorMenuBarByPacing")
+        } else {
+            self.colorMenuBarByPacing = false
+        }
+
         if let savedMuseStyle = userDefaults.string(forKey: "agy_museMenuBarDisplayStyle"),
            let parsedMuseStyle = MuseMenuBarDisplayStyle(rawValue: savedMuseStyle) {
             self.museMenuBarDisplayStyle = parsedMuseStyle
@@ -1368,6 +1392,36 @@ public final class AgyStatsViewModel {
         return getCircleFillFraction(for: bucket)
     }
 
+    private func selectedGroupForIcon() -> AgyQuotaGroup? {
+        switch selectedModelForIcon {
+        case .active: return getActiveGroup()
+        case .mostDepleted: return getMostDepletedGroup()
+        case .gemini: return getGeminiGroup()
+        case .carbon: return getCarbonGroup()
+        case .argon: return getArgonGroup()
+        case .claude: return getClaudeGroup()
+        case .both, .allThree, .gcp: return getActiveGroup()
+        }
+    }
+
+    public var selectedModelCirclePacing: QuotaPacing? {
+        guard selectedModelForIcon != .gcp else { return nil }
+        return getBucket(forGroup: selectedGroupForIcon(), target: circleRingTarget)?.pacing()
+    }
+
+    public var selectedModelNumberPacing: QuotaPacing? {
+        guard selectedModelForIcon != .gcp else { return nil }
+        return getBucket(forGroup: selectedGroupForIcon(), target: iconQuotaLimitTarget)?.pacing()
+    }
+
+    public var geminiNumberPacing: QuotaPacing? {
+        getBucket(forGroup: getGeminiGroup(), target: iconQuotaLimitTarget)?.pacing()
+    }
+
+    public var claudeNumberPacing: QuotaPacing? {
+        getBucket(forGroup: getClaudeGroup(), target: iconQuotaLimitTarget)?.pacing()
+    }
+
     public func makeMenuBarImage(litColor: Color? = nil) -> NSImage {
         let color: Color
         if let litColor {
@@ -1394,6 +1448,9 @@ public final class AgyStatsViewModel {
         }
 
         let activeMuseQuota = (showMuseTracking && showMuseInMenuBar) ? museQuota?.normalizedForCurrentTime() : nil
+        let activeAgyRingPacing = selectedModelCirclePacing
+        let activeAgyNumPacing = selectedModelNumberPacing
+        let activeMusePacing = activeMuseQuota?.pacing()
 
         return AgyMenuBarRenderer.makeAntigravityImage(
             queriesToday: stats.queriesToday,
@@ -1420,7 +1477,13 @@ public final class AgyStatsViewModel {
             museRemainingFraction: activeMuseQuota?.remainingFraction,
             musePercentUsed: activeMuseQuota?.percentUsed,
             museResetShortText: activeMuseQuota?.ultraCompactCountdown(),
-            museDisplayStyle: museMenuBarDisplayStyle
+            museDisplayStyle: museMenuBarDisplayStyle,
+            showPaceIndicator: showMenuBarPaceIndicator,
+            colorByPacing: colorMenuBarByPacing,
+            activePaceMarkerFraction: activeAgyRingPacing?.expectedRemainingFraction,
+            activeNumberPacing: activeAgyNumPacing,
+            activeRingPacing: activeAgyRingPacing,
+            musePacing: activeMusePacing
         )
     }
 
